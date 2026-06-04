@@ -1,0 +1,269 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+	EduShift Logback configuration.
+
+	Categories (named loggers, routed via per-profile <logger> bindings):
+	  - edushift.security    -> security / auth events
+	  - edushift.requests    -> HTTP access log
+	  - edushift.exceptions  -> handled & unhandled exceptions
+	  - edushift.ai          -> AI / OpenRouter integration
+	  - edushift.audit       -> audit event mirror (compliance retention)
+
+	MDC fields surfaced in every log line:
+	  - correlationId  (per request, set by CorrelationIdFilter)
+	  - traceId        (mirrored / Micrometer Tracing)
+	  - tenantId       (multi-tenancy, set by TenantFilter / TenantInterceptor)
+	  - userId         (set by auth / tenant interceptor when available)
+
+	Profiles:
+	  - dev / test : human-readable colored console
+	  - prod       : structured key=value console + rolling files per category
+
+	Designed for forward observability: same MDC keys are compatible with
+	OpenTelemetry / Micrometer Tracing once the tracing starter is added.
+-->
+<configuration scan="true" scanPeriod="60 seconds">
+
+	<include resource="org/springframework/boot/logging/logback/defaults.xml"/>
+
+	<springProperty scope="context" name="appName"
+					source="spring.application.name"
+					defaultValue="edushift-back"/>
+	<springProperty scope="context" name="activeProfile"
+					source="spring.profiles.active"
+					defaultValue="dev"/>
+
+	<property name="LOG_PATH"  value="${LOG_PATH:-./logs}"/>
+	<property name="LOG_LEVEL_ROOT" value="${LOG_LEVEL_ROOT:-INFO}"/>
+	<property name="LOG_LEVEL_APP"  value="${LOG_LEVEL_APP:-INFO}"/>
+
+	<property name="MDC_FIELDS"
+			  value="cid=%X{correlationId:-} tid=%X{traceId:-} tenant=%X{tenantId:-} user=%X{userId:-}"/>
+
+	<property name="CONSOLE_PATTERN_DEV"
+			  value="%clr(%d{HH:mm:ss.SSS}){faint} %clr(%-5level) %clr(${MDC_FIELDS}){magenta} %clr(%-40.40logger{39}){cyan} %clr(:){faint} %msg%n%wEx"/>
+
+	<property name="STRUCTURED_PATTERN"
+			  value="%d{yyyy-MM-dd'T'HH:mm:ss.SSSXXX} %-5level app=${appName} env=${activeProfile} thread=[%thread] logger=%logger{40} ${MDC_FIELDS} %msg%n%wEx"/>
+
+	<!-- ====================================================================== -->
+	<!-- Profile: dev / test - colored console, full app debug                  -->
+	<!-- ====================================================================== -->
+	<springProfile name="dev | test">
+
+		<appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+			<encoder>
+				<pattern>${CONSOLE_PATTERN_DEV}</pattern>
+				<charset>UTF-8</charset>
+			</encoder>
+		</appender>
+
+		<!-- Category loggers in dev: just inherit console via additivity -->
+		<logger name="edushift.security"   level="DEBUG"/>
+		<logger name="edushift.requests"   level="INFO"/>
+		<logger name="edushift.exceptions" level="DEBUG"/>
+		<logger name="edushift.ai"         level="DEBUG"/>
+		<logger name="edushift.audit"      level="INFO"/>
+
+		<logger name="com.edushift" level="${LOG_LEVEL_APP:-DEBUG}"/>
+
+		<root level="${LOG_LEVEL_ROOT:-INFO}">
+			<appender-ref ref="CONSOLE"/>
+		</root>
+
+	</springProfile>
+
+	<!-- ====================================================================== -->
+	<!-- Profile: prod - structured console + per-category rolling files        -->
+	<!-- ====================================================================== -->
+	<springProfile name="prod">
+
+		<appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+			<encoder>
+				<pattern>${STRUCTURED_PATTERN}</pattern>
+				<charset>UTF-8</charset>
+			</encoder>
+		</appender>
+
+		<!-- Main application log: everything at root level -->
+		<appender name="APP_FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+			<file>${LOG_PATH}/edushift.log</file>
+			<encoder>
+				<pattern>${STRUCTURED_PATTERN}</pattern>
+				<charset>UTF-8</charset>
+			</encoder>
+			<rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+				<fileNamePattern>${LOG_PATH}/archive/edushift-%d{yyyy-MM-dd}.%i.log.gz</fileNamePattern>
+				<maxFileSize>100MB</maxFileSize>
+				<maxHistory>30</maxHistory>
+				<totalSizeCap>5GB</totalSizeCap>
+				<cleanHistoryOnStart>true</cleanHistoryOnStart>
+			</rollingPolicy>
+		</appender>
+
+		<!-- Security log: auth, ACLs, suspicious events. Kept 90 days. -->
+		<appender name="SECURITY_FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+			<file>${LOG_PATH}/security.log</file>
+			<encoder>
+				<pattern>${STRUCTURED_PATTERN}</pattern>
+				<charset>UTF-8</charset>
+			</encoder>
+			<rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+				<fileNamePattern>${LOG_PATH}/archive/security-%d{yyyy-MM-dd}.%i.log.gz</fileNamePattern>
+				<maxFileSize>50MB</maxFileSize>
+				<maxHistory>90</maxHistory>
+				<totalSizeCap>2GB</totalSizeCap>
+			</rollingPolicy>
+		</appender>
+
+		<!-- Access log: one line per HTTP request. Kept 14 days. -->
+		<appender name="REQUESTS_FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+			<file>${LOG_PATH}/requests.log</file>
+			<encoder>
+				<pattern>${STRUCTURED_PATTERN}</pattern>
+				<charset>UTF-8</charset>
+			</encoder>
+			<rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+				<fileNamePattern>${LOG_PATH}/archive/requests-%d{yyyy-MM-dd}.%i.log.gz</fileNamePattern>
+				<maxFileSize>100MB</maxFileSize>
+				<maxHistory>14</maxHistory>
+				<totalSizeCap>5GB</totalSizeCap>
+			</rollingPolicy>
+		</appender>
+
+		<!-- Exceptions log: WARN+ only. Kept 90 days. -->
+		<appender name="EXCEPTIONS_FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+			<file>${LOG_PATH}/exceptions.log</file>
+			<filter class="ch.qos.logback.classic.filter.ThresholdFilter">
+				<level>WARN</level>
+			</filter>
+			<encoder>
+				<pattern>${STRUCTURED_PATTERN}</pattern>
+				<charset>UTF-8</charset>
+			</encoder>
+			<rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+				<fileNamePattern>${LOG_PATH}/archive/exceptions-%d{yyyy-MM-dd}.%i.log.gz</fileNamePattern>
+				<maxFileSize>50MB</maxFileSize>
+				<maxHistory>90</maxHistory>
+				<totalSizeCap>2GB</totalSizeCap>
+			</rollingPolicy>
+		</appender>
+
+		<!-- AI / OpenRouter log: latency, retries, model usage. Kept 30 days. -->
+		<appender name="AI_FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+			<file>${LOG_PATH}/ai.log</file>
+			<encoder>
+				<pattern>${STRUCTURED_PATTERN}</pattern>
+				<charset>UTF-8</charset>
+			</encoder>
+			<rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+				<fileNamePattern>${LOG_PATH}/archive/ai-%d{yyyy-MM-dd}.%i.log.gz</fileNamePattern>
+				<maxFileSize>50MB</maxFileSize>
+				<maxHistory>30</maxHistory>
+				<totalSizeCap>2GB</totalSizeCap>
+			</rollingPolicy>
+		</appender>
+
+		<!-- Audit log mirror: file kept 1 year for compliance (DB is canonical). -->
+		<appender name="AUDIT_FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+			<file>${LOG_PATH}/audit.log</file>
+			<encoder>
+				<pattern>${STRUCTURED_PATTERN}</pattern>
+				<charset>UTF-8</charset>
+			</encoder>
+			<rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+				<fileNamePattern>${LOG_PATH}/archive/audit-%d{yyyy-MM-dd}.%i.log.gz</fileNamePattern>
+				<maxFileSize>50MB</maxFileSize>
+				<maxHistory>365</maxHistory>
+				<totalSizeCap>10GB</totalSizeCap>
+			</rollingPolicy>
+		</appender>
+
+		<!-- Async wrappers: keep request-thread fast; drop nothing for audit. -->
+		<appender name="ASYNC_APP" class="ch.qos.logback.classic.AsyncAppender">
+			<appender-ref ref="APP_FILE"/>
+			<queueSize>1024</queueSize>
+			<discardingThreshold>0</discardingThreshold>
+			<includeCallerData>false</includeCallerData>
+			<neverBlock>true</neverBlock>
+		</appender>
+
+		<appender name="ASYNC_REQUESTS" class="ch.qos.logback.classic.AsyncAppender">
+			<appender-ref ref="REQUESTS_FILE"/>
+			<queueSize>2048</queueSize>
+			<discardingThreshold>20</discardingThreshold>
+			<neverBlock>true</neverBlock>
+		</appender>
+
+		<appender name="ASYNC_SECURITY" class="ch.qos.logback.classic.AsyncAppender">
+			<appender-ref ref="SECURITY_FILE"/>
+			<queueSize>512</queueSize>
+			<discardingThreshold>0</discardingThreshold>
+		</appender>
+
+		<appender name="ASYNC_EXCEPTIONS" class="ch.qos.logback.classic.AsyncAppender">
+			<appender-ref ref="EXCEPTIONS_FILE"/>
+			<queueSize>512</queueSize>
+			<discardingThreshold>0</discardingThreshold>
+		</appender>
+
+		<appender name="ASYNC_AI" class="ch.qos.logback.classic.AsyncAppender">
+			<appender-ref ref="AI_FILE"/>
+			<queueSize>512</queueSize>
+			<discardingThreshold>0</discardingThreshold>
+		</appender>
+
+		<appender name="ASYNC_AUDIT" class="ch.qos.logback.classic.AsyncAppender">
+			<appender-ref ref="AUDIT_FILE"/>
+			<queueSize>1024</queueSize>
+			<discardingThreshold>0</discardingThreshold>
+		</appender>
+
+		<!-- Category routing (additivity=false: no duplication into root) -->
+		<logger name="edushift.security" level="INFO" additivity="false">
+			<appender-ref ref="ASYNC_SECURITY"/>
+			<appender-ref ref="CONSOLE"/>
+		</logger>
+
+		<logger name="edushift.requests" level="INFO" additivity="false">
+			<appender-ref ref="ASYNC_REQUESTS"/>
+		</logger>
+
+		<logger name="edushift.exceptions" level="INFO" additivity="false">
+			<appender-ref ref="ASYNC_EXCEPTIONS"/>
+			<appender-ref ref="CONSOLE"/>
+		</logger>
+
+		<logger name="edushift.ai" level="INFO" additivity="false">
+			<appender-ref ref="ASYNC_AI"/>
+			<appender-ref ref="CONSOLE"/>
+		</logger>
+
+		<logger name="edushift.audit" level="INFO" additivity="false">
+			<appender-ref ref="ASYNC_AUDIT"/>
+			<appender-ref ref="CONSOLE"/>
+		</logger>
+
+		<!-- Framework noise control in prod -->
+		<logger name="org.springframework"      level="WARN"/>
+		<logger name="org.hibernate"            level="WARN"/>
+		<logger name="org.hibernate.SQL"        level="WARN"/>
+		<logger name="org.hibernate.orm.jdbc.bind" level="WARN"/>
+		<logger name="com.zaxxer.hikari"        level="WARN"/>
+		<logger name="org.flywaydb"             level="INFO"/>
+		<logger name="io.lettuce.core"          level="WARN"/>
+		<logger name="org.springframework.security" level="WARN"/>
+
+		<logger name="com.edushift" level="${LOG_LEVEL_APP:-INFO}"/>
+
+		<root level="${LOG_LEVEL_ROOT:-INFO}">
+			<appender-ref ref="CONSOLE"/>
+			<appender-ref ref="ASYNC_APP"/>
+		</root>
+
+		<!-- Stop async appenders cleanly on shutdown -->
+		<shutdownHook class="ch.qos.logback.core.hook.DefaultShutdownHook"/>
+
+	</springProfile>
+
+</configuration>

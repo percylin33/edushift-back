@@ -1,0 +1,187 @@
+# =============================================================================
+# EduShift - docker-compose base (orientado a producción)
+# Override para desarrollo:
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+# =============================================================================
+
+name: edushift
+
+services:
+
+  # ---------------------------------------------------------------------------
+  # PostgreSQL
+  # ---------------------------------------------------------------------------
+  postgres:
+    image: postgres:16-alpine
+    container_name: edushift-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DB_NAME:-edushift}
+      POSTGRES_USER: ${DB_USER:-edushift}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
+      POSTGRES_INITDB_ARGS: "--encoding=UTF-8 --locale=C"
+      TZ: UTC
+      PGTZ: UTC
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - edushift-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ---------------------------------------------------------------------------
+  # Redis
+  # ---------------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: edushift-redis
+    restart: unless-stopped
+    command:
+      - "redis-server"
+      - "--requirepass"
+      - "${REDIS_PASSWORD:?REDIS_PASSWORD is required}"
+      - "--appendonly"
+      - "yes"
+      - "--maxmemory"
+      - "${REDIS_MAXMEMORY:-256mb}"
+      - "--maxmemory-policy"
+      - "${REDIS_MAXMEMORY_POLICY:-allkeys-lru}"
+      - "--save"
+      - "900 1"
+      - "--save"
+      - "300 10"
+    environment:
+      TZ: UTC
+    volumes:
+      - redis-data:/data
+    networks:
+      - edushift-net
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" --no-auth-warning ping | grep -q PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ---------------------------------------------------------------------------
+  # Backend Spring Boot
+  # ---------------------------------------------------------------------------
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        SKIP_TESTS: "true"
+    image: edushift/edushift-back:${APP_VERSION:-latest}
+    container_name: edushift-back
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-prod}
+      SERVER_PORT: 8080
+      SERVER_CONTEXT_PATH: ${SERVER_CONTEXT_PATH:-/api}
+      # PostgreSQL
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: ${DB_NAME:-edushift}
+      DB_USER: ${DB_USER:-edushift}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_SCHEMA: ${DB_SCHEMA:-edushift}
+      DB_SSL_MODE: ${DB_SSL_MODE:-disable}
+      DB_APPLICATION_NAME: edushift-back
+      # Hikari
+      HIKARI_MINIMUM_IDLE: ${HIKARI_MINIMUM_IDLE:-10}
+      HIKARI_MAXIMUM_POOL_SIZE: ${HIKARI_MAXIMUM_POOL_SIZE:-30}
+      # Flyway
+      FLYWAY_ENABLED: ${FLYWAY_ENABLED:-true}
+      FLYWAY_SCHEMAS: ${FLYWAY_SCHEMAS:-edushift}
+      FLYWAY_DEFAULT_SCHEMA: ${FLYWAY_DEFAULT_SCHEMA:-edushift}
+      # Redis
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      REDIS_SSL_ENABLED: ${REDIS_SSL_ENABLED:-false}
+      REDIS_KEY_PREFIX: ${REDIS_KEY_PREFIX:-edushift:}
+      # Aplicación / Frontend / CORS
+      APP_BASE_URL: ${APP_BASE_URL}
+      FRONTEND_URL: ${FRONTEND_URL}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS}
+      CORS_ALLOW_CREDENTIALS: ${CORS_ALLOW_CREDENTIALS:-true}
+      # JWT
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
+      JWT_ISSUER: ${JWT_ISSUER:-edushift}
+      JWT_AUDIENCE: ${JWT_AUDIENCE:-edushift-clients}
+      JWT_ACCESS_TTL: ${JWT_ACCESS_TTL:-15m}
+      JWT_REFRESH_TTL: ${JWT_REFRESH_TTL:-7d}
+      # OpenRouter (AI)
+      OPENROUTER_ENABLED: ${OPENROUTER_ENABLED:-false}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      OPENROUTER_BASE_URL: ${OPENROUTER_BASE_URL:-https://openrouter.ai/api/v1}
+      OPENROUTER_DEFAULT_MODEL: ${OPENROUTER_DEFAULT_MODEL:-openai/gpt-4o-mini}
+      OPENROUTER_REFERER: ${OPENROUTER_REFERER:-}
+      OPENROUTER_TITLE: ${OPENROUTER_TITLE:-EduShift}
+      # Firebase
+      FIREBASE_ENABLED: ${FIREBASE_ENABLED:-false}
+      FIREBASE_PROJECT_ID: ${FIREBASE_PROJECT_ID:-}
+      FIREBASE_CREDENTIALS_JSON: ${FIREBASE_CREDENTIALS_JSON:-}
+      FIREBASE_CREDENTIALS_PATH: ${FIREBASE_CREDENTIALS_PATH:-}
+      FIREBASE_WEB_API_KEY: ${FIREBASE_WEB_API_KEY:-}
+      FIREBASE_DATABASE_URL: ${FIREBASE_DATABASE_URL:-}
+      FIREBASE_STORAGE_BUCKET: ${FIREBASE_STORAGE_BUCKET:-}
+      # Logging
+      LOG_PATH: ${LOG_PATH:-/var/log/edushift}
+      LOG_LEVEL_ROOT: ${LOG_LEVEL_ROOT:-INFO}
+      LOG_LEVEL_APP: ${LOG_LEVEL_APP:-INFO}
+      # JVM
+      JAVA_OPTS: ${JAVA_OPTS:--Xms256m -Xmx768m}
+      TZ: UTC
+    ports:
+      - "${BACKEND_HOST_PORT:-8080}:8080"
+    volumes:
+      - backend-logs:${LOG_PATH:-/var/log/edushift}
+    networks:
+      - edushift-net
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8080/api/actuator/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+
+# =============================================================================
+# Volumes & Network
+# =============================================================================
+volumes:
+  postgres-data:
+    name: edushift-postgres-data
+  redis-data:
+    name: edushift-redis-data
+  backend-logs:
+    name: edushift-backend-logs
+
+networks:
+  edushift-net:
+    name: edushift-net
+    driver: bridge
