@@ -51,6 +51,23 @@ public class JwtServiceImpl implements JwtService {
 	private static final String CLAIM_ROLES = "roles";
 	private static final String CLAIM_EMAIL = "email";
 	private static final String CLAIM_TYPE = "typ";
+	/**
+	 * RFC 7519 §4.1.7 reserved {@code jti} claim — a unique identifier per
+	 * issued token. Without it, two refresh tokens emitted to the same user
+	 * within the same wall-clock second would share every other claim
+	 * ({@code sub}, {@code iat}, {@code exp}, {@code tenant_id}, {@code typ})
+	 * and produce <em>byte-identical</em> JWTs whose SHA-256 hashes collide
+	 * against the {@code uk_refresh_tokens_token_hash} unique constraint.
+	 * That collision was surfaced by {@code AuthTenantIsolationIT} when
+	 * Failsafe was wired up for Sprint 2 — the issue had been latent because
+	 * Sprint 1 only ran unit tests via {@code mvn test}.
+	 *
+	 * <p>Adding {@code jti} also brings us in line with standard JWT
+	 * recommendations and lets future code (e.g. token introspection,
+	 * audit logs) refer to a token by an opaque id without exposing the
+	 * raw secret.
+	 */
+	private static final String CLAIM_JWT_ID = "jti";
 	private static final long ALLOWED_CLOCK_SKEW_SECONDS = 30L;
 
 	private final JwtProperties properties;
@@ -89,6 +106,7 @@ public class JwtServiceImpl implements JwtService {
 		claims.put(CLAIM_ROLES, roles == null ? List.of() : List.copyOf(roles));
 		claims.put(CLAIM_EMAIL, user.getEmail());
 		claims.put(CLAIM_TYPE, TokenType.ACCESS.name().toLowerCase());
+		claims.put(CLAIM_JWT_ID, UUID.randomUUID().toString());
 
 		return buildToken(user.getPublicUuid().toString(), claims, now, properties.getAccessTokenTtl());
 	}
@@ -99,6 +117,7 @@ public class JwtServiceImpl implements JwtService {
 		Map<String, Object> claims = new LinkedHashMap<>();
 		claims.put(CLAIM_TENANT_ID, tenant.getId().toString());
 		claims.put(CLAIM_TYPE, TokenType.REFRESH.name().toLowerCase());
+		claims.put(CLAIM_JWT_ID, UUID.randomUUID().toString());
 
 		return buildToken(user.getPublicUuid().toString(), claims, now, properties.getRefreshTokenTtl());
 	}

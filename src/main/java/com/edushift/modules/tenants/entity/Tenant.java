@@ -9,12 +9,16 @@ import jakarta.persistence.PrePersist;
 import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
 import java.time.Instant;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.UUID;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 import lombok.ToString;
+import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.annotations.SQLDelete;
+import org.hibernate.type.SqlTypes;
 
 /**
  * Root tenant record (one row = one school / institution).
@@ -24,15 +28,28 @@ import org.hibernate.annotations.SQLDelete;
  * source. It lives in the global schema, has no {@code tenant_id} column, and
  * is queried directly by the auth flow during login (slug → tenant_id).
  *
- * <h3>Sprint 1 scope (BE-1.3)</h3>
- * Minimal columns required for login: {@code id}, {@code slug}, {@code status},
- * {@code name}. Sprint 2 ({@code Tenants module}) extends this entity with
- * {@code customDomain}, {@code settings} (jsonb), {@code plan}, {@code branding},
- * {@code featureFlags}, etc.
+ * <h3>Mapped columns</h3>
+ * After Sprint 2 (V7) this entity covers the full tenant catalog surface
+ * needed by the SaaS:
+ * <ul>
+ *   <li><strong>Identity</strong>: {@code publicUuid}, {@code name},
+ *       {@code slug}, {@code customDomain}.</li>
+ *   <li><strong>Lifecycle</strong>: {@code status} (PENDING/ACTIVE/...).</li>
+ *   <li><strong>Billing</strong>: {@code plan} + {@code trialEndsAt}.</li>
+ *   <li><strong>Branding & flags</strong>: {@code branding} + {@code featureFlags}
+ *       as schema-less {@code jsonb}. The contract with consumers is
+ *       enforced at the DTO layer, not here, so the database doesn't
+ *       have to migrate every time the front wants a new color or
+ *       toggle.</li>
+ *   <li><strong>Soft caps</strong>: {@code maxStudents}, {@code maxTeachers}.
+ *       NULL means "use plan default".</li>
+ * </ul>
  *
- * <p>The DB columns omitted here ({@code public_uuid}, {@code custom_domain},
- * {@code settings}) have safe defaults at the DB level — Hibernate's
- * {@code ddl-auto=validate} only checks that entity columns ⊆ DB columns.
+ * <h3>Why the JSON fields use {@code Map<String, Object>}</h3>
+ * Hibernate 6's {@code @JdbcTypeCode(SqlTypes.JSON)} round-trips this
+ * to {@code jsonb} via Jackson without any custom type. The same
+ * pattern is used by {@code AuditLog.metadata}; keeping the convention
+ * uniform across modules makes the persistence layer predictable.
  */
 @Entity
 @Table(
@@ -45,7 +62,7 @@ import org.hibernate.annotations.SQLDelete;
 @Getter
 @Setter
 @NoArgsConstructor
-@ToString(callSuper = true, of = {"slug", "name", "status"})
+@ToString(callSuper = true, of = {"slug", "name", "status", "plan"})
 @SQLDelete(sql = "UPDATE edushift.tenants "
 		+ "SET deleted = true, deleted_at = NOW(), updated_at = NOW() "
 		+ "WHERE id = ?")
@@ -66,9 +83,53 @@ public class Tenant extends AuditableEntity {
 	@Column(name = "slug", nullable = false, length = 80)
 	private String slug;
 
+	/** Optional vanity domain (e.g. {@code app.micolegio.edu.pe}). */
+	@Column(name = "custom_domain", length = 200)
+	private String customDomain;
+
 	@Enumerated(EnumType.STRING)
 	@Column(name = "status", nullable = false, length = 30)
 	private TenantStatus status = TenantStatus.PENDING;
+
+	@Enumerated(EnumType.STRING)
+	@Column(name = "plan", nullable = false, length = 30)
+	private TenantPlan plan = TenantPlan.TRIAL;
+
+	@Column(name = "trial_ends_at")
+	private Instant trialEndsAt;
+
+	/**
+	 * Free-form branding bag (primaryColor, logoUrl, faviconUrl, loginBgUrl, ...).
+	 * The DTO layer ({@code BrandingDto}) defines the typed contract;
+	 * this map is the storage layer.
+	 */
+	@JdbcTypeCode(SqlTypes.JSON)
+	@Column(name = "branding", nullable = false, columnDefinition = "jsonb")
+	private Map<String, Object> branding = new HashMap<>();
+
+	/**
+	 * Free-form per-tenant feature flags ({@code {flag: bool}}). Reads
+	 * default to "off" when a key is missing — the absence of a flag
+	 * is intentional and equivalent to a disabled feature.
+	 */
+	@JdbcTypeCode(SqlTypes.JSON)
+	@Column(name = "feature_flags", nullable = false, columnDefinition = "jsonb")
+	private Map<String, Object> featureFlags = new HashMap<>();
+
+	/**
+	 * Optional hard cap on the number of students. {@code null} means
+	 * "use the plan's default cap" (resolved by the service layer).
+	 */
+	@Column(name = "max_students")
+	private Integer maxStudents;
+
+	/** See {@link #maxStudents}. */
+	@Column(name = "max_teachers")
+	private Integer maxTeachers;
+
+	@Column(name = "settings", nullable = false, columnDefinition = "jsonb")
+	@JdbcTypeCode(SqlTypes.JSON)
+	private Map<String, Object> settings = new HashMap<>();
 
 	@Column(name = "deleted_at")
 	private Instant deletedAt;
@@ -81,8 +142,20 @@ public class Tenant extends AuditableEntity {
 		if (status == null) {
 			status = TenantStatus.PENDING;
 		}
+		if (plan == null) {
+			plan = TenantPlan.TRIAL;
+		}
 		if (slug != null) {
 			slug = slug.trim().toLowerCase();
+		}
+		if (branding == null) {
+			branding = new HashMap<>();
+		}
+		if (featureFlags == null) {
+			featureFlags = new HashMap<>();
+		}
+		if (settings == null) {
+			settings = new HashMap<>();
 		}
 	}
 

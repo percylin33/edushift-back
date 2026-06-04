@@ -168,6 +168,25 @@
 					</excludes>
 				</configuration>
 			</plugin>
+			<!--
+			  Surefire 3.x excludes *IT.java by convention so unit tests stay
+			  fast (no DB, no Testcontainers). Failsafe picks them up during
+			  the `verify` phase, runs them with the same Spring profile, and
+			  reports separately. This is the standard Maven pattern documented
+			  by Spring Boot itself (https://spring.io/guides/gs/testing-web/).
+			-->
+			<plugin>
+				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-failsafe-plugin</artifactId>
+				<executions>
+					<execution>
+						<goals>
+							<goal>integration-test</goal>
+							<goal>verify</goal>
+						</goals>
+					</execution>
+				</executions>
+			</plugin>
 		</plugins>
 	</build>
 

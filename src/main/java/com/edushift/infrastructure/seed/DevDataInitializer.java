@@ -147,6 +147,11 @@ public class DevDataInitializer implements CommandLineRunner {
 		user.setStatus(UserStatus.ACTIVE);
 		user.setEmailVerified(true);
 		user.setMfaEnabled(false);
+		// Sprint 2 (BE-2.4): the seed admin needs TENANT_ADMIN so the dev
+		// environment can exercise role-gated endpoints (e.g.
+		// PATCH /tenants/me). The Flyway V8 backfill covers tenants whose
+		// seed admin already exists; this line covers fresh boots.
+		user.addRole(com.edushift.modules.auth.entity.UserRole.TENANT_ADMIN);
 		// publicUuid is generated in @PrePersist; tenant_id is auto-populated
 		// by Hibernate's @TenantId discriminator from TenantContext.
 		return user;

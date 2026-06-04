@@ -171,7 +171,7 @@ public class AuthServiceImpl implements AuthService {
 		user.recordSuccessfulLogin();
 		userRepository.saveAndFlush(user);
 
-		String accessToken = jwtService.issueAccessToken(user, tenant, /* roles */ Set.of());
+		String accessToken = jwtService.issueAccessToken(user, tenant, user.getRoleNames());
 		String refreshToken = jwtService.issueRefreshToken(user, tenant);
 
 		// First token of a new chain — parent_token_id is null.
@@ -254,8 +254,10 @@ public class AuthServiceImpl implements AuthService {
 						"User no longer exists"));
 		assertUserCanAuthenticate(user, tenant.getSlug());
 
-		// Mint new pair.
-		String newAccess = jwtService.issueAccessToken(user, tenant, Set.of());
+		// Mint new pair. Roles are re-read from the user (so a role grant /
+		// revoke between login and refresh is reflected in the new access
+		// token without forcing the user to log out).
+		String newAccess = jwtService.issueAccessToken(user, tenant, user.getRoleNames());
 		String newRefresh = jwtService.issueRefreshToken(user, tenant);
 
 		// Rotate: revoke old, persist new with parent link.
@@ -356,6 +358,42 @@ public class AuthServiceImpl implements AuthService {
 						"Authenticated user no longer exists"));
 
 		return userMapper.toResponse(user);
+	}
+
+	// =========================================================================
+	// Issue session (login + register share this)
+	// =========================================================================
+
+	/**
+	 * Issue a token pair for an already-loaded user/tenant. The caller MUST:
+	 * <ul>
+	 *   <li>have set the {@link TenantContext} to {@code tenant.getId()}, and</li>
+	 *   <li>be running inside an active transaction (so the
+	 *       {@code refresh_tokens} INSERT picks up the right
+	 *       {@code @TenantId}).</li>
+	 * </ul>
+	 * Both {@code login()} and the upcoming {@code TenantService.register()}
+	 * call this from inside their own {@code runAs + TransactionTemplate}
+	 * block, so the contract is enforced at every call site.
+	 *
+	 * <p>This method intentionally does <strong>not</strong> stamp
+	 * {@code last_login_at}. Login does that explicitly because it
+	 * represents an interactive credential check; register does NOT (the
+	 * user just created their account in the same request, the timestamp
+	 * is meaningful only for return visits). Callers that need it should
+	 * stamp it themselves before calling this method.
+	 */
+	@Override
+	public AuthResponse issueSession(User user, Tenant tenant) {
+		String accessToken = jwtService.issueAccessToken(user, tenant, user.getRoleNames());
+		String refreshToken = jwtService.issueRefreshToken(user, tenant);
+		persistRefreshToken(refreshToken, user, /* parentTokenId */ null);
+
+		return AuthResponse.bearer(
+				accessToken,
+				refreshToken,
+				jwtService.accessTokenTtlSeconds(),
+				userMapper.toSummary(user));
 	}
 
 	// =========================================================================

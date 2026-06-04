@@ -12,12 +12,17 @@ import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
 import java.time.Instant;
+import java.util.Arrays;
+import java.util.LinkedHashSet;
+import java.util.Set;
 import java.util.UUID;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 import lombok.ToString;
+import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.annotations.SQLDelete;
+import org.hibernate.type.SqlTypes;
 
 /**
  * Application user. Scoped to a single {@code tenant} (school / institution)
@@ -121,6 +126,22 @@ public class User extends TenantAwareEntity {
 	private Instant lastLoginAt;
 
 	/**
+	 * Role names assigned to this user. Mirrors the {@link UserRole} enum
+	 * values stored as plain strings — see the enum's javadoc for the
+	 * rationale (table-less catalog for Sprint 2, relational promotion in
+	 * Sprint 3 without breaking the JWT shape).
+	 *
+	 * <p>Persisted as a Postgres {@code varchar[]} via Hibernate 6's
+	 * {@code @JdbcTypeCode(SqlTypes.ARRAY)}. The Java type is the raw
+	 * {@code String[]} that Hibernate accepts natively; type-safe access
+	 * goes through {@link #getRoleSet} / {@link #setRoleSet} /
+	 * {@link #addRole} / {@link #hasRole}.
+	 */
+	@JdbcTypeCode(SqlTypes.ARRAY)
+	@Column(name = "roles", nullable = false, columnDefinition = "varchar[]")
+	private String[] roles = new String[0];
+
+	/**
 	 * Timestamp of soft deletion. Populated by the {@code @SQLDelete} statement
 	 * and by {@link #markDeleted()}; cleared by {@link #restore()}.
 	 */
@@ -186,6 +207,70 @@ public class User extends TenantAwareEntity {
 		if (this.status == UserStatus.PENDING_VERIFICATION) {
 			this.status = UserStatus.ACTIVE;
 		}
+	}
+
+	// ---------------------------------------------------------------------------
+	// Role helpers (type-safe view over the raw varchar[] column)
+	// ---------------------------------------------------------------------------
+
+	/**
+	 * Returns the role names as a defensive copy. Always non-null; an
+	 * empty set means "no privileged endpoints accessible". Used by
+	 * {@code AuthService.issueSession} / {@code AuthService.login} to
+	 * populate the {@code roles} JWT claim.
+	 */
+	public Set<String> getRoleNames() {
+		if (roles == null || roles.length == 0) {
+			return Set.of();
+		}
+		// LinkedHashSet preserves the order from the DB array — useful for
+		// deterministic JWT claim shape (helps debugging + cache hits).
+		return new LinkedHashSet<>(Arrays.asList(roles));
+	}
+
+	/** Type-safe view: drops names that don't match any {@link UserRole}. */
+	public Set<UserRole> getRoleSet() {
+		if (roles == null || roles.length == 0) {
+			return Set.of();
+		}
+		Set<UserRole> result = new LinkedHashSet<>();
+		for (String name : roles) {
+			UserRole role = UserRole.fromName(name);
+			if (role != null) result.add(role);
+		}
+		return result;
+	}
+
+	/** Replace the user's roles in one shot. {@code null} clears the roles. */
+	public void setRoleSet(Set<UserRole> newRoles) {
+		if (newRoles == null || newRoles.isEmpty()) {
+			this.roles = new String[0];
+			return;
+		}
+		this.roles = newRoles.stream()
+				.filter(java.util.Objects::nonNull)
+				.map(Enum::name)
+				.toArray(String[]::new);
+	}
+
+	/** Idempotent: adds a role if not already present, no-op otherwise. */
+	public void addRole(UserRole role) {
+		if (role == null) return;
+		if (hasRole(role)) return;
+		String[] current = roles == null ? new String[0] : roles;
+		String[] next = new String[current.length + 1];
+		System.arraycopy(current, 0, next, 0, current.length);
+		next[current.length] = role.name();
+		this.roles = next;
+	}
+
+	/** Membership check. */
+	public boolean hasRole(UserRole role) {
+		if (role == null || roles == null) return false;
+		for (String name : roles) {
+			if (role.name().equals(name)) return true;
+		}
+		return false;
 	}
 
 }

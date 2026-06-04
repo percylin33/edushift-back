@@ -9,6 +9,7 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.config.Customizer;
+import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
@@ -62,6 +63,10 @@ import org.springframework.web.servlet.HandlerExceptionResolver;
  */
 @Configuration
 @EnableWebSecurity
+// Activates @PreAuthorize / @PostAuthorize on @RestController methods.
+// Sprint 2 (BE-2.4) uses it to gate PATCH /v1/tenants/me on TENANT_ADMIN;
+// Sprint 3+ will lean heavily on it for per-resource authorization.
+@EnableMethodSecurity
 public class SecurityConfig {
 
 	/**
@@ -84,6 +89,18 @@ public class SecurityConfig {
 			"/v1/auth/login",
 			"/v1/auth/refresh",
 			"/v1/auth/logout",
+			// `tenants/by-slug` powers the tenant-aware login screen — anyone
+			// rendering /auth/login on a given subdomain needs to read its
+			// branding before having any credentials. Sensitive fields are
+			// withheld at the DTO level (TenantSummary), so opening this path
+			// to the public web is safe by construction.
+			"/v1/tenants/by-slug/*",
+			// `tenants/register` is the public self-signup entry point.
+			// Anyone on the open internet can create a TRIAL tenant; the
+			// per-IP rate-limit landing in a future hardening sprint will
+			// keep abuse manageable. The controller validates the body
+			// strictly and the response is shaped exactly like /auth/login.
+			"/v1/tenants/register",
 			"/swagger-ui.html",
 			"/swagger-ui/**",
 			"/v3/api-docs",

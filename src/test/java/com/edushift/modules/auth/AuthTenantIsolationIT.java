@@ -245,7 +245,13 @@ class AuthTenantIsolationIT extends IntegrationTest {
 			ResponseEntity<String> refreshANow = doRefresh(loginA.refreshToken());
 			assertUnauthorizedWithCode(refreshANow, "TOKEN_REUSED");
 
-			// B's refresh is untouched → /refresh rotates successfully.
+			// B's refresh is untouched → /refresh rotates successfully. (Until
+			// the {@code jti} claim was added to the JWT in JwtServiceImpl,
+			// the rotated refresh issued here would collide with the previous
+			// one under the {@code uk_refresh_tokens_token_hash} unique
+			// constraint when both fell within the same wall-clock second —
+			// surfaced as a 409 CONFLICT here. The {@code jti} guarantees the
+			// hash is unique even at sub-second cadence.)
 			ResponseEntity<String> refreshBNow = doRefresh(loginB.refreshToken());
 			assertThat(refreshBNow.getStatusCode())
 					.as("logout of tenant A must not affect tenant B's refresh chain")

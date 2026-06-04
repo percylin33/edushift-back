@@ -1,11 +1,10 @@
 package com.edushift;
 
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.containers.PostgreSQLContainer;
-import org.testcontainers.junit.jupiter.Container;
-import org.testcontainers.junit.jupiter.Testcontainers;
 
 /**
  * Base class for full-stack integration tests.
@@ -38,32 +37,54 @@ import org.testcontainers.junit.jupiter.Testcontainers;
  * </ul>
  *
  * <h3>Why a separate class instead of an annotation</h3>
- * Composing {@code @SpringBootTest}, {@code @Testcontainers},
- * {@code @ActiveProfiles} and a {@code static @Container} field cannot be
- * expressed cleanly in a single meta-annotation (the container declaration
- * must be a field, not metadata). Inheritance is the simplest mechanism.
+ * Composing {@code @SpringBootTest}, {@code @ActiveProfiles} and the static
+ * container in a single meta-annotation is not possible — the container
+ * declaration must be a field, not metadata. Inheritance is the simplest
+ * mechanism.
+ *
+ * <h3>Why the singleton container pattern (and NOT {@code @Testcontainers})</h3>
+ * The first revision used {@code @Testcontainers} + {@code @Container}, which
+ * is JUnit 5 idiomatic but treats the field as <em>class-scoped</em>: the
+ * extension stops the container at the end of each test class. When Maven
+ * Failsafe runs <em>multiple</em> {@code IT} classes in the same JVM (e.g.
+ * {@code AuthTenantIsolationIT} followed by {@code TenantsTenantIsolationIT}),
+ * the second class would see {@code Hikari pool empty / Connection has been
+ * closed} because the container had been torn down between classes. The
+ * documented fix from Testcontainers itself is the <em>singleton container
+ * pattern</em> — start the container once in a static initializer and let
+ * the JVM shutdown reap it. JDBC URL and credentials are then bridged to
+ * Spring via {@code @DynamicPropertySource} (the lower-level equivalent of
+ * the {@code @ServiceConnection} hook the previous revision relied on).
+ *
+ * @see <a href="https://java.testcontainers.org/test_framework_integration/manual_lifecycle_control/">
+ *      Testcontainers — manual lifecycle control / singleton container pattern</a>
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @ActiveProfiles("test")
-@Testcontainers
 public abstract class IntegrationTest {
 
 	/**
-	 * Postgres container. {@code static} so it lives for the entire test class
-	 * (Testcontainers' JUnit Jupiter extension treats static {@code @Container}
-	 * fields as class-scoped). Pinning a tag (instead of {@code latest}) keeps
-	 * runs reproducible and matches what we plan to deploy in prod.
-	 *
-	 * <p>Image is the slim Alpine variant (~80MB, vs ~440MB for the full image)
-	 * which dramatically reduces first-run pull time on dev laptops and CI.
+	 * Postgres container, started once per JVM and shared across all
+	 * integration test classes. Tag pinned for reproducibility; Alpine image
+	 * keeps first-run pulls under ~80 MB (vs ~440 MB for the full image).
 	 */
-	@Container
-	@ServiceConnection
-	@SuppressWarnings("resource") // closed automatically by the Testcontainers extension
+	@SuppressWarnings("resource") // intentional: lifetime == JVM
 	static final PostgreSQLContainer<?> POSTGRES =
 			new PostgreSQLContainer<>("postgres:16-alpine")
 					.withDatabaseName("edushift_it")
 					.withUsername("edushift")
 					.withPassword("edushift");
+
+	static {
+		POSTGRES.start();
+	}
+
+	@DynamicPropertySource
+	static void registerPostgresProperties(DynamicPropertyRegistry registry) {
+		registry.add("spring.datasource.url", POSTGRES::getJdbcUrl);
+		registry.add("spring.datasource.username", POSTGRES::getUsername);
+		registry.add("spring.datasource.password", POSTGRES::getPassword);
+		registry.add("spring.datasource.driver-class-name", POSTGRES::getDriverClassName);
+	}
 
 }
