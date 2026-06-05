@@ -130,6 +130,19 @@
 		</dependency>
 
 		<!--
+		  Apache POI (https://poi.apache.org/) - Excel (.xlsx) parsing &
+		  generation for the bulk-import feature in students. We use the
+		  OOXML flavour (poi-ooxml) so the parser handles streaming reads
+		  for big workbooks gracefully (>10k rows). poi-ooxml pulls in the
+		  base poi module transitively, so we don't declare it explicitly.
+		-->
+		<dependency>
+			<groupId>org.apache.poi</groupId>
+			<artifactId>poi-ooxml</artifactId>
+			<version>5.4.0</version>
+		</dependency>
+
+		<!--
 		  Testcontainers (https://testcontainers.com/) - hermetic, ephemeral
 		  Postgres for integration tests. Docker is required on the dev box
 		  and on CI runners. The Spring Boot starter brings the

@@ -143,6 +143,7 @@ class AuthControllerTest {
 				null, null,
 				UserStatus.ACTIVE,
 				true, false,
+				java.util.Set.of("TENANT_ADMIN"),
 				Instant.now(), Instant.now(), Instant.now());
 	}
 

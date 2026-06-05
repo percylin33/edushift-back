@@ -8,6 +8,7 @@ import java.util.UUID;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -27,7 +28,8 @@ import org.springframework.stereotype.Repository;
  * needed.
  */
 @Repository
-public interface UserRepository extends JpaRepository<User, UUID> {
+public interface UserRepository extends JpaRepository<User, UUID>,
+		JpaSpecificationExecutor<User> {
 
 	Optional<User> findByPublicUuid(UUID publicUuid);
 
@@ -62,5 +64,26 @@ public interface UserRepository extends JpaRepository<User, UUID> {
 	@Modifying
 	@Query("update User u set u.status = :newStatus where u.id = :userId")
 	int updateStatus(@Param("userId") UUID userId, @Param("newStatus") UserStatus newStatus);
+
+	/**
+	 * Counts how many <em>active</em> admins the given tenant has. Used by
+	 * the last-admin guardrail when the management module is about to
+	 * remove the {@code TENANT_ADMIN} role from a user, disable an admin,
+	 * or delete one. Returning {@code 0} after a candidate change means the
+	 * tenant would be stranded and the operation must be rejected.
+	 *
+	 * <p>Native query because JPQL has no clean way to express
+	 * {@code 'TENANT_ADMIN' = ANY(roles)} against a Postgres {@code varchar[]}.
+	 * Tenant scoping is done via an explicit parameter (rather than relying
+	 * on Hibernate's filter) since native queries bypass {@code @TenantId}.
+	 */
+	@Query(value = """
+			select count(*) from edushift.users
+			where tenant_id = :tenantId
+			  and 'TENANT_ADMIN' = any(roles)
+			  and status = 'ACTIVE'
+			  and deleted = false
+			""", nativeQuery = true)
+	long countActiveTenantAdmins(@Param("tenantId") UUID tenantId);
 
 }

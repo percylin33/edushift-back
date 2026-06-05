@@ -101,6 +101,17 @@ public class SecurityConfig {
 			// keep abuse manageable. The controller validates the body
 			// strictly and the response is shaped exactly like /auth/login.
 			"/v1/tenants/register",
+			// User-invitation public flow (BE-3.2):
+			//   * `by-token/{token}` — preflight: returns recipient + tenant
+			//     name so the accept page can greet the user. Public-safe
+			//     because the response only carries fields the recipient
+			//     just typed back to the system.
+			//   * `accept` — token redemption: creates the new user in the
+			//     invitation's tenant and returns a session envelope.
+			// Both are gated by token entropy (~192 bits) and a partial
+			// unique index on `token` is the global namespace guarantee.
+			"/v1/users/invitations/by-token/*",
+			"/v1/users/invitations/accept",
 			"/swagger-ui.html",
 			"/swagger-ui/**",
 			"/v3/api-docs",

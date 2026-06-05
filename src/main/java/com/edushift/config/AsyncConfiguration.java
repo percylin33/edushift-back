@@ -32,4 +32,27 @@ public class AsyncConfiguration {
 		return executor;
 	}
 
+	/**
+	 * Pool dedicated to bulk-import jobs (Excel/CSV uploads). Smaller
+	 * pool than {@code domainEventExecutor} because each task can
+	 * easily run for tens of seconds and bring its own DB pressure;
+	 * over-parallelising risks starving the connection pool.
+	 *
+	 * <p>Queue capacity is intentionally low — admins are unlikely to
+	 * fire dozens of imports back-to-back, and we'd rather reject the
+	 * caller fast than queue up a backlog that a server restart would
+	 * lose silently.
+	 */
+	@Bean(name = "bulkImportExecutor")
+	Executor bulkImportExecutor() {
+		ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+		executor.setCorePoolSize(1);
+		executor.setMaxPoolSize(2);
+		executor.setQueueCapacity(20);
+		executor.setThreadNamePrefix("bulk-import-");
+		executor.setTaskDecorator(new ContextPropagatingTaskDecorator());
+		executor.initialize();
+		return executor;
+	}
+
 }
