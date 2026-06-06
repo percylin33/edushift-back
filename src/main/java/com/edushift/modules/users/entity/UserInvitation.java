@@ -9,7 +9,9 @@ import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
 import java.time.Instant;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.LinkedHashSet;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import lombok.Getter;
@@ -114,6 +116,20 @@ public class UserInvitation extends TenantAwareEntity {
 	@Column(name = "deleted_at")
 	private Instant deletedAt;
 
+	/**
+	 * Free-form jsonb side-channel callers can use to carry domain ids
+	 * that should be reacted on at accept time. Sprint 4 / BE-4.6 uses
+	 * the convention {@code { "teacherId": "<uuid>" }} so the teachers
+	 * module's listener can atomically link {@code teacher.user_id} to
+	 * the freshly-created user inside the same transaction.
+	 *
+	 * <p>Keys are convention-driven; nothing here is enforced by the
+	 * invitations module itself — listeners agree on the schema.</p>
+	 */
+	@JdbcTypeCode(SqlTypes.JSON)
+	@Column(name = "metadata", nullable = false, columnDefinition = "jsonb")
+	private Map<String, Object> metadata = new HashMap<>();
+
 	@PrePersist
 	private void onPrePersist() {
 		if (publicUuid == null) {
@@ -121,6 +137,9 @@ public class UserInvitation extends TenantAwareEntity {
 		}
 		if (email != null) {
 			email = email.trim().toLowerCase();
+		}
+		if (metadata == null) {
+			metadata = new HashMap<>();
 		}
 	}
 

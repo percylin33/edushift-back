@@ -61,6 +61,7 @@ class UserInvitationServiceImplTest {
 	@Mock private TenantRepository tenantRepository;
 	@Mock private AuthService authService;
 	@Mock private PasswordEncoder passwordEncoder;
+	@Mock private org.springframework.context.ApplicationEventPublisher eventPublisher;
 	@Mock private PlatformTransactionManager txManager;
 
 	private UserInvitationServiceImpl service;
@@ -72,7 +73,7 @@ class UserInvitationServiceImplTest {
 		service = new UserInvitationServiceImpl(
 				invitationRepository, new UserInvitationMapper(),
 				userRepository, tenantRepository, authService,
-				passwordEncoder, txManager);
+				passwordEncoder, eventPublisher, txManager);
 		TenantContext.set(TENANT_ID);
 	}
 

@@ -1,6 +1,7 @@
 package com.edushift.modules.students.dto;
 
 import com.edushift.modules.students.entity.EnrollmentStatus;
+import java.util.UUID;
 
 /**
  * Query-time filters for {@code GET /v1/students}.
@@ -12,19 +13,28 @@ import com.edushift.modules.students.entity.EnrollmentStatus;
  *   <li>{@code search} — case-insensitive substring against
  *       {@code firstName}, {@code lastName}, and {@code documentNumber}
  *       (the same fields admin tooling typically lets you search on).</li>
- *   <li>{@code enrollmentStatus} — exact equality.</li>
- *   <li>{@code gradeLevelId} — placeholder for Sprint 4. Accepted by
- *       the controller for forward-compatibility but ignored by the
- *       service for now (logged at debug).</li>
+ *   <li>{@code enrollmentStatus} — exact equality on the institution-
+ *       wide lifecycle ({@code Student.enrollmentStatus}).</li>
+ *   <li>{@code gradeLevelId} — placeholder accepted for forward-
+ *       compatibility; ignored by the service (logged at debug).</li>
+ *   <li>{@code currentSectionPublicUuid} — added in BE-4.8: keeps only
+ *       students that have an ACTIVE {@code StudentEnrollment} for the
+ *       given section. Joins through {@code StudentEnrollment}.</li>
+ *   <li>{@code currentAcademicYearPublicUuid} — added in BE-4.8: keeps
+ *       only students that have an ACTIVE {@code StudentEnrollment}
+ *       for the given academic year. Combines with
+ *       {@code currentSectionPublicUuid} when both are set.</li>
  * </ul>
  */
 public record StudentListFilters(
 		String search,
 		EnrollmentStatus enrollmentStatus,
-		String gradeLevelId
+		String gradeLevelId,
+		UUID currentSectionPublicUuid,
+		UUID currentAcademicYearPublicUuid
 ) {
 
 	public static StudentListFilters empty() {
-		return new StudentListFilters(null, null, null);
+		return new StudentListFilters(null, null, null, null, null);
 	}
 }

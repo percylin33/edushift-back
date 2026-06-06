@@ -67,6 +67,7 @@ class TenantServiceImplTest {
 	@Mock private UserRepository userRepository;
 	@Mock private PasswordEncoder passwordEncoder;
 	@Mock private AuthService authService;
+	@Mock private com.edushift.modules.academic.levelgrade.service.AcademicSeedService academicSeedService;
 	@Mock private PlatformTransactionManager txManager;
 
 	private TenantServiceImpl service;
@@ -82,6 +83,7 @@ class TenantServiceImplTest {
 				userRepository,
 				passwordEncoder,
 				authService,
+				academicSeedService,
 				txManager
 		);
 	}

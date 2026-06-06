@@ -48,3 +48,6 @@ firebase-credentials*.json
 logs/
 *.log
 *.log.gz
+
+### Local helper scripts (machine-specific JAVA_HOME) ###
+_*.bat

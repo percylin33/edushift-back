@@ -85,7 +85,7 @@ class StudentServiceImplTest {
 					.thenReturn(new PageImpl<>(List.of()));
 
 			service.listStudents(
-					new StudentListFilters(null, null, "any-grade"),
+					new StudentListFilters(null, null, "any-grade", null, null),
 					Pageable.unpaged());
 
 			verify(studentRepository).findAll(any(Specification.class), any(Pageable.class));

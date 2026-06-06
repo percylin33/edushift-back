@@ -5,6 +5,8 @@ import com.edushift.modules.students.dto.StudentListFilters;
 import com.edushift.modules.students.dto.StudentListItem;
 import com.edushift.modules.students.dto.StudentResponse;
 import com.edushift.modules.students.dto.UpdateStudentRequest;
+import com.edushift.modules.students.enrollments.entity.StudentEnrollment;
+import com.edushift.modules.students.enrollments.entity.StudentEnrollmentStatus;
 import com.edushift.modules.students.entity.DocumentType;
 import com.edushift.modules.students.entity.Student;
 import com.edushift.modules.students.mapper.StudentMapper;
@@ -12,7 +14,9 @@ import com.edushift.modules.students.repository.StudentRepository;
 import com.edushift.modules.students.service.StudentService;
 import com.edushift.shared.exception.ConflictException;
 import com.edushift.shared.exception.ResourceNotFoundException;
+import jakarta.persistence.criteria.JoinType;
 import jakarta.persistence.criteria.Predicate;
+import jakarta.persistence.criteria.Subquery;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -232,6 +236,12 @@ public class StudentServiceImpl implements StudentService {
 			if (f.enrollmentStatus() != null) {
 				spec = spec.and(byEnrollmentStatus(f.enrollmentStatus()));
 			}
+			if (f.currentSectionPublicUuid() != null
+					|| f.currentAcademicYearPublicUuid() != null) {
+				spec = spec.and(byActiveEnrollment(
+						f.currentSectionPublicUuid(),
+						f.currentAcademicYearPublicUuid()));
+			}
 			return spec;
 		}
 
@@ -248,6 +258,47 @@ public class StudentServiceImpl implements StudentService {
 		private static Specification<Student> byEnrollmentStatus(
 				com.edushift.modules.students.entity.EnrollmentStatus status) {
 			return (root, q, cb) -> cb.equal(root.get("enrollmentStatus"), status);
+		}
+
+		/**
+		 * Restricts the list to students that have at least one ACTIVE
+		 * {@link StudentEnrollment} matching the supplied
+		 * {@code (sectionPublicUuid?, academicYearPublicUuid?)} pair.
+		 *
+		 * <p>Implementation note: we use an EXISTS subquery instead of
+		 * a JOIN so the {@code count()} variant Spring Data issues for
+		 * pagination doesn't trip on duplicate rows when a single
+		 * student has multiple historical enrollments. Hibernate's
+		 * tenant discriminator is applied on both the outer
+		 * {@code Student} root and the inner {@code StudentEnrollment}
+		 * subquery, so cross-tenant ids collapse to "no match".</p>
+		 */
+		private static Specification<Student> byActiveEnrollment(
+				UUID sectionPublicUuid, UUID academicYearPublicUuid) {
+			return (root, q, cb) -> {
+				if (q == null) return cb.conjunction();
+				Subquery<UUID> sub = q.subquery(UUID.class);
+				var enr = sub.from(StudentEnrollment.class);
+				sub.select(enr.get("id"));
+
+				Predicate sameStudent = cb.equal(enr.get("student"), root);
+				Predicate active = cb.equal(enr.get("status"),
+						StudentEnrollmentStatus.ACTIVE);
+
+				Predicate matchSection = sectionPublicUuid == null
+						? cb.conjunction()
+						: cb.equal(
+								enr.join("section", JoinType.INNER).get("publicUuid"),
+								sectionPublicUuid);
+				Predicate matchYear = academicYearPublicUuid == null
+						? cb.conjunction()
+						: cb.equal(
+								enr.join("academicYear", JoinType.INNER).get("publicUuid"),
+								academicYearPublicUuid);
+
+				sub.where(cb.and(sameStudent, active, matchSection, matchYear));
+				return cb.exists(sub);
+			};
 		}
 	}
 }

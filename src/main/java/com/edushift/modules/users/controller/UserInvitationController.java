@@ -79,7 +79,16 @@ public class UserInvitationController {
 	public ResponseEntity<ApiResponse<InvitationResponse>> create(
 			@Valid @RequestBody CreateInvitationRequest request
 	) {
-		InvitationResponse response = service.createInvitation(request);
+		// Strip `metadata` here on purpose: the public API surface MUST NOT
+		// let admins inject arbitrary side-channel keys (e.g. teacherId) —
+		// only internal callers (TeacherServiceImpl.invite, ...) populate
+		// metadata via the no-metadata constructor.
+		InvitationResponse response = service.createInvitation(
+				new CreateInvitationRequest(
+						request.email(),
+						request.firstName(),
+						request.lastName(),
+						request.roles()));
 		return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.ok(response));
 	}
 

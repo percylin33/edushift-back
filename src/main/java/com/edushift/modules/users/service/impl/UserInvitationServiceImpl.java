@@ -20,17 +20,21 @@ import com.edushift.modules.users.service.UserInvitationService;
 import com.edushift.shared.exception.BusinessException;
 import com.edushift.shared.exception.ConflictException;
 import com.edushift.shared.exception.GoneException;
+import com.edushift.modules.users.events.InvitationAcceptedEvent;
 import com.edushift.shared.exception.ResourceNotFoundException;
 import com.edushift.shared.multitenancy.TenantContext;
 import java.security.SecureRandom;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Base64;
+import java.util.HashMap;
 import java.util.LinkedHashSet;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -74,6 +78,7 @@ public class UserInvitationServiceImpl implements UserInvitationService {
 	private final TenantRepository tenantRepository;
 	private final AuthService authService;
 	private final PasswordEncoder passwordEncoder;
+	private final ApplicationEventPublisher eventPublisher;
 	private final TransactionTemplate txTemplate;
 	private final SecureRandom secureRandom = new SecureRandom();
 
@@ -84,6 +89,7 @@ public class UserInvitationServiceImpl implements UserInvitationService {
 			TenantRepository tenantRepository,
 			AuthService authService,
 			PasswordEncoder passwordEncoder,
+			ApplicationEventPublisher eventPublisher,
 			PlatformTransactionManager txManager
 	) {
 		this.invitationRepository = invitationRepository;
@@ -92,6 +98,7 @@ public class UserInvitationServiceImpl implements UserInvitationService {
 		this.tenantRepository = tenantRepository;
 		this.authService = authService;
 		this.passwordEncoder = passwordEncoder;
+		this.eventPublisher = eventPublisher;
 		this.txTemplate = new TransactionTemplate(txManager);
 	}
 
@@ -126,6 +133,11 @@ public class UserInvitationServiceImpl implements UserInvitationService {
 				.collect(Collectors.toCollection(LinkedHashSet::new)));
 		invitation.setToken(generateToken());
 		invitation.setExpiresAt(now.plus(TOKEN_TTL));
+		// Internal-only side-channel; the public controller strips this
+		// before calling us. See `UserInvitationController.create`.
+		if (request.metadata() != null && !request.metadata().isEmpty()) {
+			invitation.setMetadata(new HashMap<>(request.metadata()));
+		}
 
 		UserInvitation saved = invitationRepository.save(invitation);
 		log.info("[invitations] created -- publicUuid={} email='{}' expires={}",
@@ -233,6 +245,23 @@ public class UserInvitationServiceImpl implements UserInvitationService {
 					.orElseThrow(() -> new ResourceNotFoundException("Invitation", invitationId));
 			tracked.markAccepted(now);
 			invitationRepository.save(tracked);
+
+			// Publish the accepted event SYNCHRONOUSLY inside the same
+			// transaction so domain listeners (teachers.onAccept, ...)
+			// can perform their atomic linking — see Sprint 4 / BE-4.6
+			// where TeacherInvitationListener consumes
+			// metadata.teacherId to set teacher.user_id in the same tx.
+			Map<String, Object> metadataSnapshot = tracked.getMetadata() == null
+					? Map.of()
+					: Map.copyOf(tracked.getMetadata());
+			eventPublisher.publishEvent(new InvitationAcceptedEvent(
+					tracked.getId(),
+					tracked.getPublicUuid(),
+					savedUser.getId(),
+					savedUser.getPublicUuid(),
+					tenantId,
+					metadataSnapshot,
+					now));
 
 			log.info("[invitations] accepted -- publicUuid={} userId={} tenant={}",
 					tracked.getPublicUuid(), savedUser.getPublicUuid(), tenantId);

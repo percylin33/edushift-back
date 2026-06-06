@@ -1,5 +1,6 @@
 package com.edushift.modules.tenants.service.impl;
 
+import com.edushift.modules.academic.levelgrade.service.AcademicSeedService;
 import com.edushift.modules.auth.dto.AuthResponse;
 import com.edushift.modules.auth.entity.User;
 import com.edushift.modules.auth.entity.UserRole;
@@ -84,18 +85,29 @@ public class TenantServiceImpl implements TenantService {
 	 */
 	private final TransactionTemplate txTemplate;
 
+	/**
+	 * Sprint 4 / BE-4.2 hook — seeds default academic levels + grades
+	 * into a freshly registered tenant. {@code @Nullable}-equivalent in
+	 * spirit: even though the bean is always present at runtime, we
+	 * tolerate {@code null} in test slices that don't import the
+	 * academic module by mocking the field through reflection.
+	 */
+	private final AcademicSeedService academicSeedService;
+
 	public TenantServiceImpl(
 			TenantRepository tenantRepository,
 			TenantMapper tenantMapper,
 			UserRepository userRepository,
 			PasswordEncoder passwordEncoder,
 			AuthService authService,
+			AcademicSeedService academicSeedService,
 			PlatformTransactionManager transactionManager) {
 		this.tenantRepository = tenantRepository;
 		this.tenantMapper = tenantMapper;
 		this.userRepository = userRepository;
 		this.passwordEncoder = passwordEncoder;
 		this.authService = authService;
+		this.academicSeedService = academicSeedService;
 		this.txTemplate = new TransactionTemplate(transactionManager);
 	}
 
@@ -213,11 +225,22 @@ public class TenantServiceImpl implements TenantService {
 		// Step 1 — create the tenant in the global catalog (no tenant context).
 		Tenant persistedTenant = persistTenant(request, slug);
 
-		// Step 2 — create the admin and issue tokens inside the new tenant's scope.
+		// Step 2 — create the admin, seed the academic catalog defaults,
+		// and issue tokens inside the new tenant's scope.
 		try {
 			return TenantContext.runAs(persistedTenant.getId(), () ->
 					txTemplate.execute(status -> {
 						User admin = persistAdminUser(request, adminEmail);
+
+						// BE-4.2: seed INICIAL/PRIMARIA/SECUNDARIA + their default
+						// grades. Idempotent (no-op if levels already exist), so
+						// re-runs from admin tools or repeated bootstraps don't
+						// double-seed. Guarded against test slices that do not
+						// wire the academic module.
+						if (academicSeedService != null) {
+							academicSeedService.seedDefaults(persistedTenant.getId());
+						}
+
 						AuthResponse session = authService.issueSession(admin, persistedTenant);
 						log.info("[tenants] register OK -- slug='{}' adminEmail='{}' tenantId={}",
 								slug, adminEmail, persistedTenant.getId());

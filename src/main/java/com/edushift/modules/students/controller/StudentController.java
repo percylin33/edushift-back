@@ -70,20 +70,28 @@ public class StudentController {
 			summary = "List students in the current tenant (TENANT_ADMIN)",
 			description = "Paginated list with optional filters: case-insensitive "
 					+ "substring search across firstName/lastName/documentNumber, "
-					+ "exact enrollmentStatus, and gradeLevelId (passed through "
-					+ "for forward-compat; honoured starting Sprint 4)."
+					+ "exact enrollmentStatus, gradeLevelId (forward-compat, "
+					+ "ignored), currentSectionId and currentAcademicYearId "
+					+ "(BE-4.8; restrict to students with an ACTIVE enrollment "
+					+ "matching the given section / year)."
 	)
 	public ResponseEntity<Page<StudentListItem>> list(
 			@Parameter(description = "Substring match on firstName/lastName/documentNumber")
 			@RequestParam(required = false) String search,
 			@Parameter(description = "Filter by exact enrollment status")
 			@RequestParam(required = false) EnrollmentStatus enrollmentStatus,
-			@Parameter(description = "Forward-compat: ignored until Sprint 4")
+			@Parameter(description = "Forward-compat: ignored")
 			@RequestParam(required = false) String gradeLevelId,
+			@Parameter(description = "Restrict to students with an ACTIVE enrollment in this section (publicUuid)")
+			@RequestParam(required = false) UUID currentSectionId,
+			@Parameter(description = "Restrict to students with an ACTIVE enrollment in this academic year (publicUuid)")
+			@RequestParam(required = false) UUID currentAcademicYearId,
 			@PageableDefault(size = 20, sort = "lastName", direction = Sort.Direction.ASC)
 			Pageable pageable
 	) {
-		StudentListFilters filters = new StudentListFilters(search, enrollmentStatus, gradeLevelId);
+		StudentListFilters filters = new StudentListFilters(
+				search, enrollmentStatus, gradeLevelId,
+				currentSectionId, currentAcademicYearId);
 		return ResponseEntity.ok(service.listStudents(filters, pageable));
 	}
 
