@@ -57,11 +57,14 @@ ENV SPRING_PROFILES_ACTIVE=prod \
     JAVA_OPTS="" \
     JAVA_TOOL_OPTIONS="-XX:+UseContainerSupport -XX:MaxRAMPercentage=75 -XX:InitialRAMPercentage=50 -XX:+ExitOnOutOfMemoryError -Djava.security.egd=file:/dev/./urandom"
 
-# Orden: capas más estables primero (mejor cache)
-COPY --from=extractor --chown=edushift:edushift /extracted/app/dependencies/ ./
-COPY --from=extractor --chown=edushift:edushift /extracted/app/spring-boot-loader/ ./
-COPY --from=extractor --chown=edushift:edushift /extracted/app/snapshot-dependencies/ ./
-COPY --from=extractor --chown=edushift:edushift /extracted/app/application/ ./
+# Orden: capas más estables primero (mejor cache).
+# `java -Djarmode=tools ... extract --layers --destination /extracted`
+# (Spring Boot 3.3+) deja las capas planas en /extracted/<layer>/, sin
+# un subdirectorio `app/` intermedio (eso era del viejo jarmode=layertools).
+COPY --from=extractor --chown=edushift:edushift /extracted/dependencies/ ./
+COPY --from=extractor --chown=edushift:edushift /extracted/spring-boot-loader/ ./
+COPY --from=extractor --chown=edushift:edushift /extracted/snapshot-dependencies/ ./
+COPY --from=extractor --chown=edushift:edushift /extracted/application/ ./
 
 USER edushift
 

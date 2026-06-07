@@ -61,6 +61,10 @@ services:
       - "300 10"
     environment:
       TZ: UTC
+      # Necesaria DENTRO del container para que el healthcheck use el mismo
+      # password con que se levantó redis-server (via --requirepass arriba).
+      # Sin esto el healthcheck manda string vacío y Redis responde WRONGPASS.
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
     volumes:
       - redis-data:/data
     networks:
@@ -146,7 +150,10 @@ services:
       FIREBASE_DATABASE_URL: ${FIREBASE_DATABASE_URL:-}
       FIREBASE_STORAGE_BUCKET: ${FIREBASE_STORAGE_BUCKET:-}
       # Logging
-      LOG_PATH: ${LOG_PATH:-/var/log/edushift}
+      # LOG_PATH se hardcodea a un path absoluto dentro del container.
+      # No usar ${LOG_PATH} aquí: en .env apunta a "./logs" (path relativo
+      # válido sólo cuando el JAR corre nativo en Windows) y rompe el mount.
+      LOG_PATH: /var/log/edushift
       LOG_LEVEL_ROOT: ${LOG_LEVEL_ROOT:-INFO}
       LOG_LEVEL_APP: ${LOG_LEVEL_APP:-INFO}
       # JVM
@@ -155,7 +162,9 @@ services:
     ports:
       - "${BACKEND_HOST_PORT:-8080}:8080"
     volumes:
-      - backend-logs:${LOG_PATH:-/var/log/edushift}
+      # Path absoluto del container; debe coincidir con el LOG_PATH
+      # inyectado a la app (ver environment.LOG_PATH arriba).
+      - backend-logs:/var/log/edushift
     networks:
       - edushift-net
     healthcheck:
