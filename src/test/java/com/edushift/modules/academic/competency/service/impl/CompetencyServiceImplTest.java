@@ -20,6 +20,7 @@ import com.edushift.modules.academic.competency.entity.Competency;
 import com.edushift.modules.academic.competency.mapper.CompetencyMapper;
 import com.edushift.modules.academic.competency.repository.CapacityRepository;
 import com.edushift.modules.academic.competency.repository.CompetencyRepository;
+import com.edushift.modules.sessions.learning.repository.LearningSessionRepository;
 import com.edushift.modules.academic.course.entity.Course;
 import com.edushift.modules.academic.course.repository.CourseRepository;
 import com.edushift.shared.exception.ConflictException;
@@ -55,6 +56,7 @@ class CompetencyServiceImplTest {
 	@Mock private CompetencyRepository competencyRepository;
 	@Mock private CapacityRepository capacityRepository;
 	@Mock private CourseRepository courseRepository;
+	@Mock private LearningSessionRepository sessionRepository;
 	@Spy private CompetencyMapper mapper = new CompetencyMapper();
 
 	@InjectMocks private CompetencyServiceImpl service;

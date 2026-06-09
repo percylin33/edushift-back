@@ -18,6 +18,7 @@ import com.edushift.modules.academic.unit.dto.UpdateUnitRequest;
 import com.edushift.modules.academic.unit.entity.Unit;
 import com.edushift.modules.academic.unit.mapper.UnitMapper;
 import com.edushift.modules.academic.unit.repository.UnitRepository;
+import com.edushift.modules.sessions.learning.repository.LearningSessionRepository;
 import com.edushift.shared.exception.BadRequestException;
 import com.edushift.shared.exception.ConflictException;
 import com.edushift.shared.exception.ResourceNotFoundException;
@@ -52,6 +53,7 @@ class UnitServiceImplTest {
 
 	@Mock private UnitRepository unitRepository;
 	@Mock private CourseRepository courseRepository;
+	@Mock private LearningSessionRepository sessionRepository;
 	@Spy private UnitMapper mapper = new UnitMapper();
 
 	@InjectMocks private UnitServiceImpl service;

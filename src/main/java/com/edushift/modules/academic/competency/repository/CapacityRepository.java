@@ -38,4 +38,7 @@ public interface CapacityRepository extends JpaRepository<Capacity, UUID> {
 	@Query("select coalesce(max(c.displayOrder), 0) from Capacity c "
 			+ "where c.competency = :competency")
 	Integer findMaxDisplayOrderForCompetency(@Param("competency") Competency competency);
+
+	@Query("select c from Capacity c where c.publicUuid in :uuids")
+	List<Capacity> findAllByPublicUuidIn(@Param("uuids") List<UUID> uuids);
 }

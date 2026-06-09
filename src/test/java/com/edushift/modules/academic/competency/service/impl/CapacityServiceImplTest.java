@@ -18,6 +18,7 @@ import com.edushift.modules.academic.competency.mapper.CapacityMapper;
 import com.edushift.modules.academic.competency.repository.CapacityRepository;
 import com.edushift.modules.academic.competency.repository.CompetencyRepository;
 import com.edushift.modules.academic.course.entity.Course;
+import com.edushift.modules.sessions.learning.repository.LearningSessionRepository;
 import com.edushift.shared.exception.ConflictException;
 import com.edushift.shared.exception.ResourceNotFoundException;
 import java.lang.reflect.Field;
@@ -48,6 +49,7 @@ class CapacityServiceImplTest {
 
 	@Mock private CapacityRepository capacityRepository;
 	@Mock private CompetencyRepository competencyRepository;
+	@Mock private LearningSessionRepository sessionRepository;
 	@Spy private CapacityMapper mapper = new CapacityMapper();
 
 	@InjectMocks private CapacityServiceImpl service;

@@ -13,6 +13,7 @@ import com.edushift.modules.academic.competency.repository.CompetencyRepository;
 import com.edushift.modules.academic.competency.service.CompetencyService;
 import com.edushift.modules.academic.course.entity.Course;
 import com.edushift.modules.academic.course.repository.CourseRepository;
+import com.edushift.modules.sessions.learning.repository.LearningSessionRepository;
 import com.edushift.shared.exception.ConflictException;
 import com.edushift.shared.exception.ResourceNotFoundException;
 import java.util.HashSet;
@@ -32,8 +33,8 @@ import org.springframework.transaction.annotation.Transactional;
  * Default implementation of {@link CompetencyService}.
  *
  * <p>Mirrors {@code UnitServiceImpl} (BE-5A.1): two-pass reorder, anti-
- * enumeration on cross-course UUIDs, placeholder for sessions count
- * until BE-5A.4 wires up.</p>
+ * enumeration on cross-course UUIDs, and (since BE-5A.4) a real
+ * sessions-count probe for {@code COMPETENCY_IN_USE_BY_SESSIONS}.</p>
  */
 @Slf4j
 @Service
@@ -43,6 +44,7 @@ public class CompetencyServiceImpl implements CompetencyService {
 	private final CompetencyRepository competencyRepository;
 	private final CapacityRepository capacityRepository;
 	private final CourseRepository courseRepository;
+	private final LearningSessionRepository sessionRepository;
 	private final CompetencyMapper mapper;
 
 	// =========================================================================
@@ -310,11 +312,11 @@ public class CompetencyServiceImpl implements CompetencyService {
 	}
 
 	/**
-	 * Placeholder until BE-5A.4 wires up. Same rationale as
-	 * {@code UnitServiceImpl.countSessionsByUnit}.
+	 * Active session count used by {@link #deleteCompetency(UUID)}
+	 * to surface {@code COMPETENCY_IN_USE_BY_SESSIONS} (409). Wired
+	 * to {@link LearningSessionRepository} since BE-5A.4.
 	 */
 	private long countSessionsByCompetency(Competency competency) {
-		// TODO BE-5A.4: replace with LearningSessionRepository.countActiveByCompetency(competency)
-		return 0L;
+		return sessionRepository.countActiveByCompetency(competency);
 	}
 }

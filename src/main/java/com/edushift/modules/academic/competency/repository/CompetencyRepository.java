@@ -39,4 +39,7 @@ public interface CompetencyRepository extends JpaRepository<Competency, UUID> {
 
 	@Query("select count(c) from Competency c where c.course = :course")
 	long countByCourse(@Param("course") Course course);
+
+	@Query("select c from Competency c where c.publicUuid in :uuids")
+	List<Competency> findAllByPublicUuidIn(@Param("uuids") List<UUID> uuids);
 }

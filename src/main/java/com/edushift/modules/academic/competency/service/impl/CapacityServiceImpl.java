@@ -10,6 +10,7 @@ import com.edushift.modules.academic.competency.mapper.CapacityMapper;
 import com.edushift.modules.academic.competency.repository.CapacityRepository;
 import com.edushift.modules.academic.competency.repository.CompetencyRepository;
 import com.edushift.modules.academic.competency.service.CapacityService;
+import com.edushift.modules.sessions.learning.repository.LearningSessionRepository;
 import com.edushift.shared.exception.ConflictException;
 import com.edushift.shared.exception.ResourceNotFoundException;
 import java.util.HashSet;
@@ -37,6 +38,7 @@ public class CapacityServiceImpl implements CapacityService {
 
 	private final CapacityRepository capacityRepository;
 	private final CompetencyRepository competencyRepository;
+	private final LearningSessionRepository sessionRepository;
 	private final CapacityMapper mapper;
 
 	// =========================================================================
@@ -255,7 +257,6 @@ public class CapacityServiceImpl implements CapacityService {
 	}
 
 	private long countSessionsByCapacity(Capacity capacity) {
-		// TODO BE-5A.4: replace with LearningSessionRepository.countActiveByCapacity(capacity)
-		return 0L;
+		return sessionRepository.countActiveByCapacity(capacity);
 	}
 }

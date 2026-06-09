@@ -11,10 +11,12 @@ import com.edushift.modules.academic.unit.entity.Unit;
 import com.edushift.modules.academic.unit.mapper.UnitMapper;
 import com.edushift.modules.academic.unit.repository.UnitRepository;
 import com.edushift.modules.academic.unit.service.UnitService;
+import com.edushift.modules.sessions.learning.repository.LearningSessionRepository;
 import com.edushift.shared.exception.BadRequestException;
 import com.edushift.shared.exception.ConflictException;
 import com.edushift.shared.exception.ResourceNotFoundException;
 import java.time.LocalDate;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -40,11 +42,10 @@ import org.springframework.transaction.annotation.Transactional;
  * the {@code chk_academic_units_display_order_positive (display_order >= 1)}
  * CHECK.
  *
- * <h3>{@code UNIT_HAS_SESSIONS} placeholder</h3>
- * Until BE-5A.4 lands, {@link #countSessionsByUnit(Unit)} always
- * returns {@code 0L}. The service still emits {@code UNIT_HAS_SESSIONS}
- * (409) as soon as a real {@code LearningSessionRepository} is wired
- * here — only the count helper changes.
+ * <h3>{@code UNIT_HAS_SESSIONS} (live since BE-5A.4)</h3>
+ * Wired to {@link LearningSessionRepository#countActiveByUnit(Unit)}.
+ * A unit can be hard-deleted only when no non-cancelled
+ * {@code LearningSession} references it.
  */
 @Slf4j
 @Service
@@ -53,6 +54,7 @@ public class UnitServiceImpl implements UnitService {
 
 	private final UnitRepository unitRepository;
 	private final CourseRepository courseRepository;
+	private final LearningSessionRepository sessionRepository;
 	private final UnitMapper mapper;
 
 	// =========================================================================
@@ -303,26 +305,23 @@ public class UnitServiceImpl implements UnitService {
 	}
 
 	/**
-	 * Hot path: bulk-count sessions for a list of units.
-	 *
-	 * <p><strong>Placeholder until BE-5A.4 (LearningSessions).</strong>
-	 * Returns an empty map so the rest of the pipeline degrades to
-	 * {@code sessionCount = 0}. When the LearningSessions module lands,
-	 * inject {@code LearningSessionRepository} and replace this with a
-	 * single grouped count query
-	 * ({@code GROUP BY unit_id WHERE unit IN (:units) AND deleted=false}).</p>
+	 * Hot path: bulk-count active sessions per unit, used by the list
+	 * endpoint to render badges without N+1 queries.
 	 */
 	private Map<UUID, Long> batchSessionCounts(List<Unit> units) {
-		// TODO BE-5A.4: replace with LearningSessionRepository.countActiveByUnitIn(units)
-		return Map.of();
+		if (units == null || units.isEmpty()) return Map.of();
+		Map<UUID, Long> result = new HashMap<>();
+		for (Object[] row : sessionRepository.countActiveByUnitIn(units)) {
+			result.put((UUID) row[0], ((Number) row[1]).longValue());
+		}
+		return result;
 	}
 
 	/**
-	 * Per-unit count helper. Same placeholder rationale as
-	 * {@link #batchSessionCounts(List)}.
+	 * Per-unit active session count used by {@link #deleteUnit(UUID)}
+	 * to surface {@code UNIT_HAS_SESSIONS} (409).
 	 */
 	private long countSessionsByUnit(Unit unit) {
-		// TODO BE-5A.4: replace with LearningSessionRepository.countActiveByUnit(unit)
-		return 0L;
+		return sessionRepository.countActiveByUnit(unit);
 	}
 }
