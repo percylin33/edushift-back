@@ -11,6 +11,7 @@ public final class ModuleNames {
 	public static final String STUDENTS = "students";
 	public static final String TEACHERS = "teachers";
 	public static final String ACADEMIC = "academic";
+	public static final String EVALUATIONS = "evaluations";
 	public static final String ATTENDANCE = "attendance";
 	public static final String PAYMENTS = "payments";
 	public static final String AI = "ai";
