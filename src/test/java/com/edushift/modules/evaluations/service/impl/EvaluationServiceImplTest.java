@@ -59,6 +59,10 @@ class EvaluationServiceImplTest {
 	@Mock private TeacherAssignmentRepository assignmentRepository;
 	@Mock private UnitRepository unitRepository;
 	@Mock private LearningSessionRepository sessionRepository;
+	// BE-5B.3 wired: deleteEvaluation now consults this repo to surface
+	// EVAL_HAS_GRADES (409). Default Mockito returns 'false' for boolean
+	// methods, so existing tests that don't care keep working unchanged.
+	@Mock private com.edushift.modules.evaluations.graderecord.repository.GradeRecordRepository gradeRecordRepository;
 	@Spy private EvaluationMapper mapper = new EvaluationMapper();
 
 	@InjectMocks private EvaluationServiceImpl service;
@@ -461,13 +465,15 @@ class EvaluationServiceImplTest {
 	class DeleteEvaluation {
 
 		@Test
-		@DisplayName("happy path — placeholder GradeRecord count is 0, soft-deletes")
+		@DisplayName("happy path — soft-deletes when no GradeRecords are attached")
 		void happyPath() {
 			TeacherAssignment assignment = newAssignment(newCourse("MAT"));
 			Evaluation existing = newEvaluation(assignment, "Tarea 1",
 					EvaluationKind.TASK, EvaluationScale.SCORE_0_20);
 			when(evaluationRepository.findByPublicUuid(existing.getPublicUuid()))
 					.thenReturn(Optional.of(existing));
+			// BE-5B.3 wiring: explicit "no grades attached" stub for clarity.
+			when(gradeRecordRepository.existsByEvaluation(existing)).thenReturn(false);
 
 			service.deleteEvaluation(existing.getPublicUuid());
 
@@ -483,6 +489,24 @@ class EvaluationServiceImplTest {
 
 			assertThatThrownBy(() -> service.deleteEvaluation(anyUuid))
 					.isInstanceOf(ResourceNotFoundException.class);
+		}
+
+		@Test
+		@DisplayName("attached GradeRecords → 409 EVAL_HAS_GRADES (BE-5B.3 guard)")
+		void hasGrades() {
+			TeacherAssignment assignment = newAssignment(newCourse("MAT"));
+			Evaluation existing = newEvaluation(assignment, "Tarea 1",
+					EvaluationKind.TASK, EvaluationScale.SCORE_0_20);
+			when(evaluationRepository.findByPublicUuid(existing.getPublicUuid()))
+					.thenReturn(Optional.of(existing));
+			when(gradeRecordRepository.existsByEvaluation(existing)).thenReturn(true);
+
+			assertThatThrownBy(() -> service.deleteEvaluation(existing.getPublicUuid()))
+					.isInstanceOf(com.edushift.shared.exception.ConflictException.class)
+					.hasFieldOrPropertyWithValue("code",
+							com.edushift.modules.evaluations.error
+									.EvaluationErrorCodes.EVAL_HAS_GRADES);
+			verify(evaluationRepository, org.mockito.Mockito.never()).delete(existing);
 		}
 	}
 

@@ -4,6 +4,7 @@ import com.edushift.modules.academic.section.entity.Section;
 import com.edushift.modules.academic.year.entity.AcademicYear;
 import com.edushift.modules.students.enrollments.entity.StudentEnrollment;
 import com.edushift.modules.students.entity.Student;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -83,4 +84,29 @@ public interface StudentEnrollmentRepository extends JpaRepository<StudentEnroll
 			  and e.status = com.edushift.modules.students.enrollments.entity.StudentEnrollmentStatus.ACTIVE
 			""")
 	boolean existsActiveBySection(@Param("section") Section section);
+
+	/**
+	 * Was the student ACTIVE-enrolled in the given section on
+	 * {@code date}? "Active on a date" means: the row's
+	 * {@code enrolledAt <= date} and either {@code withdrawnAt} is
+	 * {@code null} or strictly after {@code date}, regardless of the
+	 * enrollment's current status (a transferred student is still
+	 * "enrolled at" the day before transfer).
+	 *
+	 * <p>Backs the {@code GRADE_STUDENT_NOT_ENROLLED} guard in the
+	 * {@code evaluations.graderecord} sub-module (BE-5B.3): a teacher
+	 * cannot register a grade for a student who wasn't part of the
+	 * section on the evaluation's {@code scheduledDate}.
+	 */
+	@Query("""
+			select count(e) > 0 from StudentEnrollment e
+			where e.student = :student
+			  and e.section = :section
+			  and e.enrolledAt <= :date
+			  and (e.withdrawnAt is null or e.withdrawnAt > :date)
+			""")
+	boolean existsActiveAt(
+			@Param("student") Student student,
+			@Param("section") Section section,
+			@Param("date") LocalDate date);
 }

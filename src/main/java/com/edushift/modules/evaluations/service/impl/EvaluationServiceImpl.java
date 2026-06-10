@@ -12,6 +12,7 @@ import com.edushift.modules.evaluations.entity.EvaluationKind;
 import com.edushift.modules.evaluations.entity.EvaluationScale;
 import com.edushift.modules.evaluations.entity.EvaluationStatus;
 import com.edushift.modules.evaluations.error.EvaluationErrorCodes;
+import com.edushift.modules.evaluations.graderecord.repository.GradeRecordRepository;
 import com.edushift.modules.evaluations.mapper.EvaluationMapper;
 import com.edushift.modules.evaluations.repository.EvaluationRepository;
 import com.edushift.modules.evaluations.service.EvaluationService;
@@ -63,6 +64,7 @@ public class EvaluationServiceImpl implements EvaluationService {
 	private final TeacherAssignmentRepository assignmentRepository;
 	private final UnitRepository unitRepository;
 	private final LearningSessionRepository sessionRepository;
+	private final GradeRecordRepository gradeRecordRepository;
 	private final EvaluationMapper mapper;
 
 	// =========================================================================
@@ -296,12 +298,16 @@ public class EvaluationServiceImpl implements EvaluationService {
 	public void deleteEvaluation(UUID publicUuid) {
 		Evaluation evaluation = loadEvaluation(publicUuid);
 
-		// Placeholder for BE-5B.3 — the {@code EVAL_HAS_GRADES} guard
-		// will live in {@code GradeRecordRepository.existsByEvaluation}.
-		// For now the count is always 0, so deletes are allowed.
-		// if (gradeRecordRepository.existsByEvaluation(evaluation)) {
-		//     throw new ConflictException(EVAL_HAS_GRADES, "...");
-		// }
+		// BE-5B.3 — guard delete when there are GradeRecords attached.
+		// Soft-delete on the evaluation would orphan the grade rows
+		// (audit-history pollution + risk of leaving them invisible
+		// while still occupying the unique (eval, student) slot).
+		if (gradeRecordRepository.existsByEvaluation(evaluation)) {
+			throw new ConflictException(EvaluationErrorCodes.EVAL_HAS_GRADES,
+					"Evaluation " + publicUuid
+							+ " has grade records attached; delete the grades first"
+							+ " or close the evaluation");
+		}
 
 		evaluationRepository.delete(evaluation);
 		log.info("[evaluations] deleted -- publicUuid={} status={}",
