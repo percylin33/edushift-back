@@ -153,11 +153,18 @@ public class RubricController {
 			description = "Source must be a system rubric (is_system=true). "
 					+ "400 RUB_CANNOT_FORK_NON_SYSTEM otherwise. The fork is "
 					+ "fully editable; criteria/levels can be overridden via "
-					+ "the request body (otherwise copied from the source)."
+					+ "the request body (otherwise copied from the source). "
+					+ "All body fields are optional on fork: empty body "
+					+ "produces an exact copy with a '(fork)' suffix on the "
+					+ "name. Bean Validation on this endpoint is intentionally "
+					+ "disabled — the service runs the same shape validation "
+					+ "({@code RubricValidationService.assertShapeValid}) on "
+					+ "the merged criteria/levels, so a partial body cannot "
+					+ "produce an invalid rubric."
 	)
 	public ResponseEntity<ApiResponse<RubricResponse>> fork(
 			@PathVariable UUID publicUuid,
-			@Valid @RequestBody(required = false) CreateRubricRequest request
+			@RequestBody(required = false) CreateRubricRequest request
 	) {
 		RubricResponse response = service.forkRubric(publicUuid, request);
 		return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.ok(response));

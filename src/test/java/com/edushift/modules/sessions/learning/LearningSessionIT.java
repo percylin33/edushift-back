@@ -513,7 +513,7 @@ class LearningSessionIT extends IntegrationTest {
 			Section savedSection = sectionRepository.saveAndFlush(section);
 
 			Course course = new Course();
-			course.setCode("MAT-IT-S");
+			course.setCode("MAT_IT_S");
 			course.setName("Matemática IT Sessions");
 			course.setIsActive(true);
 			Course savedCourse = courseRepository.saveAndFlush(course);

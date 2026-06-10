@@ -50,9 +50,13 @@ import org.springframework.transaction.annotation.Transactional;
  *   <li>Editability matrix for {@code PUT}: {@code DRAFT} = any field;
  *       {@code PUBLISHED} = only {@code description} / {@code dueDate};
  *       {@code CLOSED} = no fields (rejected with {@code EVAL_CLOSED}).</li>
- *   <li>Soft-delete with the {@code EVAL_HAS_GRADES} guard (BE-5B.3 will
- *       light this up; for now the count is always 0 and the guard is
- *       a no-op pass-through).</li>
+ *   <li>Soft-delete with the {@code EVAL_HAS_GRADES} guard (BE-5B.3) — refuses
+ *       deletion when {@code GradeRecord}s point at the row.</li>
+ *   <li>{@code gradeCount} on every read/write response is the live
+ *       count from {@code GradeRecordRepository.countByEvaluation}
+ *       (BE-5B.4 plug). For listings the count is per-row (N+1
+ *       acceptable for the current page sizes; tracked as
+ *       DEBT-EVAL-N for batch-aggregation when sections grow large).</li>
  * </ul>
  */
 @Slf4j
@@ -90,7 +94,8 @@ public class EvaluationServiceImpl implements EvaluationService {
 
 		if (rows.isEmpty()) return List.of();
 		return rows.stream()
-				.map(e -> mapper.toListItem(e, 0L)) // BE-5B.3 will plug gradeCount
+				.map(e -> mapper.toListItem(e,
+						gradeRecordRepository.countByEvaluation(e)))
 				.toList();
 	}
 
@@ -98,7 +103,8 @@ public class EvaluationServiceImpl implements EvaluationService {
 	@Transactional(readOnly = true)
 	public EvaluationResponse getEvaluation(UUID publicUuid) {
 		Evaluation evaluation = loadEvaluation(publicUuid);
-		return mapper.toResponse(evaluation, 0L); // BE-5B.3 will plug gradeCount
+		return mapper.toResponse(evaluation,
+				gradeRecordRepository.countByEvaluation(evaluation));
 	}
 
 	// =========================================================================
@@ -152,7 +158,11 @@ public class EvaluationServiceImpl implements EvaluationService {
 				saved.getPublicUuid(), assignment.getPublicUuid(),
 				saved.getKind(), saved.getScale(), saved.getStatus());
 
-		return mapper.toResponse(saved, 0L);
+		// gradeCount is necessarily 0 on a fresh row, but we keep the
+		// call to mirror getEvaluation's contract (and future-proof if
+		// we ever stop creating in DRAFT-without-grades).
+		return mapper.toResponse(saved,
+				gradeRecordRepository.countByEvaluation(saved));
 	}
 
 	@Override
@@ -162,7 +172,8 @@ public class EvaluationServiceImpl implements EvaluationService {
 		Evaluation evaluation = loadEvaluation(publicUuid);
 
 		if (request == null || request.isEmpty()) {
-			return mapper.toResponse(evaluation, 0L);
+			return mapper.toResponse(evaluation,
+					gradeRecordRepository.countByEvaluation(evaluation));
 		}
 
 		// Lifecycle gate. PUBLISHED only allows description + dueDate
@@ -241,7 +252,8 @@ public class EvaluationServiceImpl implements EvaluationService {
 		log.info("[evaluations] updated -- publicUuid={} status={}",
 				saved.getPublicUuid(), saved.getStatus());
 
-		return mapper.toResponse(saved, 0L);
+		return mapper.toResponse(saved,
+				gradeRecordRepository.countByEvaluation(saved));
 	}
 
 	// =========================================================================
@@ -261,7 +273,8 @@ public class EvaluationServiceImpl implements EvaluationService {
 		log.info("[evaluations] published -- publicUuid={} at={}",
 				saved.getPublicUuid(), saved.getPublishedAt());
 
-		return mapper.toResponse(saved, 0L);
+		return mapper.toResponse(saved,
+				gradeRecordRepository.countByEvaluation(saved));
 	}
 
 	@Override
@@ -286,7 +299,8 @@ public class EvaluationServiceImpl implements EvaluationService {
 		log.info("[evaluations] closed -- publicUuid={} at={}",
 				saved.getPublicUuid(), saved.getClosedAt());
 
-		return mapper.toResponse(saved, 0L);
+		return mapper.toResponse(saved,
+				gradeRecordRepository.countByEvaluation(saved));
 	}
 
 	// =========================================================================

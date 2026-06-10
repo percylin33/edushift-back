@@ -421,7 +421,7 @@ class EvaluationTenantIsolationIT extends IntegrationTest {
 			Section savedSection = sectionRepository.saveAndFlush(section);
 
 			Course course = new Course();
-			course.setCode("MAT-IT-E");
+			course.setCode("MAT_IT_E");
 			course.setName("Matemática IT Evals");
 			course.setIsActive(true);
 			Course savedCourse = courseRepository.saveAndFlush(course);

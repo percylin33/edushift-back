@@ -6,6 +6,9 @@ import com.edushift.modules.evaluations.dto.EvaluationListItem;
 import com.edushift.modules.evaluations.dto.EvaluationResponse;
 import com.edushift.modules.evaluations.dto.UpdateEvaluationRequest;
 import com.edushift.modules.evaluations.entity.EvaluationStatus;
+import com.edushift.modules.evaluations.evaluationrubric.dto.AttachRubricRequest;
+import com.edushift.modules.evaluations.evaluationrubric.service.EvaluationRubricService;
+import com.edushift.modules.evaluations.rubric.dto.RubricResponse;
 import com.edushift.modules.evaluations.service.EvaluationService;
 import com.edushift.shared.api.ApiResponse;
 import io.swagger.v3.oas.annotations.Operation;
@@ -61,6 +64,15 @@ import org.springframework.web.bind.annotation.RestController;
  *   <tr><td>DELETE</td><td>/academic/evaluations/{publicUuid}
  *       </td><td>TENANT_ADMIN, TEACHER</td>
  *       <td>204</td></tr>
+ *   <tr><td>POST  </td><td>/academic/evaluations/{publicUuid}/rubric
+ *       </td><td>TENANT_ADMIN, TEACHER</td>
+ *       <td>{@link RubricResponse} (BE-5B.4)</td></tr>
+ *   <tr><td>GET   </td><td>/academic/evaluations/{publicUuid}/rubric
+ *       </td><td>TENANT_ADMIN, TEACHER</td>
+ *       <td>{@link RubricResponse} (BE-5B.4)</td></tr>
+ *   <tr><td>DELETE</td><td>/academic/evaluations/{publicUuid}/rubric
+ *       </td><td>TENANT_ADMIN, TEACHER</td>
+ *       <td>204 (BE-5B.4)</td></tr>
  * </table>
  *
  * <p>CRUD lives under two roots on purpose, mirroring
@@ -82,6 +94,7 @@ import org.springframework.web.bind.annotation.RestController;
 public class EvaluationController {
 
 	private final EvaluationService service;
+	private final EvaluationRubricService rubricLinkService;
 
 	// =========================================================================
 	// Assignment-scoped routes
@@ -213,6 +226,67 @@ public class EvaluationController {
 	)
 	public ResponseEntity<Void> delete(@PathVariable UUID publicUuid) {
 		service.deleteEvaluation(publicUuid);
+		return ResponseEntity.noContent().build();
+	}
+
+	// =========================================================================
+	// Rubric association (BE-5B.4)
+	// =========================================================================
+
+	@PostMapping("/academic/evaluations/{publicUuid}/rubric")
+	@SecurityRequirement(name = "bearerAuth")
+	@PreAuthorize("hasAnyRole('TENANT_ADMIN','TEACHER')")
+	@Operation(
+			summary = "Attach a rubric to an evaluation (TENANT_ADMIN, TEACHER)",
+			description = "Replace-style upsert: if the evaluation already has a "
+					+ "different rubric attached, the previous link is soft-deleted "
+					+ "and the new one is inserted in the same transaction. "
+					+ "Re-attaching the same rubric is a 200 no-op. "
+					+ "404 RESOURCE_NOT_FOUND if either the evaluation or the rubric "
+					+ "publicUuid is unknown for the tenant (cross-tenant rubrics "
+					+ "collapse here on purpose; we never leak the existence of "
+					+ "another tenant's rubric)."
+	)
+	public ResponseEntity<ApiResponse<RubricResponse>> attachRubric(
+			@PathVariable UUID publicUuid,
+			@Valid @RequestBody AttachRubricRequest request
+	) {
+		return ResponseEntity.ok(
+				ApiResponse.ok(rubricLinkService.attachRubric(publicUuid, request)));
+	}
+
+	@GetMapping("/academic/evaluations/{publicUuid}/rubric")
+	@SecurityRequirement(name = "bearerAuth")
+	@PreAuthorize("hasAnyRole('TENANT_ADMIN','TEACHER')")
+	@Operation(
+			summary = "Get the rubric attached to an evaluation (TENANT_ADMIN, TEACHER)",
+			description = "Returns the full RubricResponse of the currently attached "
+					+ "rubric. 404 RESOURCE_NOT_FOUND if the evaluation publicUuid is "
+					+ "unknown; 404 EVAL_RUBRIC_NOT_SET if the evaluation has no "
+					+ "rubric attached (the FE should render an empty state, not a "
+					+ "404 page)."
+	)
+	public ResponseEntity<ApiResponse<RubricResponse>> getAttachedRubric(
+			@PathVariable UUID publicUuid
+	) {
+		return ResponseEntity.ok(
+				ApiResponse.ok(rubricLinkService.getAttachedRubric(publicUuid)));
+	}
+
+	@DeleteMapping("/academic/evaluations/{publicUuid}/rubric")
+	@ResponseStatus(HttpStatus.NO_CONTENT)
+	@SecurityRequirement(name = "bearerAuth")
+	@PreAuthorize("hasAnyRole('TENANT_ADMIN','TEACHER')")
+	@Operation(
+			summary = "Detach the rubric from an evaluation (TENANT_ADMIN, TEACHER)",
+			description = "Soft-deletes the active rubric attachment. 404 "
+					+ "RESOURCE_NOT_FOUND if the evaluation is unknown; 404 "
+					+ "EVAL_RUBRIC_NOT_SET if there's no rubric attached (calling "
+					+ "DELETE twice is a client bug — we don't make the second call "
+					+ "idempotent on purpose, so the FE notices the state drift)."
+	)
+	public ResponseEntity<Void> detachRubric(@PathVariable UUID publicUuid) {
+		rubricLinkService.detachRubric(publicUuid);
 		return ResponseEntity.noContent().build();
 	}
 }

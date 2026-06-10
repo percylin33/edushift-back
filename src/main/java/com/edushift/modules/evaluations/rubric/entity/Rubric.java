@@ -8,6 +8,7 @@ import jakarta.persistence.ForeignKey;
 import jakarta.persistence.Index;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
+import jakarta.persistence.PrePersist;
 import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
 import java.time.Instant;
@@ -127,4 +128,24 @@ public class Rubric extends TenantAwareEntity {
 
 	@Column(name = "deleted_at")
 	private Instant deletedAt;
+
+	/**
+	 * Auto-assigns {@code publicUuid} on first persist when the caller
+	 * (typically a test seeding through the repository) hasn't provided
+	 * one. The service layer of system-rubric seeding ({@code
+	 * RubricSeedServiceImpl#materializeSystemRubrics}) already sets
+	 * {@code publicUuid} explicitly; this hook is the safety net.
+	 */
+	@PrePersist
+	private void onPrePersist() {
+		if (publicUuid == null) {
+			publicUuid = UUID.randomUUID();
+		}
+		if (isSystem == null) {
+			isSystem = Boolean.FALSE;
+		}
+		if (isActive == null) {
+			isActive = Boolean.TRUE;
+		}
+	}
 }

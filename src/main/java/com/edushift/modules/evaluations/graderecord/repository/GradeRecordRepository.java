@@ -3,6 +3,7 @@ package com.edushift.modules.evaluations.graderecord.repository;
 import com.edushift.modules.evaluations.entity.Evaluation;
 import com.edushift.modules.evaluations.graderecord.entity.GradeRecord;
 import com.edushift.modules.students.entity.Student;
+import com.edushift.modules.teachers.assignments.entity.TeacherAssignment;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -113,4 +114,24 @@ public interface GradeRecordRepository extends JpaRepository<GradeRecord, UUID> 
             where g.evaluation = :evaluation
             """)
     long countByEvaluation(@Param("evaluation") Evaluation evaluation);
+
+    /**
+     * Lists every grade attached to any evaluation under the given
+     * assignment. Used by the grade book aggregate (BE-5B.4) to build
+     * the matrix in a single query (vs N queries on
+     * {@link #findAllByEvaluationPublicUuid}).
+     *
+     * <p>Ordering is by evaluation date desc then by student last name
+     * so the grade book renders in the same order as the
+     * {@code GET /assignments/{uuid}/evaluations} listing.</p>
+     */
+    @Query("""
+            select g from GradeRecord g
+            where g.evaluation.teacherAssignment = :assignment
+            order by g.evaluation.scheduledDate desc,
+                     g.student.lastName asc,
+                     g.student.firstName asc
+            """)
+    List<GradeRecord> findAllByAssignment(
+            @Param("assignment") TeacherAssignment assignment);
 }

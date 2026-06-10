@@ -280,6 +280,27 @@ class EvaluationServiceImplTest {
 		}
 
 		@Test
+		@DisplayName("BE-5B.4 — gradeCount in response reflects "
+				+ "GradeRecordRepository.countByEvaluation")
+		void gradeCountWired() {
+			TeacherAssignment assignment = newAssignment(newCourse("MAT"));
+			Evaluation existing = newEvaluation(assignment, "Tarea 1",
+					EvaluationKind.TASK, EvaluationScale.SCORE_0_20);
+			when(evaluationRepository.findByPublicUuid(existing.getPublicUuid()))
+					.thenReturn(Optional.of(existing));
+			when(evaluationRepository.saveAndFlush(any()))
+					.thenAnswer(inv -> inv.getArgument(0));
+			when(gradeRecordRepository.countByEvaluation(existing)).thenReturn(7L);
+
+			EvaluationResponse response = service.updateEvaluation(
+					existing.getPublicUuid(),
+					new UpdateEvaluationRequest(null, null, "anything",
+							null, null, null, null, null, null, null));
+
+			assertThat(response.gradeCount()).isEqualTo(7L);
+		}
+
+		@Test
 		@DisplayName("empty patch returns current state without writing")
 		void emptyPatch() {
 			TeacherAssignment assignment = newAssignment(newCourse("MAT"));

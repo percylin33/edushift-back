@@ -20,7 +20,14 @@ package com.edushift.modules.evaluations.error;
  *   <li>{@code EVAL_SESSION_NOT_IN_ASSIGNMENT} — anchor session belongs to another assignment (400).</li>
  *   <li>{@code EVAL_HAS_GRADES} — delete attempted while {@code GradeRecord}s exist (409, BE-5B.3).</li>
  *   <li>{@code EVAL_ILLEGAL_TRANSITION} — lifecycle jump that the state machine forbids (400).</li>
+ *   <li>{@code EVAL_RUBRIC_NOT_SET} — GET/DELETE on rubric association when no rubric is attached (404, BE-5B.4).</li>
  * </ul>
+ *
+ * <p>Note: cross-tenant rubric attachments collapse to a generic
+ * {@code RESOURCE_NOT_FOUND} (404) because the rubric lookup itself
+ * never sees the other tenant's row (Hibernate {@code @TenantId}
+ * filter). We don't surface a dedicated {@code TENANT_MISMATCH}
+ * code: it would leak the existence of the other-tenant resource.</p>
  */
 public final class EvaluationErrorCodes {
 
@@ -53,6 +60,12 @@ public final class EvaluationErrorCodes {
 
 	/** 400 — lifecycle transition is not in {@code EvaluationStatus.legalNext()}. */
 	public static final String EVAL_ILLEGAL_TRANSITION = "EVAL_ILLEGAL_TRANSITION";
+
+	/**
+	 * 404 — the evaluation has no rubric attached, but the caller asked
+	 * for it (GET) or to detach it (DELETE). BE-5B.4.
+	 */
+	public static final String EVAL_RUBRIC_NOT_SET = "EVAL_RUBRIC_NOT_SET";
 
 	private EvaluationErrorCodes() {
 	}

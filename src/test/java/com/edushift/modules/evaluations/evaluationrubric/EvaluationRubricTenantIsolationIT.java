@@ -1,4 +1,4 @@
-package com.edushift.modules.evaluations.graderecord;
+package com.edushift.modules.evaluations.evaluationrubric;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -29,15 +29,12 @@ import com.edushift.modules.evaluations.entity.Evaluation;
 import com.edushift.modules.evaluations.entity.EvaluationKind;
 import com.edushift.modules.evaluations.entity.EvaluationScale;
 import com.edushift.modules.evaluations.entity.EvaluationStatus;
-import com.edushift.modules.evaluations.graderecord.entity.GradeRecord;
-import com.edushift.modules.evaluations.graderecord.repository.GradeRecordRepository;
+import com.edushift.modules.evaluations.evaluationrubric.entity.EvaluationRubric;
+import com.edushift.modules.evaluations.evaluationrubric.repository.EvaluationRubricRepository;
 import com.edushift.modules.evaluations.repository.EvaluationRepository;
+import com.edushift.modules.evaluations.rubric.entity.Rubric;
+import com.edushift.modules.evaluations.rubric.repository.RubricRepository;
 import com.edushift.modules.students.entity.DocumentType;
-import com.edushift.modules.students.entity.Student;
-import com.edushift.modules.students.enrollments.entity.StudentEnrollment;
-import com.edushift.modules.students.enrollments.entity.StudentEnrollmentStatus;
-import com.edushift.modules.students.enrollments.repository.StudentEnrollmentRepository;
-import com.edushift.modules.students.repository.StudentRepository;
 import com.edushift.modules.teachers.assignments.entity.TeacherAssignment;
 import com.edushift.modules.teachers.assignments.repository.TeacherAssignmentRepository;
 import com.edushift.modules.teachers.entity.EmploymentStatus;
@@ -47,12 +44,12 @@ import com.edushift.modules.tenants.entity.Tenant;
 import com.edushift.modules.tenants.entity.TenantStatus;
 import com.edushift.modules.tenants.repository.TenantRepository;
 import com.edushift.shared.multitenancy.TenantContext;
-import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -70,33 +67,36 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
 /**
- * Cross-tenant isolation IT for the {@code evaluations.graderecord}
- * sub-module (Sprint 5B / BE-5B.3).
+ * Cross-tenant isolation IT for the {@code evaluations.evaluation_rubric}
+ * sub-module (Sprint 5B / BE-5B.4).
  *
  * <h3>What is tested</h3>
  * <ul>
- *   <li><strong>Read isolation</strong> — admin A's listing under their
- *       evaluation is bounded; B's grades never leak.</li>
- *   <li><strong>Cross-tenant access</strong> — GET / PUT / DELETE on
- *       B's grade UUID from A → 404 (anti-enumeration).</li>
- *   <li><strong>Cross-tenant evaluation reference</strong> — POST under
- *       B's evaluation UUID from A → 404.</li>
+ *   <li><strong>Happy path</strong> — admin A attaches A's rubric to
+ *       A's evaluation, GETs it back.</li>
+ *   <li><strong>Cross-tenant rubric</strong> — admin A tries to attach
+ *       B's rubric to A's evaluation → 404 (the rubric load itself
+ *       fails under A's TenantContext).</li>
+ *   <li><strong>Cross-tenant evaluation</strong> — admin A operates on
+ *       B's evaluation publicUuid → 404 (GET, POST, DELETE).</li>
+ *   <li><strong>EVAL_RUBRIC_NOT_SET</strong> — admin A GETs the
+ *       attached rubric on an A's evaluation that has none → 404 with
+ *       the dedicated code.</li>
  * </ul>
  *
- * <p>Like its siblings ({@code EvaluationTenantIsolationIT},
- * {@code RubricTenantIsolationIT}), this IT requires Docker because
+ * <p>Like {@code EvaluationTenantIsolationIT} and
+ * {@code GradeRecordTenantIsolationIT}, this IT requires Docker because
  * {@link IntegrationTest} bootstraps a real Postgres container.
  * Compiles offline; running needs Docker Desktop up.
  */
-@DisplayName("GradeRecord multi-tenancy isolation")
-class GradeRecordTenantIsolationIT extends IntegrationTest {
+@DisplayName("EvaluationRubric multi-tenancy isolation")
+class EvaluationRubricTenantIsolationIT extends IntegrationTest {
 
     private static final String EVAL_BASE = "/v1/academic/evaluations";
-    private static final String GRADE_FLAT_BASE = "/v1/academic/grade-records";
     private static final String AUTH_BASE = "/v1/auth";
-    private static final String SHARED_EMAIL = "shared-grade@isolation.test";
-    private static final String PASSWORD_A = "PassGradeA-1!";
-    private static final String PASSWORD_B = "PassGradeB-2!";
+    private static final String SHARED_EMAIL = "shared-rubric-link@isolation.test";
+    private static final String PASSWORD_A = "PassRubricLinkA-1!";
+    private static final String PASSWORD_B = "PassRubricLinkB-2!";
 
     @Autowired private TestRestTemplate rest;
     @Autowired private TenantRepository tenantRepository;
@@ -111,9 +111,8 @@ class GradeRecordTenantIsolationIT extends IntegrationTest {
     @Autowired private TeacherRepository teacherRepository;
     @Autowired private TeacherAssignmentRepository assignmentRepository;
     @Autowired private EvaluationRepository evaluationRepository;
-    @Autowired private StudentRepository studentRepository;
-    @Autowired private StudentEnrollmentRepository enrollmentRepository;
-    @Autowired private GradeRecordRepository gradeRecordRepository;
+    @Autowired private RubricRepository rubricRepository;
+    @Autowired private EvaluationRubricRepository linkRepository;
     @Autowired private AcademicSeedService seedService;
     @Autowired private PasswordEncoder passwordEncoder;
     @Autowired private PlatformTransactionManager txManager;
@@ -127,122 +126,128 @@ class GradeRecordTenantIsolationIT extends IntegrationTest {
     }
 
     // -------------------------------------------------------------------
-    // Read isolation
+    // Happy path
     // -------------------------------------------------------------------
 
     @Nested
-    @DisplayName("Read isolation")
-    class Read {
+    @DisplayName("Happy path")
+    class Happy {
 
         @Test
-        @DisplayName("Admin A listing grades of A's evaluation does not leak B's rows")
-        void listIsScoped() throws Exception {
+        @DisplayName("Admin A attaches A's rubric to A's evaluation, then GETs it")
+        void attachAndGet() throws Exception {
             Fixture fx = setupTenants();
             AuthResponse loginA = login(fx.tenantA().getSlug(), SHARED_EMAIL, PASSWORD_A);
 
-            ResponseEntity<String> response = doGet(
-                    EVAL_BASE + "/" + fx.evaluationA().getPublicUuid()
-                            + "/grade-records",
+            String body = "{\"rubricPublicUuid\":\""
+                    + fx.rubricA().getPublicUuid() + "\"}";
+            ResponseEntity<String> attach = doPost(
+                    EVAL_BASE + "/" + fx.evaluationA().getPublicUuid() + "/rubric",
+                    loginA.accessToken(), body);
+            assertThat(attach.getStatusCode()).isEqualTo(HttpStatus.OK);
+
+            ResponseEntity<String> get = doGet(
+                    EVAL_BASE + "/" + fx.evaluationA().getPublicUuid() + "/rubric",
                     loginA.accessToken());
-
-            assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
-            JsonNode array = objectMapper.readTree(response.getBody());
-
-            List<UUID> bGradeIds = TenantContext.runAs(fx.tenantB().getId(),
-                    () -> tx().execute(s -> gradeRecordRepository.findAll().stream()
-                            .map(GradeRecord::getPublicUuid).toList()));
-
-            assertThat(array).isNotNull();
-            for (JsonNode item : array) {
-                UUID id = UUID.fromString(item.get("publicUuid").asText());
-                assertThat(bGradeIds)
-                        .as("tenant B grade publicUuid leaked into A's listing")
-                        .doesNotContain(id);
-            }
+            assertThat(get.getStatusCode()).isEqualTo(HttpStatus.OK);
+            assertThat(get.getBody()).contains(fx.rubricA().getPublicUuid().toString());
         }
 
         @Test
-        @DisplayName("Admin A reading B's grade by publicUuid → 404")
-        void crossTenantGetIs404() throws Exception {
+        @DisplayName("GET on A's evaluation without an attached rubric → 404 EVAL_RUBRIC_NOT_SET")
+        void notSet() throws Exception {
             Fixture fx = setupTenants();
             AuthResponse loginA = login(fx.tenantA().getSlug(), SHARED_EMAIL, PASSWORD_A);
 
             ResponseEntity<String> response = doGet(
-                    GRADE_FLAT_BASE + "/" + fx.gradeB().getPublicUuid(),
+                    EVAL_BASE + "/" + fx.evaluationA().getPublicUuid() + "/rubric",
                     loginA.accessToken());
 
             assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
-        }
-
-        @Test
-        @DisplayName("Admin A listing grades of B's evaluation → 404")
-        void crossTenantEvaluationIs404() throws Exception {
-            Fixture fx = setupTenants();
-            AuthResponse loginA = login(fx.tenantA().getSlug(), SHARED_EMAIL, PASSWORD_A);
-
-            ResponseEntity<String> response = doGet(
-                    EVAL_BASE + "/" + fx.evaluationB().getPublicUuid()
-                            + "/grade-records",
-                    loginA.accessToken());
-
-            assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+            assertThat(response.getBody()).contains("EVAL_RUBRIC_NOT_SET");
         }
     }
 
     // -------------------------------------------------------------------
-    // Write isolation
+    // Cross-tenant
     // -------------------------------------------------------------------
 
     @Nested
-    @DisplayName("Write isolation")
-    class Write {
+    @DisplayName("Cross-tenant")
+    class CrossTenant {
 
         @Test
-        @DisplayName("Cross-tenant POST under B's evaluation → 404")
-        void crossTenantPostEvaluationIs404() throws Exception {
+        @DisplayName("Admin A attaches B's rubric to A's evaluation → 404 RESOURCE_NOT_FOUND")
+        void crossTenantRubricIs404() throws Exception {
             Fixture fx = setupTenants();
             AuthResponse loginA = login(fx.tenantA().getSlug(), SHARED_EMAIL, PASSWORD_A);
 
-            String body = "{"
-                    + "\"studentPublicUuid\":\"" + fx.studentA().getPublicUuid() + "\","
-                    + "\"score\":17.50"
-                    + "}";
-
+            String body = "{\"rubricPublicUuid\":\""
+                    + fx.rubricB().getPublicUuid() + "\"}";
             ResponseEntity<String> response = doPost(
-                    EVAL_BASE + "/" + fx.evaluationB().getPublicUuid()
-                            + "/grade-records",
+                    EVAL_BASE + "/" + fx.evaluationA().getPublicUuid() + "/rubric",
                     loginA.accessToken(), body);
 
             assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
         }
 
         @Test
-        @DisplayName("Cross-tenant DELETE → 404")
-        void crossTenantDeleteIs404() throws Exception {
-            Fixture fx = setupTenants();
+        @DisplayName("Admin A reads rubric attached to B's evaluation → 404")
+        void crossTenantGetEvaluationIs404() throws Exception {
+            Fixture fx = setupTenantsWithLink();
             AuthResponse loginA = login(fx.tenantA().getSlug(), SHARED_EMAIL, PASSWORD_A);
 
-            ResponseEntity<String> response = doDelete(
-                    GRADE_FLAT_BASE + "/" + fx.gradeB().getPublicUuid(),
+            ResponseEntity<String> response = doGet(
+                    EVAL_BASE + "/" + fx.evaluationB().getPublicUuid() + "/rubric",
                     loginA.accessToken());
 
             assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
         }
 
         @Test
-        @DisplayName("Cross-tenant PUT → 404")
-        void crossTenantPutIs404() throws Exception {
+        @DisplayName("Admin A detaches the rubric of B's evaluation → 404")
+        void crossTenantDetachIs404() throws Exception {
+            Fixture fx = setupTenantsWithLink();
+            AuthResponse loginA = login(fx.tenantA().getSlug(), SHARED_EMAIL, PASSWORD_A);
+
+            ResponseEntity<String> response = doDelete(
+                    EVAL_BASE + "/" + fx.evaluationB().getPublicUuid() + "/rubric",
+                    loginA.accessToken());
+
+            assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+        }
+
+        @Test
+        @DisplayName("Admin A attaches a rubric on B's evaluation publicUuid → 404")
+        void crossTenantAttachOnEvaluationIs404() throws Exception {
             Fixture fx = setupTenants();
             AuthResponse loginA = login(fx.tenantA().getSlug(), SHARED_EMAIL, PASSWORD_A);
 
-            String body = "{\"comments\":\"hijack\"}";
-            ResponseEntity<String> response = rest.exchange(
-                    GRADE_FLAT_BASE + "/" + fx.gradeB().getPublicUuid(),
-                    HttpMethod.PUT,
-                    new HttpEntity<>(body, jsonHeadersWithAuth(loginA.accessToken())),
-                    String.class);
+            String body = "{\"rubricPublicUuid\":\""
+                    + fx.rubricA().getPublicUuid() + "\"}";
+            ResponseEntity<String> response = doPost(
+                    EVAL_BASE + "/" + fx.evaluationB().getPublicUuid() + "/rubric",
+                    loginA.accessToken(), body);
 
             assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+        }
+
+        @Test
+        @DisplayName("After A attaches its rubric, B does NOT see the link "
+                + "in their own gradebook-style listing")
+        void linkIsScoped() {
+            Fixture fx = setupTenantsWithLink();
+
+            // Probe the link table under B's tenant — it should not see A's link.
+            List<UUID> bLinkEvalIds = TenantContext.runAs(fx.tenantB().getId(),
+                    () -> tx().execute(s -> linkRepository.findAll().stream()
+                            .map(EvaluationRubric::getEvaluation)
+                            .map(Evaluation::getPublicUuid)
+                            .toList()));
+
+            assertThat(bLinkEvalIds)
+                    .as("tenant B should not see A's link to A's evaluation")
+                    .doesNotContain(fx.evaluationA().getPublicUuid());
         }
     }
 
@@ -253,12 +258,6 @@ class GradeRecordTenantIsolationIT extends IntegrationTest {
     private HttpHeaders jsonHeaders() {
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
-        return headers;
-    }
-
-    private HttpHeaders jsonHeadersWithAuth(String bearer) {
-        HttpHeaders headers = jsonHeaders();
-        headers.setBearerAuth(bearer);
         return headers;
     }
 
@@ -302,26 +301,42 @@ class GradeRecordTenantIsolationIT extends IntegrationTest {
     record Fixture(
             Tenant tenantA, Tenant tenantB,
             Evaluation evaluationA, Evaluation evaluationB,
-            Student studentA, Student studentB,
-            GradeRecord gradeA, GradeRecord gradeB
+            Rubric rubricA, Rubric rubricB
     ) {
     }
 
     private Fixture setupTenants() {
-        Tenant tenantA = createTenant("it-grade-a-");
-        Tenant tenantB = createTenant("it-grade-b-");
-        User adminA = createAdmin(tenantA, SHARED_EMAIL, PASSWORD_A);
-        User adminB = createAdmin(tenantB, SHARED_EMAIL, PASSWORD_B);
+        Tenant tenantA = createTenant("it-erlink-a-");
+        Tenant tenantB = createTenant("it-erlink-b-");
+        createAdmin(tenantA, SHARED_EMAIL, PASSWORD_A);
+        createAdmin(tenantB, SHARED_EMAIL, PASSWORD_B);
         seedAcademicCatalog(tenantA);
         seedAcademicCatalog(tenantB);
 
-        Bundle bundleA = seedGrade(tenantA, adminA);
-        Bundle bundleB = seedGrade(tenantB, adminB);
+        Bundle bundleA = seedEvaluationAndRubric(tenantA);
+        Bundle bundleB = seedEvaluationAndRubric(tenantB);
 
         return new Fixture(tenantA, tenantB,
                 bundleA.evaluation(), bundleB.evaluation(),
-                bundleA.student(), bundleB.student(),
-                bundleA.grade(), bundleB.grade());
+                bundleA.rubric(), bundleB.rubric());
+    }
+
+    private Fixture setupTenantsWithLink() {
+        Fixture fx = setupTenants();
+        // Pre-attach A's rubric to A's evaluation, and B's to B's, so the
+        // cross-tenant detach / get tests have something to fail on.
+        attachInTenant(fx.tenantA(), fx.evaluationA(), fx.rubricA());
+        attachInTenant(fx.tenantB(), fx.evaluationB(), fx.rubricB());
+        return fx;
+    }
+
+    private void attachInTenant(Tenant tenant, Evaluation evaluation, Rubric rubric) {
+        TenantContext.runAs(tenant.getId(), () -> tx().execute(s -> {
+            EvaluationRubric link = new EvaluationRubric();
+            link.setEvaluation(evaluation);
+            link.setRubric(rubric);
+            return linkRepository.saveAndFlush(link);
+        }));
     }
 
     private Tenant createTenant(String slugPrefix) {
@@ -356,10 +371,10 @@ class GradeRecordTenantIsolationIT extends IntegrationTest {
                 }));
     }
 
-    record Bundle(Evaluation evaluation, Student student, GradeRecord grade) {
+    record Bundle(Evaluation evaluation, Rubric rubric) {
     }
 
-    private Bundle seedGrade(Tenant tenant, User admin) {
+    private Bundle seedEvaluationAndRubric(Tenant tenant) {
         return TenantContext.runAs(tenant.getId(), () -> tx().execute(s -> {
             AcademicLevel primaria = levelRepository.findByCodeIgnoreCase("PRIMARIA")
                     .orElseThrow();
@@ -367,7 +382,7 @@ class GradeRecordTenantIsolationIT extends IntegrationTest {
                     .findAllByLevelOrderByOrdinalAsc(primaria).get(0);
 
             AcademicYear year = new AcademicYear();
-            year.setName("2026-IT-GRADE");
+            year.setName("2026-IT-ERLINK");
             year.setStartDate(LocalDate.of(2026, 3, 1));
             year.setEndDate(LocalDate.of(2026, 12, 20));
             year.setStatus(AcademicYearStatus.ACTIVE);
@@ -389,21 +404,21 @@ class GradeRecordTenantIsolationIT extends IntegrationTest {
             Section savedSection = sectionRepository.saveAndFlush(section);
 
             Course course = new Course();
-            course.setCode("MAT_IT_G");
-            course.setName("Matemática IT GradeRec");
+            course.setCode("MAT_IT_ER");
+            course.setName("Matemática IT EvalRubric");
             course.setIsActive(true);
             Course savedCourse = courseRepository.saveAndFlush(course);
 
-            CourseLevel link = new CourseLevel();
-            link.setCourse(savedCourse);
-            link.setLevel(primaria);
-            courseLevelRepository.saveAndFlush(link);
+            CourseLevel courseLevel = new CourseLevel();
+            courseLevel.setCourse(savedCourse);
+            courseLevel.setLevel(primaria);
+            courseLevelRepository.saveAndFlush(courseLevel);
 
             Teacher teacher = new Teacher();
             teacher.setFirstName("María");
             teacher.setLastName("García");
             teacher.setDocumentType(DocumentType.DNI);
-            teacher.setDocumentNumber("87654321"
+            teacher.setDocumentNumber("87655555"
                     + tenant.getSlug().substring(0, 1).toUpperCase());
             teacher.setEmploymentStatus(EmploymentStatus.ACTIVE);
             Teacher savedTeacher = teacherRepository.saveAndFlush(teacher);
@@ -417,48 +432,35 @@ class GradeRecordTenantIsolationIT extends IntegrationTest {
             TeacherAssignment savedAssignment = assignmentRepository
                     .saveAndFlush(assignment);
 
-            // Evaluation in PUBLISHED status so the grade write can land.
-            LocalDate scheduledDate = LocalDate.of(2026, 4, 10);
             Evaluation evaluation = new Evaluation();
             evaluation.setTeacherAssignment(savedAssignment);
-            evaluation.setKind(EvaluationKind.TASK);
-            evaluation.setName("Tarea 1");
+            evaluation.setKind(EvaluationKind.RUBRIC);
+            evaluation.setName("Rúbrica de presentación");
             evaluation.setWeight(BigDecimal.valueOf(1.00));
-            evaluation.setScheduledDate(scheduledDate);
-            evaluation.setScale(EvaluationScale.SCORE_0_20);
-            evaluation.setStatus(EvaluationStatus.PUBLISHED);
-            evaluation.setPublishedAt(Instant.now());
+            evaluation.setScheduledDate(LocalDate.of(2026, 4, 10));
+            evaluation.setScale(EvaluationScale.LITERAL_AD);
+            evaluation.setStatus(EvaluationStatus.DRAFT);
             evaluation.setIsActive(Boolean.TRUE);
-            Evaluation savedEvaluation = evaluationRepository
-                    .saveAndFlush(evaluation);
+            Evaluation savedEvaluation = evaluationRepository.saveAndFlush(evaluation);
 
-            // A student matriculated in the same section from the year start.
-            Student student = new Student();
-            student.setDocumentType(DocumentType.DNI);
-            student.setDocumentNumber("12345678"
-                    + tenant.getSlug().substring(0, 1).toUpperCase());
-            student.setFirstName("Ana");
-            student.setLastName("Pérez");
-            Student savedStudent = studentRepository.saveAndFlush(student);
+            Rubric rubric = new Rubric();
+            rubric.setName("Rúbrica IT-ERLINK " + tenant.getSlug());
+            rubric.setDescription("Para test multi-tenant");
+            rubric.setIsSystem(Boolean.FALSE);
+            rubric.setIsActive(Boolean.TRUE);
+            rubric.setCriteria(List.of(Map.of(
+                    "key", "redaccion",
+                    "name", "Redacción",
+                    "weight", BigDecimal.valueOf(100),
+                    "descriptors", List.of())));
+            rubric.setLevels(List.of(
+                    Map.of("code", "EN_INICIO",   "name", "En inicio",   "order", 1),
+                    Map.of("code", "EN_PROCESO",  "name", "En proceso",  "order", 2),
+                    Map.of("code", "ESPERADO",    "name", "Esperado",    "order", 3),
+                    Map.of("code", "SOBRESALIENTE","name", "Sobresaliente","order", 4)));
+            Rubric savedRubric = rubricRepository.saveAndFlush(rubric);
 
-            StudentEnrollment enrollment = new StudentEnrollment();
-            enrollment.setStudent(savedStudent);
-            enrollment.setSection(savedSection);
-            enrollment.setAcademicYear(savedYear);
-            enrollment.setEnrolledAt(LocalDate.of(2026, 3, 1));
-            enrollment.setStatus(StudentEnrollmentStatus.ACTIVE);
-            enrollmentRepository.saveAndFlush(enrollment);
-
-            GradeRecord gradeRecord = new GradeRecord();
-            gradeRecord.setEvaluation(savedEvaluation);
-            gradeRecord.setStudent(savedStudent);
-            gradeRecord.setScore(new BigDecimal("17.50"));
-            gradeRecord.setRecordedAt(Instant.now());
-            gradeRecord.setRecordedByUserId(admin.getId());
-            gradeRecord.setIsActive(Boolean.TRUE);
-            GradeRecord savedGrade = gradeRecordRepository.saveAndFlush(gradeRecord);
-
-            return new Bundle(savedEvaluation, savedStudent, savedGrade);
+            return new Bundle(savedEvaluation, savedRubric);
         }));
     }
 }

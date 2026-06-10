@@ -57,10 +57,11 @@ public interface RubricRepository extends JpaRepository<Rubric, UUID> {
 			select r from Rubric r
 			where (:systemOnly is null or r.isSystem = :systemOnly)
 			  and (:isActive   is null or r.isActive = :isActive)
-			  and (:nameQuery  is null
-			       or lower(r.name)        like lower(concat('%', :nameQuery, '%'))
+			  and (cast(:nameQuery as string) is null
+			       or lower(r.name)
+			              like lower(concat('%', cast(:nameQuery as string), '%'))
 			       or lower(coalesce(r.description, ''))
-			                                like lower(concat('%', :nameQuery, '%')))
+			              like lower(concat('%', cast(:nameQuery as string), '%')))
 			order by r.isSystem desc, r.name asc
 			""")
 	List<Rubric> findFiltered(

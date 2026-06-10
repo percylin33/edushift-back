@@ -458,7 +458,7 @@ class TimeSlotIT extends IntegrationTest {
 			Section savedSection = sectionRepository.saveAndFlush(section);
 
 			Course course = new Course();
-			course.setCode("MAT-IT");
+			course.setCode("MAT_IT");
 			course.setName("Matemática IT");
 			course.setIsActive(true);
 			Course savedCourse = courseRepository.saveAndFlush(course);
