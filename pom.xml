@@ -143,6 +143,25 @@
 		</dependency>
 
 		<!--
+		  ZXing (https://github.com/zxing/zxing) - QR code generation for
+		  the attendance module (Sprint 6 / BE-6.3). The split is:
+		    - core   : the matrix encoder (deterministic, no I/O).
+		    - javase : MatrixToImageWriter + ImageIO bridge for PNG.
+		  SVG rendering is hand-rolled in QrRenderer to keep the dep
+		  surface minimal (zxing has no SVG writer out of the box).
+		-->
+		<dependency>
+			<groupId>com.google.zxing</groupId>
+			<artifactId>core</artifactId>
+			<version>3.5.3</version>
+		</dependency>
+		<dependency>
+			<groupId>com.google.zxing</groupId>
+			<artifactId>javase</artifactId>
+			<version>3.5.3</version>
+		</dependency>
+
+		<!--
 		  Testcontainers (https://testcontainers.com/) - hermetic, ephemeral
 		  Postgres for integration tests. Docker is required on the dev box
 		  and on CI runners. The Spring Boot starter brings the

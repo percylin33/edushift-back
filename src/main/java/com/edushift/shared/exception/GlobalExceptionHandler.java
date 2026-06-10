@@ -21,6 +21,7 @@ import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.AuthenticationException;
 import org.springframework.validation.FieldError;
+import org.springframework.web.HttpMediaTypeNotAcceptableException;
 import org.springframework.web.HttpMediaTypeNotSupportedException;
 import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -30,6 +31,7 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.multipart.MaxUploadSizeExceededException;
+import org.springframework.web.server.NotAcceptableStatusException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 /**
@@ -141,6 +143,27 @@ public class GlobalExceptionHandler {
 			HttpMediaTypeNotSupportedException ex, HttpServletRequest req) {
 		ApiError error = ApiError.of("UNSUPPORTED_MEDIA_TYPE", ex.getMessage());
 		return build(HttpStatus.UNSUPPORTED_MEDIA_TYPE, "Unsupported media type", List.of(error), req, ex, false);
+	}
+
+	/**
+	 * Caller's {@code Accept} header cannot be satisfied (HTTP 406).
+	 * <p>
+	 * Spring MVC raises {@link HttpMediaTypeNotAcceptableException} when
+	 * the framework's content-negotiation cannot find a matching
+	 * representation; controllers may also throw
+	 * {@link NotAcceptableStatusException} explicitly when their own
+	 * negotiation logic rules out the requested type (for example the
+	 * attendance QR controller, which only emits {@code image/svg+xml}
+	 * and {@code image/png}). Both shapes flow through the same handler
+	 * to keep the public error envelope consistent.
+	 */
+	@ExceptionHandler({HttpMediaTypeNotAcceptableException.class, NotAcceptableStatusException.class})
+	public ResponseEntity<ApiErrorResponse> handleNotAcceptable(
+			Exception ex, HttpServletRequest req) {
+		String detail = ex.getMessage() != null ? ex.getMessage()
+				: "Requested media type cannot be produced";
+		ApiError error = ApiError.of("NOT_ACCEPTABLE", detail);
+		return build(HttpStatus.NOT_ACCEPTABLE, "Not acceptable", List.of(error), req, ex, false);
 	}
 
 	@ExceptionHandler(NoResourceFoundException.class)
