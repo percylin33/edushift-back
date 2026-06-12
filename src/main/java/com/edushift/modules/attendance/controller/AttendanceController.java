@@ -1,22 +1,32 @@
 package com.edushift.modules.attendance.controller;
 
 import com.edushift.modules.attendance.dto.AttendanceRecordResponse;
+import com.edushift.modules.attendance.dto.AttendanceSessionListItemResponse;
 import com.edushift.modules.attendance.dto.AttendanceSessionResponse;
 import com.edushift.modules.attendance.dto.CheckInRequest;
 import com.edushift.modules.attendance.dto.CreateSessionRequest;
+import com.edushift.modules.attendance.dto.ManualCheckInRequest;
 import com.edushift.modules.attendance.dto.UpdateRecordRequest;
+import com.edushift.modules.attendance.entity.AttendanceSessionSlot;
+import com.edushift.modules.attendance.entity.AttendanceSessionStatus;
 import com.edushift.modules.attendance.service.AttendanceService;
 import com.edushift.shared.api.ApiResponse;
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.web.PageableDefault;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -29,6 +39,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -55,6 +66,11 @@ import org.springframework.web.bind.annotation.RestController;
  *       <td>TENANT_ADMIN, TEACHER</td>
  *       <td>{@link AttendanceRecordResponse} (200 idempotent hit / 201
  *           fresh)</td></tr>
+ *   <tr><td>POST</td>
+ *       <td>/v1/attendance/manual-check-in</td>
+ *       <td>TENANT_ADMIN, TEACHER</td>
+ *       <td>{@link AttendanceRecordResponse} (200/201; auto-resolves
+ *           session by student)</td></tr>
  *   <tr><td>GET</td>
  *       <td>/v1/attendance/sessions/{publicUuid}/records</td>
  *       <td>TENANT_ADMIN, TEACHER</td>
@@ -104,7 +120,7 @@ public class AttendanceController {
 	// Sessions
 	// =====================================================================
 
-	@PostMapping(value = "/v1/attendance/sessions",
+	@PostMapping(value = "/attendance/sessions",
 			consumes = MediaType.APPLICATION_JSON_VALUE,
 			produces = MediaType.APPLICATION_JSON_VALUE)
 	@SecurityRequirement(name = "bearerAuth")
@@ -124,7 +140,7 @@ public class AttendanceController {
 		return ResponseEntity.status(status).body(ApiResponse.ok(response));
 	}
 
-	@PatchMapping(value = "/v1/attendance/sessions/{publicUuid}/close",
+	@PatchMapping(value = "/attendance/sessions/{publicUuid}/close",
 			produces = MediaType.APPLICATION_JSON_VALUE)
 	@SecurityRequirement(name = "bearerAuth")
 	@PreAuthorize("hasAnyRole('TENANT_ADMIN','TEACHER')")
@@ -141,11 +157,47 @@ public class AttendanceController {
 		return ResponseEntity.ok(ApiResponse.ok(response));
 	}
 
+	@GetMapping(value = "/attendance/sessions",
+			produces = MediaType.APPLICATION_JSON_VALUE)
+	@SecurityRequirement(name = "bearerAuth")
+	@PreAuthorize("hasAnyRole('TENANT_ADMIN','TEACHER')")
+	@Operation(summary = "List attendance sessions (tenant-scoped, paginated)",
+			description = "Drives the /attendance/sessions list page (FE-6.2). "
+					+ "All filters are optional and AND-combined: a single day "
+					+ "filter is expressed as `from=date&to=date`. Results are "
+					+ "ordered by `occurredOn DESC, startsAt DESC`. Cross-tenant "
+					+ "leakage is structurally impossible: the controller NEVER "
+					+ "accepts `tenantId`; the repository is tenant-scoped by "
+					+ "Hibernate's `@TenantId` discriminator (BE-6.7).")
+	public ResponseEntity<ApiResponse<Page<AttendanceSessionListItemResponse>>> listSessions(
+			@Parameter(description = "Filter by section public UUID")
+			@RequestParam(required = false) UUID sectionPublicUuid,
+			@Parameter(description = "Inclusive lower bound on `occurredOn` (yyyy-MM-dd)")
+			@RequestParam(required = false)
+			@DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+			@Parameter(description = "Inclusive upper bound on `occurredOn` (yyyy-MM-dd)")
+			@RequestParam(required = false)
+			@DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
+			@Parameter(description = "Filter by slot: MORNING / AFTERNOON / EVENING")
+			@RequestParam(required = false) AttendanceSessionSlot slot,
+			@Parameter(description = "Filter by session status: ACTIVE / CLOSED")
+			@RequestParam(required = false) AttendanceSessionStatus status,
+			@Parameter(description = "Standard Spring Data pagination "
+					+ "(page, size, sort). Defaults: size=20, sort=occurredOn,DESC")
+			@PageableDefault(size = 20) Pageable pageable) {
+		AttendanceService.ListSessionsFilter filter =
+				new AttendanceService.ListSessionsFilter(
+						sectionPublicUuid, from, to, slot, status);
+		Page<AttendanceSessionListItemResponse> result =
+				attendanceService.listSessions(filter, pageable);
+		return ResponseEntity.ok(ApiResponse.ok(result));
+	}
+
 	// =====================================================================
 	// Check-in / records
 	// =====================================================================
 
-	@PostMapping(value = "/v1/attendance/sessions/{publicUuid}/check-in",
+	@PostMapping(value = "/attendance/sessions/{publicUuid}/check-in",
 			consumes = MediaType.APPLICATION_JSON_VALUE,
 			produces = MediaType.APPLICATION_JSON_VALUE)
 	@SecurityRequirement(name = "bearerAuth")
@@ -178,7 +230,69 @@ public class AttendanceController {
 		return ResponseEntity.status(status).body(ApiResponse.ok(response));
 	}
 
-	@GetMapping(value = "/v1/attendance/sessions/{publicUuid}/records",
+	@PostMapping(value = "/attendance/scan-check-in",
+			consumes = MediaType.APPLICATION_JSON_VALUE,
+			produces = MediaType.APPLICATION_JSON_VALUE)
+	@SecurityRequirement(name = "bearerAuth")
+	@PreAuthorize("hasAnyRole('TENANT_ADMIN','TEACHER')")
+	@Operation(summary = "Session-less QR check-in (auto-resolves session)",
+			description = "Used by the scanner page (BE-6.8.b) when no "
+					+ "attendance session is pre-opened — the canonical "
+					+ "'auxiliary at the school entrance' flow. The "
+					+ "backend validates the QR exactly like /attendance/"
+					+ "sessions/{uuid}/check-in (HS256 + tenant + revoked "
+					+ "check) and then resolves the target session from "
+					+ "the student's current ACTIVE enrollment, identical "
+					+ "to /attendance/manual-check-in. Idempotent on "
+					+ "(resolved session, student). "
+					+ "Errors: 401 QR_INVALID / 410 QR_EXPIRED / 404 "
+					+ "RESOURCE_NOT_FOUND (tenant mismatch) / 422 "
+					+ "STUDENT_NO_ACTIVE_ENROLLMENT / 403 FORCED_STATUS_FORBIDDEN.",
+			requestBody = @io.swagger.v3.oas.annotations.parameters.RequestBody(
+					content = @Content(schema = @Schema(implementation = com.edushift.modules.attendance.dto.ScanCheckInRequest.class))))
+	public ResponseEntity<ApiResponse<AttendanceRecordResponse>> scanCheckIn(
+			@Valid @RequestBody com.edushift.modules.attendance.dto.ScanCheckInRequest request) {
+		AttendanceRecordResponse response = attendanceService.scanCheckIn(request);
+		HttpStatus status = Boolean.TRUE.equals(response.wasIdempotent())
+				? HttpStatus.OK : HttpStatus.CREATED;
+		log.debug("[attendance-api] scanCheckIn status={} record={} idempotent={}",
+				status.value(), response.publicUuid(), response.wasIdempotent());
+		return ResponseEntity.status(status).body(ApiResponse.ok(response));
+	}
+
+	@PostMapping(value = "/attendance/manual-check-in",
+			consumes = MediaType.APPLICATION_JSON_VALUE,
+			produces = MediaType.APPLICATION_JSON_VALUE)
+	@SecurityRequirement(name = "bearerAuth")
+	@PreAuthorize("hasAnyRole('TENANT_ADMIN','TEACHER')")
+	@Operation(summary = "Manual check-in by studentPublicUuid (no QR)",
+			description = "Used by the 'auxiliar en la entrada del colegio' "
+					+ "flow when the student has no QR card on hand. The "
+					+ "backend resolves the target session automatically: "
+					+ "looks up the student's current ACTIVE enrollment "
+					+ "(section), then findOrOpens an ACTIVE session for "
+					+ "(section, occurredOn, slot). occurredOn defaults to "
+					+ "today; slot defaults to MORNING before noon and "
+					+ "AFTERNOON otherwise (override via the body). "
+					+ "Idempotent on (resolved session, student) — same "
+					+ "semantics as the QR check-in (ADR-6.3). "
+					+ "Errors: 404 RESOURCE_NOT_FOUND when the student is "
+					+ "from another tenant; 422 STUDENT_NO_ACTIVE_ENROLLMENT "
+					+ "when the student has no current section; "
+					+ "403 FORCED_STATUS_FORBIDDEN for non-admin forced status.",
+			requestBody = @io.swagger.v3.oas.annotations.parameters.RequestBody(
+					content = @Content(schema = @Schema(implementation = ManualCheckInRequest.class))))
+	public ResponseEntity<ApiResponse<AttendanceRecordResponse>> manualCheckIn(
+			@Valid @RequestBody ManualCheckInRequest request) {
+		AttendanceRecordResponse response = attendanceService.manualCheckIn(request);
+		HttpStatus status = Boolean.TRUE.equals(response.wasIdempotent())
+				? HttpStatus.OK : HttpStatus.CREATED;
+		log.debug("[attendance-api] manualCheckIn status={} record={} idempotent={}",
+				status.value(), response.publicUuid(), response.wasIdempotent());
+		return ResponseEntity.status(status).body(ApiResponse.ok(response));
+	}
+
+	@GetMapping(value = "/attendance/sessions/{publicUuid}/records",
 			produces = MediaType.APPLICATION_JSON_VALUE)
 	@SecurityRequirement(name = "bearerAuth")
 	@PreAuthorize("hasAnyRole('TENANT_ADMIN','TEACHER')")
@@ -192,7 +306,7 @@ public class AttendanceController {
 		return ResponseEntity.ok(attendanceService.listRecords(publicUuid));
 	}
 
-	@PutMapping(value = "/v1/attendance/records/{publicUuid}",
+	@PutMapping(value = "/attendance/records/{publicUuid}",
 			consumes = MediaType.APPLICATION_JSON_VALUE,
 			produces = MediaType.APPLICATION_JSON_VALUE)
 	@ResponseStatus(HttpStatus.OK)

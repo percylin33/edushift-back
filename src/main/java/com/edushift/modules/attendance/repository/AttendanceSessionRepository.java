@@ -8,6 +8,8 @@ import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -46,23 +48,35 @@ public interface AttendanceSessionRepository extends JpaRepository<AttendanceSes
 			@Param("slot") AttendanceSessionSlot slot);
 
 	/**
-	 * Per-section listing with optional date-window + status filters.
-	 * Filters are AND-combined and skip-on-null. Drives the "Asistencia"
-	 * sub-tab in section-detail (FE-6.2).
+	 * Per-section listing with optional date-window + status filters
+	 * (Sprint 6 / BE-6.7). Filters are AND-combined and skip-on-null.
+	 * The returned {@link Page} is tenant-scoped by Hibernate's
+	 * {@code @TenantId} discriminator; cross-tenant leakage is
+	 * structurally impossible regardless of inputs.
 	 */
-	@Query("""
+	@Query(value = """
 			select s from AttendanceSession s
 			where (:section is null or s.section = :section)
 			  and (:status  is null or s.status  = :status)
-			  and (:from    is null or s.occurredOn >= :from)
-			  and (:to      is null or s.occurredOn <= :to)
-			order by s.occurredOn desc, s.startsAt desc
+			  and (:slot    is null or s.slot    = :slot)
+			  and s.occurredOn >= coalesce(:from, cast('1900-01-01' as date))
+			  and s.occurredOn <= coalesce(:to,   cast('2999-12-31' as date))
+			""",
+			countQuery = """
+			select count(s) from AttendanceSession s
+			where (:section is null or s.section = :section)
+			  and (:status  is null or s.status  = :status)
+			  and (:slot    is null or s.slot    = :slot)
+			  and s.occurredOn >= coalesce(:from, cast('1900-01-01' as date))
+			  and s.occurredOn <= coalesce(:to,   cast('2999-12-31' as date))
 			""")
-	List<AttendanceSession> findFiltered(
+	Page<AttendanceSession> findFilteredPaged(
 			@Param("section") Section section,
 			@Param("status") AttendanceSessionStatus status,
+			@Param("slot") AttendanceSessionSlot slot,
 			@Param("from") LocalDate from,
-			@Param("to") LocalDate to);
+			@Param("to") LocalDate to,
+			Pageable pageable);
 
 	/**
 	 * Last-N closed sessions across the tenant — drives the "Ultimas
@@ -86,3 +100,4 @@ public interface AttendanceSessionRepository extends JpaRepository<AttendanceSes
 			""")
 	long countActiveOn(@Param("day") LocalDate day);
 }
+

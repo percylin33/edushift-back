@@ -57,6 +57,15 @@ public final class AttendanceErrorCodes {
 	/** 422 — student not enrolled in the session's section. */
 	public static final String STUDENT_NOT_ENROLLED = "STUDENT_NOT_ENROLLED";
 
+	/**
+	 * 422 — the student has no ACTIVE enrollment in any section. Surfaced
+	 * by the manual check-in flow (BE-6.8) when the auxiliary picks a
+	 * student by name+filters but the system cannot resolve which session
+	 * to assign them to (no current section). The recovery hint is to
+	 * register an enrollment first via the {@code students} module.
+	 */
+	public static final String STUDENT_NO_ACTIVE_ENROLLMENT = "STUDENT_NO_ACTIVE_ENROLLMENT";
+
 	/** 403 — TEACHER edit attempt outside the 24h window. */
 	public static final String EDIT_WINDOW_EXPIRED = "EDIT_WINDOW_EXPIRED";
 

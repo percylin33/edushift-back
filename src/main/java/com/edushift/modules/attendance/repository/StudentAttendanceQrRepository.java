@@ -35,6 +35,23 @@ public interface StudentAttendanceQrRepository extends JpaRepository<StudentAtte
 	Optional<StudentAttendanceQr> findActiveByTokenHash(@Param("tokenHash") String tokenHash);
 
 	/**
+	 * Hot-path variant of {@link #findActiveByTokenHash(String)} that
+	 * eagerly hydrates the {@code student} association in the same
+	 * round-trip. Used by the attendance check-in flow which always
+	 * dereferences {@code qr.getStudent()} immediately after the
+	 * lookup; the lazy default would force a follow-up
+	 * {@code SELECT s.* FROM students WHERE id = ?} per scan.
+	 */
+	@Query("""
+			select q from StudentAttendanceQr q
+			join fetch q.student
+			where q.tokenHash = :tokenHash
+			  and q.revokedAt is null
+			""")
+	Optional<StudentAttendanceQr> findActiveByTokenHashFetchStudent(
+			@Param("tokenHash") String tokenHash);
+
+	/**
 	 * Lookup by hash including revoked rows. Used in
 	 * {@code POST /attendance/check-in} to distinguish between
 	 * {@code QR_INVALID} (no row at all — not minted by us) and

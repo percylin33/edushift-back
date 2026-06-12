@@ -33,9 +33,9 @@ import org.springframework.web.bind.annotation.RestController;
  * <table>
  *   <caption>Academic level endpoints</caption>
  *   <tr><th>Method</th><th>Path</th><th>Auth</th><th>Returns</th></tr>
- *   <tr><td>GET   </td><td>/                            </td><td>TENANT_ADMIN</td>
+ *   <tr><td>GET   </td><td>/                            </td><td>TENANT_ADMIN, TEACHER</td>
  *       <td>{@code List<}{@link AcademicLevelResponse}{@code >} (with grades)</td></tr>
- *   <tr><td>GET   </td><td>/{publicUuid}                </td><td>TENANT_ADMIN</td>
+ *   <tr><td>GET   </td><td>/{publicUuid}                </td><td>TENANT_ADMIN, TEACHER</td>
  *       <td>{@link AcademicLevelResponse}</td></tr>
  *   <tr><td>POST  </td><td>/                            </td><td>TENANT_ADMIN</td>
  *       <td>{@link AcademicLevelResponse} (201)</td></tr>
@@ -57,11 +57,13 @@ public class AcademicLevelController {
 
 	@GetMapping
 	@SecurityRequirement(name = "bearerAuth")
-	@PreAuthorize("hasRole('TENANT_ADMIN')")
+	@PreAuthorize("hasAnyRole('TENANT_ADMIN','TEACHER')")
 	@Operation(
-			summary = "List academic levels with their grades (TENANT_ADMIN)",
+			summary = "List academic levels with their grades",
 			description = "Sorted by ordinal asc. Each level embeds its grades, "
-					+ "also sorted by ordinal asc."
+					+ "also sorted by ordinal asc. Readable by TEACHER so the "
+					+ "attendance manual-fallback picker can populate its filters "
+					+ "without a separate admin-only round-trip (BE-6.8)."
 	)
 	public ResponseEntity<List<AcademicLevelResponse>> list() {
 		return ResponseEntity.ok(service.listLevels());
@@ -69,8 +71,8 @@ public class AcademicLevelController {
 
 	@GetMapping("/{publicUuid}")
 	@SecurityRequirement(name = "bearerAuth")
-	@PreAuthorize("hasRole('TENANT_ADMIN')")
-	@Operation(summary = "Get an academic level with its grades (TENANT_ADMIN)")
+	@PreAuthorize("hasAnyRole('TENANT_ADMIN','TEACHER')")
+	@Operation(summary = "Get an academic level with its grades")
 	public ResponseEntity<ApiResponse<AcademicLevelResponse>> getOne(
 			@PathVariable UUID publicUuid
 	) {

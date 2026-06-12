@@ -86,6 +86,47 @@ public interface StudentEnrollmentRepository extends JpaRepository<StudentEnroll
 	boolean existsActiveBySection(@Param("section") Section section);
 
 	/**
+	 * Current ACTIVE enrollment for a student, regardless of section
+	 * or academic year. Used by the manual check-in flow (BE-6.8) to
+	 * resolve which section the student should be marked present in
+	 * when the auxiliary picks them by name.
+	 *
+	 * <p>In MVP the partial unique index in V20 guarantees at most one
+	 * ACTIVE per {@code (student, year)}; we further constrain by
+	 * "newest enrolledAt" to deterministically pick a single row if a
+	 * student happens to be active in more than one year (data error
+	 * that should not happen but is defensively handled).
+	 */
+	@Query("""
+			select e from StudentEnrollment e
+			where e.student = :student
+			  and e.status = com.edushift.modules.students.enrollments.entity.StudentEnrollmentStatus.ACTIVE
+			order by e.enrolledAt desc, e.createdAt desc
+			""")
+	List<StudentEnrollment> findActiveByStudent(@Param("student") Student student);
+
+	/**
+	 * Hot-path variant of {@link #findActiveByStudent(Student)} that
+	 * eagerly loads the {@code section} association. Used by the
+	 * attendance scan-check-in flow (Sprint 6 / BE-6.8.b) where the
+	 * caller immediately needs {@code enrollment.getSection()} to
+	 * auto-resolve the {@code AttendanceSession}.
+	 *
+	 * <p>Saves one round-trip per scan compared to the lazy variant
+	 * (the section would otherwise be hydrated by a follow-up
+	 * {@code SELECT s.* FROM sections WHERE id = ?}).
+	 */
+	@Query("""
+			select e from StudentEnrollment e
+			join fetch e.section
+			where e.student = :student
+			  and e.status = com.edushift.modules.students.enrollments.entity.StudentEnrollmentStatus.ACTIVE
+			order by e.enrolledAt desc, e.createdAt desc
+			""")
+	List<StudentEnrollment> findActiveByStudentFetchSection(
+			@Param("student") Student student);
+
+	/**
 	 * Was the student ACTIVE-enrolled in the given section on
 	 * {@code date}? "Active on a date" means: the row's
 	 * {@code enrolledAt <= date} and either {@code withdrawnAt} is

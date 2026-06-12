@@ -37,9 +37,9 @@ import org.springframework.web.bind.annotation.RestController;
  *   <caption>Section endpoints</caption>
  *   <tr><th>Method</th><th>Path</th><th>Auth</th><th>Returns</th></tr>
  *   <tr><td>GET   </td><td>/                                       </td>
- *       <td>TENANT_ADMIN</td><td>{@code List<}{@link SectionListItem}{@code >}</td></tr>
+ *       <td>TENANT_ADMIN, TEACHER</td><td>{@code List<}{@link SectionListItem}{@code >}</td></tr>
  *   <tr><td>GET   </td><td>/{publicUuid}                           </td>
- *       <td>TENANT_ADMIN</td><td>{@link SectionResponse}</td></tr>
+ *       <td>TENANT_ADMIN, TEACHER</td><td>{@link SectionResponse}</td></tr>
  *   <tr><td>POST  </td><td>/                                       </td>
  *       <td>TENANT_ADMIN</td><td>{@link SectionResponse} (201)</td></tr>
  *   <tr><td>PUT   </td><td>/{publicUuid}                           </td>
@@ -60,12 +60,14 @@ public class SectionController {
 
 	@GetMapping
 	@SecurityRequirement(name = "bearerAuth")
-	@PreAuthorize("hasRole('TENANT_ADMIN')")
+	@PreAuthorize("hasAnyRole('TENANT_ADMIN','TEACHER')")
 	@Operation(
-			summary = "List sections (TENANT_ADMIN)",
+			summary = "List sections",
 			description = "Default scope: ACTIVE academic year. Optional filters: "
 					+ "?academicYearId, ?gradeId, ?levelId. If both gradeId and "
-					+ "levelId are supplied, gradeId takes precedence (stricter scope)."
+					+ "levelId are supplied, gradeId takes precedence (stricter scope). "
+					+ "Readable by TEACHER so the attendance manual-fallback picker "
+					+ "can cascade Grade -> Section (BE-6.8)."
 	)
 	public ResponseEntity<List<SectionListItem>> list(
 			@Parameter(description = "Filter by academic year publicUuid (default = ACTIVE year)")
@@ -81,8 +83,8 @@ public class SectionController {
 
 	@GetMapping("/{publicUuid}")
 	@SecurityRequirement(name = "bearerAuth")
-	@PreAuthorize("hasRole('TENANT_ADMIN')")
-	@Operation(summary = "Get a section by public UUID (TENANT_ADMIN)")
+	@PreAuthorize("hasAnyRole('TENANT_ADMIN','TEACHER')")
+	@Operation(summary = "Get a section by public UUID")
 	public ResponseEntity<ApiResponse<SectionResponse>> getOne(
 			@PathVariable UUID publicUuid
 	) {

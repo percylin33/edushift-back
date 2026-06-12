@@ -52,6 +52,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
+import org.springframework.web.util.UriComponentsBuilder;
 
 /**
  * Cross-tenant isolation IT for the {@code attendance} module
@@ -310,6 +311,64 @@ class AttendanceTenantIsolationIT extends IntegrationTest {
 	}
 
 	// =====================================================================
+	// BE-6.7 — listing endpoint is tenant-scoped
+	// =====================================================================
+
+	@Nested
+	@DisplayName("Listing endpoint never leaks across tenants")
+	class ListingIsolation {
+
+		@Test
+		@DisplayName("XT-ATT-7: GET /sessions from A returns only A's sessions")
+		void listSessionsAsTenantAExcludesB() throws Exception {
+			Fixture fx = setupTenants();
+			AuthResponse loginA = login(fx.tenantA().getSlug(),
+					SHARED_EMAIL, PASSWORD_A);
+
+			ResponseEntity<String> response = doGet(
+					SESSIONS_BASE,
+					loginA.accessToken(),
+					java.util.Map.of());
+
+			assertThat(response.getStatusCode())
+					.as("body=%s", response.getBody())
+					.isEqualTo(HttpStatus.OK);
+			// The body is a JSON envelope with a page of items; we
+			// verify that B's session UUID never appears. Using
+			// string-contains keeps the test resilient to changes in
+			// the page shape.
+			String body = response.getBody();
+			assertThat(body)
+					.as("A's listing must not contain B's session publicUuid")
+					.doesNotContain(fx.sessionB().getPublicUuid().toString());
+		}
+
+		@Test
+		@DisplayName("XT-ATT-8: filter by section from A only matches A's sections")
+		void listSessionsWithSectionFilterIsTenantScoped() throws Exception {
+			Fixture fx = setupTenants();
+			AuthResponse loginA = login(fx.tenantA().getSlug(),
+					SHARED_EMAIL, PASSWORD_A);
+
+			// Filter by A's section — should return A's session.
+			ResponseEntity<String> response = doGet(
+					SESSIONS_BASE,
+					loginA.accessToken(),
+					java.util.Map.of(
+							"sectionPublicUuid",
+							fx.sectionA().getPublicUuid().toString()));
+
+			assertThat(response.getStatusCode())
+					.as("body=%s", response.getBody())
+					.isEqualTo(HttpStatus.OK);
+			String body = response.getBody();
+			assertThat(body)
+					.as("A's filtered listing must not contain B's session")
+					.doesNotContain(fx.sessionB().getPublicUuid().toString());
+		}
+	}
+
+	// =====================================================================
 	// Sanity: same-tenant reads + writes still work
 	// =====================================================================
 
@@ -388,6 +447,25 @@ class AttendanceTenantIsolationIT extends IntegrationTest {
 		HttpHeaders headers = new HttpHeaders();
 		headers.setBearerAuth(bearer);
 		return rest.exchange(path, HttpMethod.GET,
+				new HttpEntity<>(headers), String.class);
+	}
+
+	/**
+	 * Same as {@link #doGet(String, String)} but appends the given
+	 * query params. Used by the BE-6.7 listing tests where the
+	 * controller surfaces the page through `?from=…&to=…&sectionPublicUuid=…`.
+	 */
+	private ResponseEntity<String> doGet(String path, String bearer,
+			java.util.Map<String, ?> queryParams) {
+		HttpHeaders headers = new HttpHeaders();
+		headers.setBearerAuth(bearer);
+		UriComponentsBuilder uri = UriComponentsBuilder.fromPath(path);
+		for (java.util.Map.Entry<String, ?> e : queryParams.entrySet()) {
+			if (e.getValue() != null) {
+				uri.queryParam(e.getKey(), e.getValue().toString());
+			}
+		}
+		return rest.exchange(uri.toUriString(), HttpMethod.GET,
 				new HttpEntity<>(headers), String.class);
 	}
 

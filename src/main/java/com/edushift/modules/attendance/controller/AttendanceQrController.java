@@ -58,7 +58,7 @@ import org.springframework.web.server.NotAcceptableStatusException;
  */
 @Slf4j
 @RestController
-@RequestMapping("/v1/students/{publicUuid}/attendance-qr")
+@RequestMapping("/students/{publicUuid}/attendance-qr")
 @RequiredArgsConstructor
 @Tag(name = "AttendanceQr",
 		description = "Lifecycle of a student's printable QR credential. "
@@ -102,6 +102,7 @@ public class AttendanceQrController {
 		MediaType chosen = resolveFormat(request, format);
 
 		IssuedQr issued = qrService.getOrIssueQr(publicUuid);
+
 		byte[] body = MediaType.IMAGE_PNG.equals(chosen)
 				? qrRenderer.renderPng(issued.jwt())
 				: qrRenderer.renderSvg(issued.jwt());

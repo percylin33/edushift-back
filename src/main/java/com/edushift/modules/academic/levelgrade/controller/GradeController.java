@@ -36,7 +36,7 @@ import org.springframework.web.bind.annotation.RestController;
  * <table>
  *   <caption>Grade endpoints</caption>
  *   <tr><th>Method</th><th>Path</th><th>Auth</th><th>Returns</th></tr>
- *   <tr><td>GET   </td><td>/                          </td><td>TENANT_ADMIN</td>
+ *   <tr><td>GET   </td><td>/                          </td><td>TENANT_ADMIN, TEACHER</td>
  *       <td>{@code List<}{@link GradeResponse}{@code >}</td></tr>
  *   <tr><td>POST  </td><td>/                          </td><td>TENANT_ADMIN</td>
  *       <td>{@link GradeResponse} (201)</td></tr>
@@ -60,8 +60,10 @@ public class GradeController {
 
 	@GetMapping
 	@SecurityRequirement(name = "bearerAuth")
-	@PreAuthorize("hasRole('TENANT_ADMIN')")
-	@Operation(summary = "List grades of a level (TENANT_ADMIN)")
+	@PreAuthorize("hasAnyRole('TENANT_ADMIN','TEACHER')")
+	@Operation(summary = "List grades of a level",
+			description = "Readable by TEACHER so the attendance manual-"
+					+ "fallback picker can cascade Level -> Grade (BE-6.8).")
 	public ResponseEntity<List<GradeResponse>> list(@PathVariable UUID levelUuid) {
 		return ResponseEntity.ok(service.listGrades(levelUuid));
 	}

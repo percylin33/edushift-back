@@ -130,6 +130,20 @@
 		</dependency>
 
 		<!--
+		  Caffeine (https://github.com/ben-manes/caffeine) - high-performance
+		  in-memory cache for hot lookups. Used by AttendanceUserCache to
+		  short-circuit the per-scan resolution of the scanning user
+		  (auxiliar) which is the same user during an entire morning peak.
+		  Programmatic API (not Spring Cache @Cacheable) because the global
+		  Spring Cache type is set to Redis and we want a local L1.
+		-->
+		<dependency>
+			<groupId>com.github.ben-manes.caffeine</groupId>
+			<artifactId>caffeine</artifactId>
+			<version>3.1.8</version>
+		</dependency>
+
+		<!--
 		  Apache POI (https://poi.apache.org/) - Excel (.xlsx) parsing &
 		  generation for the bulk-import feature in students. We use the
 		  OOXML flavour (poi-ooxml) so the parser handles streaming reads

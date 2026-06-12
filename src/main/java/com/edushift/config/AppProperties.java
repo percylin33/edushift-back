@@ -36,6 +36,15 @@ public class AppProperties {
 
 		private List<String> allowedOrigins = List.of();
 
+		/**
+		 * Wildcard-friendly origin patterns (e.g. {@code https://*.devtunnels.ms},
+		 * {@code https://*.ngrok-free.app}) used together with
+		 * {@code setAllowedOriginPatterns}. Required when {@code allowCredentials=true}
+		 * because Spring forbids the literal {@code "*"} in {@code allowedOrigins}
+		 * in that case. Empty by default — populated only in dev profiles.
+		 */
+		private List<String> allowedOriginPatterns = List.of();
+
 		private List<String> allowedMethods = List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS");
 
 		private List<String> allowedHeaders = List.of("*");

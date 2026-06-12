@@ -100,4 +100,23 @@ public interface AttendanceRecordRepository extends JpaRepository<AttendanceReco
 	long countBySessionAndStatus(
 			@Param("session") AttendanceSession session,
 			@Param("status") AttendanceRecordStatus status);
+
+	/**
+	 * Batched per-status counts for many sessions in one round trip
+	 * (Sprint 6 / BE-6.7). Used by the listing endpoint to populate
+	 * the four counters on each row of the page.
+	 *
+	 * <p>Returns one row per {@code (session, status)} pair that has
+	 * at least one record. Sessions with no records are absent from
+	 * the result — the caller treats missing sessions as zero
+	 * counts. Tenant-scoped by Hibernate's {@code @TenantId}.</p>
+	 */
+	@Query("""
+			select r.session, r.status, count(r)
+			from AttendanceRecord r
+			where r.session in :sessions
+			group by r.session, r.status
+			""")
+	List<Object[]> countGroupedByStatusForSessions(
+			@Param("sessions") List<AttendanceSession> sessions);
 }

@@ -299,15 +299,17 @@ public class DashboardServiceImpl implements DashboardService {
 
 		// Pre-load enrollment counts in one query to avoid the
 		// N+1 on the FE side (and on us).
-		List<Long> sectionIds = rows.stream()
-				.map(r -> ((Number) r.get("section_id")).longValue())
+		// NOTE: sections.id is UUID (see V15__create_sections_table.sql),
+		// not bigint, so we keep the in-memory key as UUID throughout.
+		List<UUID> sectionIds = rows.stream()
+				.map(r -> (UUID) r.get("section_id"))
 				.toList();
-		Map<Long, Long> enrolledBySection = loadEnrolledBySection(
+		Map<UUID, Long> enrolledBySection = loadEnrolledBySection(
 				tenantId, sectionIds);
 
 		List<TopAbsentSectionItem> out = new ArrayList<>(rows.size());
 		for (Map<String, Object> r : rows) {
-			long sectionId = ((Number) r.get("section_id")).longValue();
+			UUID sectionId = (UUID) r.get("section_id");
 			out.add(new TopAbsentSectionItem(
 					(UUID) r.get("section_uuid"),
 					(String) r.get("section_name"),
@@ -318,7 +320,7 @@ public class DashboardServiceImpl implements DashboardService {
 		return out;
 	}
 
-	private Map<Long, Long> loadEnrolledBySection(UUID tenantId, List<Long> sectionIds) {
+	private Map<UUID, Long> loadEnrolledBySection(UUID tenantId, List<UUID> sectionIds) {
 		if (sectionIds.isEmpty()) return Map.of();
 		List<Map<String, Object>> rows = jdbc.queryForList(
 				"""
@@ -334,9 +336,9 @@ public class DashboardServiceImpl implements DashboardService {
 				new MapSqlParameterSource()
 						.addValue("tenantId", tenantId)
 						.addValue("sectionIds", sectionIds));
-		Map<Long, Long> out = new LinkedHashMap<>();
+		Map<UUID, Long> out = new LinkedHashMap<>();
 		for (Map<String, Object> r : rows) {
-			long sectionId = ((Number) r.get("section_id")).longValue();
+			UUID sectionId = (UUID) r.get("section_id");
 			long enrolled = ((Number) r.get("enrolled")).longValue();
 			out.put(sectionId, enrolled);
 		}

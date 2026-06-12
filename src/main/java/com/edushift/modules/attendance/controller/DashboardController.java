@@ -47,7 +47,7 @@ import org.springframework.web.bind.annotation.RestController;
  */
 @Slf4j
 @RestController
-@RequestMapping("/v1/attendance/dashboard")
+@RequestMapping("/attendance/dashboard")
 @RequiredArgsConstructor
 @Tag(name = "AttendanceDashboard",
 		description = "Admin-only attendance KPIs: today rate, open "

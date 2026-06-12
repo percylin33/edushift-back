@@ -1,8 +1,10 @@
 package com.edushift.modules.attendance.mapper;
 
 import com.edushift.modules.attendance.dto.AttendanceRecordResponse;
+import com.edushift.modules.attendance.dto.AttendanceSessionListItemResponse;
 import com.edushift.modules.attendance.dto.AttendanceSessionResponse;
 import com.edushift.modules.attendance.dto.UserRef;
+import com.edushift.modules.academic.section.entity.Section;
 import com.edushift.modules.attendance.entity.AttendanceRecord;
 import com.edushift.modules.attendance.entity.AttendanceSession;
 import com.edushift.modules.auth.entity.User;
@@ -55,6 +57,42 @@ public class AttendanceMapper {
 		return toResponse(session, null, null, null, null,
 				wasIdempotent,
 				usersByPublicUuid == null ? Map.of() : usersByPublicUuid);
+	}
+
+	/**
+	 * Slim projection for the listing endpoint (Sprint 6 / BE-6.7).
+	 *
+	 * <p>The four counters are populated only for {@code CLOSED}
+	 * sessions — for {@code ACTIVE} sessions we deliberately pass
+	 * {@code null} to keep the list cheap. The FE's "only pending"
+	 * toggle uses the {@code status} field to derive pending-ness, so
+	 * this shape covers the FE's needs without an N-count round-trip.</p>
+	 */
+	public AttendanceSessionListItemResponse toListItem(
+			AttendanceSession session,
+			Long presentCount,
+			Long lateCount,
+			Long absentCount,
+			Long excusedCount) {
+		Section section = session.getSection();
+		return new AttendanceSessionListItemResponse(
+				session.getPublicUuid(),
+				section != null ? section.getPublicUuid() : null,
+				section != null ? section.getName() : null,
+				section != null && section.getGrade() != null
+						? section.getGrade().getName() : null,
+				session.getOccurredOn(),
+				session.getSlot(),
+				session.getStatus(),
+				session.getStartsAt(),
+				session.getClosedAt(),
+				presentCount,
+				lateCount,
+				absentCount,
+				excusedCount,
+				session.getCreatedAt(),
+				session.getUpdatedAt()
+		);
 	}
 
 	private AttendanceSessionResponse toResponse(

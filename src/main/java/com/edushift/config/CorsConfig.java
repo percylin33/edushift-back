@@ -53,6 +53,11 @@ public class CorsConfig {
 
 		CorsConfiguration config = new CorsConfiguration();
 		config.setAllowedOrigins(corsProps.getAllowedOrigins());
+		// Wildcard origin patterns (e.g. dev tunnels). Spring evaluates BOTH lists
+		// and a match in either accepts the request. Kept empty in prod by default.
+		if (!corsProps.getAllowedOriginPatterns().isEmpty()) {
+			config.setAllowedOriginPatterns(corsProps.getAllowedOriginPatterns());
+		}
 		config.setAllowedMethods(corsProps.getAllowedMethods());
 		config.setAllowedHeaders(corsProps.getAllowedHeaders());
 		config.setAllowCredentials(corsProps.isAllowCredentials());

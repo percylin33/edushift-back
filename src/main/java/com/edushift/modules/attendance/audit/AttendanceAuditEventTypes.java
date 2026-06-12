@@ -20,6 +20,7 @@ package com.edushift.modules.attendance.audit;
  *   <tr><td>{@link #SESSION_OPENED}</td>     <td>CREATE</td>         <td>AttendanceSession</td></tr>
  *   <tr><td>{@link #SESSION_CLOSED}</td>     <td>UPDATE</td>         <td>AttendanceSession</td></tr>
  *   <tr><td>{@link #CHECKED_IN}</td>         <td>CREATE</td>         <td>AttendanceRecord</td></tr>
+ *   <tr><td>{@link #MANUAL_CHECKED_IN}</td>  <td>CREATE</td>         <td>AttendanceRecord</td></tr>
  *   <tr><td>{@link #RECORD_EDITED}</td>      <td>UPDATE</td>         <td>AttendanceRecord</td></tr>
  *   <tr><td>{@link #QR_ISSUED}</td>          <td>CREATE</td>         <td>StudentAttendanceQr</td></tr>
  *   <tr><td>{@link #QR_ROTATED}</td>         <td>UPDATE</td>         <td>StudentAttendanceQr</td></tr>
@@ -34,6 +35,7 @@ public final class AttendanceAuditEventTypes {
 	public static final String SESSION_OPENED  = "AttendanceSessionOpened";
 	public static final String SESSION_CLOSED  = "AttendanceSessionClosed";
 	public static final String CHECKED_IN      = "AttendanceCheckedIn";
+	public static final String MANUAL_CHECKED_IN = "AttendanceManualCheckedIn";
 	public static final String RECORD_EDITED   = "AttendanceRecordEdited";
 	public static final String QR_ISSUED       = "AttendanceQrIssued";
 	public static final String QR_ROTATED      = "AttendanceQrRotated";

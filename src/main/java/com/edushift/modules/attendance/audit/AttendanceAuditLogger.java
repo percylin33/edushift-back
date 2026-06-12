@@ -102,6 +102,44 @@ public class AttendanceAuditLogger {
 	}
 
 	/**
+	 * Audit a successful manual check-in (idempotent or fresh).
+	 *
+	 * <p>Stamped distinctly from {@link #logCheckedIn(AttendanceRecord, boolean)}
+	 * so the security team can dashboard "auxiliary marking by name" vs
+	 * "QR-driven scans" — useful when investigating discrepancies like
+	 * "a kid was marked present without their QR".
+	 *
+	 * @param record           the persisted record (or pre-existing one if idempotent).
+	 * @param wasIdempotent    {@code true} when the record already existed.
+	 * @param sessionWasOpened {@code true} when the manual flow auto-opened a
+	 *                         brand-new session (the section had no ACTIVE
+	 *                         session for that day+slot). Surfaces the side
+	 *                         effect explicitly on the timeline.
+	 */
+	public void logManualCheckedIn(
+			AttendanceRecord record, boolean wasIdempotent, boolean sessionWasOpened) {
+		Map<String, Object> meta = baseMeta(AttendanceAuditEventTypes.MANUAL_CHECKED_IN);
+		meta.put("sessionPublicUuid", uuid(record.getSession() != null
+				? record.getSession().getPublicUuid() : null));
+		meta.put("studentPublicUuid", uuid(record.getStudent() != null
+				? record.getStudent().getPublicUuid() : null));
+		meta.put("status", record.getStatus() != null
+				? record.getStatus().name() : null);
+		meta.put("occurredAt", record.getOccurredAt() != null
+				? record.getOccurredAt().toString() : null);
+		meta.put("wasIdempotent", wasIdempotent);
+		meta.put("sessionAutoOpened", sessionWasOpened);
+		meta.put("manual", true);
+		emit(AuditAction.CREATE,
+				AttendanceAuditEventTypes.RESOURCE_RECORD,
+				record.getPublicUuid(),
+				"Attendance manual check-in"
+						+ (wasIdempotent ? " (idempotent)" : "")
+						+ (sessionWasOpened ? " [auto-opened session]" : ""),
+				meta);
+	}
+
+	/**
 	 * Audit a check-in attempt that was rejected before any DB row was
 	 * mutated. Always {@code ACCESS_DENIED} — the whole point of this
 	 * event is to feed alerting on suspicious scans (cross-tenant
