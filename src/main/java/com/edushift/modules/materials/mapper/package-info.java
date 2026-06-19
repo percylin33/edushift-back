@@ -1,0 +1,4 @@
+/**
+ * Hand-written mappers for the LMS materials module.
+ */
+package com.edushift.modules.materials.mapper;
