@@ -39,6 +39,8 @@ import com.edushift.modules.quizzes.repository.QuizOptionRepository;
 import com.edushift.modules.quizzes.repository.QuizQuestionRepository;
 import com.edushift.modules.quizzes.repository.QuizRepository;
 import com.edushift.modules.quizzes.service.impl.QuizAttemptServiceImpl;
+import com.edushift.modules.auth.entity.User;
+import com.edushift.modules.auth.repository.UserRepository;
 import com.edushift.modules.students.entity.Student;
 import com.edushift.modules.students.enrollments.repository.StudentEnrollmentRepository;
 import com.edushift.modules.students.repository.StudentRepository;
@@ -86,6 +88,7 @@ class QuizAttemptServiceValidationTest {
 	private SectionRepository sectionRepository;
 	private StudentRepository studentRepository;
 	private StudentEnrollmentRepository enrollmentRepository;
+	private UserRepository userRepository;
 	private QuizAttemptMapper attemptMapper;
 	private CurrentUserProvider currentUserProvider;
 	private QuizAttemptServiceImpl service;
@@ -100,13 +103,14 @@ class QuizAttemptServiceValidationTest {
 		sectionRepository = mock(SectionRepository.class);
 		studentRepository = mock(StudentRepository.class);
 		enrollmentRepository = mock(StudentEnrollmentRepository.class);
+		userRepository = mock(UserRepository.class);
 		attemptMapper = new QuizAttemptMapper(answerRepository);
 		currentUserProvider = mock(CurrentUserProvider.class);
 		service = new QuizAttemptServiceImpl(
 				quizRepository, attemptRepository, answerRepository,
 				questionRepository, optionRepository, sectionRepository,
-				studentRepository, enrollmentRepository, attemptMapper,
-				currentUserProvider);
+				studentRepository, enrollmentRepository, userRepository,
+				attemptMapper, currentUserProvider);
 	}
 
 	// ------------------------------------------------------------------
@@ -149,9 +153,14 @@ class QuizAttemptServiceValidationTest {
 			setField(quiz, "section", section);
 
 			UUID studentUserId = UUID.randomUUID();
+			UUID userInternalId = UUID.randomUUID();
+			User user = new User();
+			setField(user, "id", userInternalId);
 			when(quizRepository.findByPublicUuid(quiz.getPublicUuid()))
 					.thenReturn(Optional.of(quiz));
-			when(studentRepository.findByUserId(studentUserId))
+			when(userRepository.findByPublicUuid(studentUserId))
+					.thenReturn(Optional.of(user));
+			when(studentRepository.findByUserId(userInternalId))
 					.thenReturn(Optional.empty());
 
 			assertThatThrownBy(() -> service.startAttempt(
@@ -168,13 +177,18 @@ class QuizAttemptServiceValidationTest {
 			setField(section, "publicUuid", UUID.randomUUID());
 			setField(quiz, "section", section);
 			UUID studentUserId = UUID.randomUUID();
+			UUID userInternalId = UUID.randomUUID();
+			User user = new User();
+			setField(user, "id", userInternalId);
 
 			Student student = new Student();
 			setField(student, "publicUuid", UUID.randomUUID());
 
 			when(quizRepository.findByPublicUuid(quiz.getPublicUuid()))
 					.thenReturn(Optional.of(quiz));
-			when(studentRepository.findByUserId(studentUserId))
+			when(userRepository.findByPublicUuid(studentUserId))
+					.thenReturn(Optional.of(user));
+			when(studentRepository.findByUserId(userInternalId))
 					.thenReturn(Optional.of(student));
 			when(enrollmentRepository.existsActiveAt(
 					eq(student), eq(section), any()))
@@ -194,13 +208,18 @@ class QuizAttemptServiceValidationTest {
 			setField(section, "publicUuid", UUID.randomUUID());
 			setField(quiz, "section", section);
 			UUID studentUserId = UUID.randomUUID();
+			UUID userInternalId = UUID.randomUUID();
+			User user = new User();
+			setField(user, "id", userInternalId);
 
 			Student student = new Student();
 			setField(student, "publicUuid", UUID.randomUUID());
 
 			when(quizRepository.findByPublicUuid(quiz.getPublicUuid()))
 					.thenReturn(Optional.of(quiz));
-			when(studentRepository.findByUserId(studentUserId))
+			when(userRepository.findByPublicUuid(studentUserId))
+					.thenReturn(Optional.of(user));
+			when(studentRepository.findByUserId(userInternalId))
 					.thenReturn(Optional.of(student));
 			when(enrollmentRepository.existsActiveAt(
 					eq(student), eq(section), any()))
@@ -223,12 +242,17 @@ class QuizAttemptServiceValidationTest {
 			setField(section, "publicUuid", UUID.randomUUID());
 			setField(quiz, "section", section);
 			UUID studentUserId = UUID.randomUUID();
+			UUID userInternalId = UUID.randomUUID();
+			User user = new User();
+			setField(user, "id", userInternalId);
 			Student student = new Student();
 			setField(student, "publicUuid", UUID.randomUUID());
 
 			when(quizRepository.findByPublicUuid(quiz.getPublicUuid()))
 					.thenReturn(Optional.of(quiz));
-			when(studentRepository.findByUserId(studentUserId))
+			when(userRepository.findByPublicUuid(studentUserId))
+					.thenReturn(Optional.of(user));
+			when(studentRepository.findByUserId(userInternalId))
 					.thenReturn(Optional.of(student));
 			when(enrollmentRepository.existsActiveAt(
 					eq(student), eq(section), any()))

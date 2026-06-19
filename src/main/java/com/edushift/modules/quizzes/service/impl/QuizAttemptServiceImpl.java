@@ -35,6 +35,8 @@ import com.edushift.modules.quizzes.service.QuizAttemptService;
 import com.edushift.modules.students.entity.Student;
 import com.edushift.modules.students.enrollments.repository.StudentEnrollmentRepository;
 import com.edushift.modules.students.repository.StudentRepository;
+import com.edushift.modules.auth.repository.UserRepository;
+import com.edushift.modules.auth.entity.User;
 import com.edushift.shared.security.CurrentUserProvider;
 import com.edushift.shared.security.LmsAuthorities;
 import java.time.Instant;
@@ -102,6 +104,7 @@ public class QuizAttemptServiceImpl implements QuizAttemptService {
 	private final SectionRepository sectionRepository;
 	private final StudentRepository studentRepository;
 	private final StudentEnrollmentRepository enrollmentRepository;
+	private final UserRepository userRepository;
 	private final QuizAttemptMapper attemptMapper;
 	private final CurrentUserProvider currentUserProvider;
 
@@ -440,12 +443,25 @@ public class QuizAttemptServiceImpl implements QuizAttemptService {
 	 * the section. Surfaces 403 {@code STUDENT_NOT_ENROLLED_IN_SECTION}
 	 * otherwise. The fact that the user has no {@code Student} row
 	 * is also treated as "not enrolled" (no row to leak).
+	 *
+	 * <p><b>Identifier contract.</b> The {@code userId} argument is the
+	 * caller's {@code User.publicUuid} (carried as the JWT {@code sub} claim,
+	 * surfaced via {@link CurrentUserProvider#currentUserId()}). However,
+	 * {@code students.user_id} is a FK to {@code users.id} (internal UUIDv7,
+	 * see V10 {@code fk_students_user}), <em>not</em> to {@code public_uuid}.
+	 * We therefore dereference {@code public_uuid → id → user_id} in two
+	 * steps, matching the pattern already in use by
+	 * {@code QuizRubricServiceImpl.gradeWithRubric} (BE-7b.3).
 	 */
-	private void requireEnrolledStudent(Section section, UUID userId) {
-		if (section == null || userId == null) {
+	private void requireEnrolledStudent(Section section, UUID userPublicUuid) {
+		if (section == null || userPublicUuid == null) {
 			throw new StudentNotEnrolledException("null");
 		}
-		Student student = studentRepository.findByUserId(userId)
+		UUID userInternalId = userRepository.findByPublicUuid(userPublicUuid)
+				.map(User::getId)
+				.orElseThrow(() -> new StudentNotEnrolledException(
+						section.getPublicUuid().toString()));
+		Student student = studentRepository.findByUserId(userInternalId)
 				.orElseThrow(() -> new StudentNotEnrolledException(
 						section.getPublicUuid().toString()));
 		boolean active = enrollmentRepository.existsActiveAt(
