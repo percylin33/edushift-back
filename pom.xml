@@ -198,6 +198,24 @@
 			<artifactId>junit-jupiter</artifactId>
 			<scope>test</scope>
 		</dependency>
+
+		<!--
+		  Google Cloud Storage (GCS) compile-time stubs. The actual
+		  Firebase/GCS adapter (FirebaseStorageService) is gated by
+		  `app.storage.provider=FIREBASE` at runtime via
+		  @ConditionalOnProperty; on any other profile the class is
+		  never loaded. We declare the deps here as <optional>true</optional>
+		  so javac can resolve the imports without dragging GCS into
+		  the fat-jar of deployments that use the LOCAL storage
+		  provider. Versions are pinned so transitive drift doesn't
+		  silently break the storage adapter (DEBT-BE-7B-6).
+		-->
+		<dependency>
+			<groupId>com.google.cloud</groupId>
+			<artifactId>google-cloud-storage</artifactId>
+			<version>2.43.1</version>
+			<optional>true</optional>
+		</dependency>
 	</dependencies>
 
 	<build>

@@ -1,13 +1,17 @@
 package com.edushift.modules.auth.security;
 
+import com.edushift.modules.auth.entity.UserRole;
 import com.edushift.modules.auth.service.JwtService;
 import com.edushift.modules.auth.service.JwtService.JwtClaims;
 import com.edushift.modules.auth.service.JwtService.TokenType;
+import com.edushift.shared.security.LmsRoleAuthorityMapper;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
@@ -74,6 +78,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 	static final String BEARER_PREFIX = "Bearer ";
 
 	private final JwtService jwtService;
+	private final LmsRoleAuthorityMapper authorityMapper;
 
 	@Override
 	protected void doFilterInternal(HttpServletRequest request,
@@ -165,16 +170,36 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 		}
 	}
 
-	private static List<GrantedAuthority> mapAuthorities(Set<String> roles) {
+	private List<GrantedAuthority> mapAuthorities(Set<String> roles) {
 		if (roles == null || roles.isEmpty()) {
 			return List.of();
 		}
-		return roles.stream()
-				.filter(r -> r != null && !r.isBlank())
-				// "ROLE_" prefix is the Spring Security default for hasRole(...) checks.
-				.map(r -> r.startsWith("ROLE_") ? r : "ROLE_" + r)
+		LinkedHashSet<GrantedAuthority> out = new LinkedHashSet<>();
+		// 1) Coarse ROLE_* authorities (kept for @PreAuthorize("hasRole('...')") checks
+		//    and for any code that hasn't been migrated to hasAuthority(...)).
+		for (String r : roles) {
+			if (r == null || r.isBlank()) { continue; }
+			String prefixed = r.startsWith("ROLE_") ? r : "ROLE_" + r;
+			out.add(new SimpleGrantedAuthority(prefixed));
+		}
+		// 2) Granular LMS_* authorities expanded from the same roles via
+		//    LmsRoleAuthorityMapper. This is what @PreAuthorize("hasAuthority('LMS_AI_GENERATE')")
+		//    and the rest of the LMS controllers gate on.
+		List<UserRole> userRoles = new ArrayList<>();
+		for (String r : roles) {
+			if (r == null) { continue; }
+			String stripped = r.startsWith("ROLE_") ? r.substring("ROLE_".length()) : r;
+			try {
+				userRoles.add(UserRole.valueOf(stripped));
+			} catch (IllegalArgumentException ignore) {
+				// unknown role name — LmsRoleAuthorityMapper.mapAuthorities silently
+				// ignores it, which is the right forward-compat behaviour.
+			}
+		}
+		out.addAll(authorityMapper.mapAuthorities(userRoles).stream()
 				.<GrantedAuthority>map(SimpleGrantedAuthority::new)
-				.toList();
+				.toList());
+		return new ArrayList<>(out);
 	}
 
 }

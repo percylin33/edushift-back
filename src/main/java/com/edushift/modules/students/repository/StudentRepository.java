@@ -44,4 +44,19 @@ public interface StudentRepository extends JpaRepository<Student, UUID>,
 	 */
 	Optional<Student> findByEmailIgnoreCase(String email);
 
+	/**
+	 * Resolves the {@link Student} record (if any) linked to the
+	 * given auth {@code userId} (FK {@code students.user_id}
+	 * → {@code users.public_uuid}). Used by BE-7b.2 to bridge the
+	 * quiz attempt's {@code student_user_id} (which is a
+	 * {@code users.public_uuid}) to the enrollment lookup
+	 * {@link com.edushift.modules.students.enrollments.repository.StudentEnrollmentRepository#existsActiveAt}
+	 * (which expects a {@link Student} entity).
+	 *
+	 * <p>Returns empty when the user has no student record
+	 * (e.g. it's a parent or a teacher), in which case the
+	 * caller should treat the enrollment check as failed.
+	 */
+	Optional<Student> findByUserId(UUID userId);
+
 }

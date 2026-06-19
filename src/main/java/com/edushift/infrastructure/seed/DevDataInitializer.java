@@ -3,7 +3,9 @@ package com.edushift.infrastructure.seed;
 import com.edushift.modules.auth.entity.User;
 import com.edushift.modules.auth.entity.UserStatus;
 import com.edushift.modules.auth.repository.UserRepository;
+import com.edushift.modules.tenants.repository.TenantRepository;
 import com.edushift.shared.multitenancy.TenantContext;
+import java.util.List;
 import java.util.UUID;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -57,6 +59,7 @@ public class DevDataInitializer implements CommandLineRunner {
 
 	private final JdbcTemplate jdbcTemplate;
 	private final UserRepository userRepository;
+	private final TenantRepository tenantRepository;
 	private final PasswordEncoder passwordEncoder;
 	private final TransactionTemplate txTemplate;
 
@@ -65,19 +68,30 @@ public class DevDataInitializer implements CommandLineRunner {
 	private final String adminFirstName;
 	private final String adminLastName;
 	private final String tenantSlug;
+	private final String seedPassword;
+
+	private static final String SEED_HASH_SENTINEL = "SEED_RESET_REQUIRED_v1";
+	private static final String FIND_TENANTS_SQL = """
+			SELECT id
+			FROM edushift.tenants
+			WHERE deleted = false
+			""";
 
 	public DevDataInitializer(
 			JdbcTemplate jdbcTemplate,
 			UserRepository userRepository,
+			TenantRepository tenantRepository,
 			PasswordEncoder passwordEncoder,
 			PlatformTransactionManager txManager,
 			@Value("${dev.seed.admin.email:admin@demo.edushift.pe}") String adminEmail,
 			@Value("${dev.seed.admin.password:Edushift123!}") String adminPassword,
 			@Value("${dev.seed.admin.first-name:Admin}") String adminFirstName,
 			@Value("${dev.seed.admin.last-name:Demo}") String adminLastName,
-			@Value("${dev.seed.admin.tenant-slug:demo}") String tenantSlug) {
+			@Value("${dev.seed.admin.tenant-slug:demo}") String tenantSlug,
+			@Value("${dev.seed.password:EduShift2026!}") String seedPassword) {
 		this.jdbcTemplate = jdbcTemplate;
 		this.userRepository = userRepository;
+		this.tenantRepository = tenantRepository;
 		this.passwordEncoder = passwordEncoder;
 		this.txTemplate = new TransactionTemplate(txManager);
 		this.adminEmail = adminEmail;
@@ -85,11 +99,15 @@ public class DevDataInitializer implements CommandLineRunner {
 		this.adminFirstName = adminFirstName;
 		this.adminLastName = adminLastName;
 		this.tenantSlug = tenantSlug;
+		this.seedPassword = seedPassword;
 	}
 
 	@Override
 	public void run(String... args) {
-		// Tenant lookup runs WITHOUT tenant context — tenants is the global catalog
+		// 1) Reset V38-seeded user password hashes (sentinel → real BCrypt of seedPassword)
+		resetSeededUserPasswords();
+
+		// 2) Tenant lookup runs WITHOUT tenant context — tenants is the global catalog
 		// and JdbcTemplate manages its own connection / transaction.
 		UUID tenantId = findDemoTenantId();
 		if (tenantId == null) {
@@ -134,6 +152,77 @@ public class DevDataInitializer implements CommandLineRunner {
 		}
 		catch (EmptyResultDataAccessException e) {
 			return null;
+		}
+	}
+
+	/**
+	 * V38 seeds user rows with a sentinel password hash that REJECTS login
+	 * (cannot be a real BCrypt). On dev startup we walk every tenant and
+	 * overwrite those sentinel hashes with a real BCrypt of
+	 * {@code dev.seed.password} (default {@code EduShift2026!}) so the
+	 * seeded admin / teachers / parents can log in.
+	 *
+	 * <p>Idempotent: rows whose password_hash no longer starts with
+	 * {@link #SEED_HASH_SENTINEL} are skipped, so re-runs are no-ops once
+	 * the sentinel has been replaced.</p>
+	 *
+	 * <p>Multi-tenancy note: the same dance as {@link #run} — enter
+	 * {@code runAs} per tenant, then open a new transaction inside. We use
+	 * raw SQL to find the sentinel rows because the {@code @TenantId}
+	 * filter is the last thing to apply, and we want to update them all
+	 * without writing a JPA entity for the sentinel state.</p>
+	 */
+	private void resetSeededUserPasswords() {
+		List<UUID> tenantIds = jdbcTemplate.query(FIND_TENANTS_SQL,
+				(rs, rowNum) -> (UUID) rs.getObject(1));
+
+		String findSentinelsSql = """
+				SELECT id, email
+				FROM edushift.users
+				WHERE deleted = false
+				  AND password_hash LIKE ?
+				""";
+		String updateSql = """
+				UPDATE edushift.users
+				SET    password_hash = ?, updated_at = NOW()
+				WHERE  id = ?
+				""";
+		String sentinelPrefix = SEED_HASH_SENTINEL + "%";
+
+		int totalReset = 0;
+		for (UUID tid : tenantIds) {
+			final int[] count = { 0 };
+			TenantContext.runAs(tid, () -> {
+				txTemplate.executeWithoutResult(status -> {
+					List<Object[]> rows = jdbcTemplate.query(
+							findSentinelsSql,
+							(rs, rowNum) -> new Object[] {
+									(UUID) rs.getObject(1),
+									rs.getString(2)
+							},
+							sentinelPrefix);
+
+					String realHash = passwordEncoder.encode(seedPassword);
+					for (Object[] row : rows) {
+						UUID userId = (UUID) row[0];
+						String email = (String) row[1];
+						jdbcTemplate.update(updateSql, realHash, userId);
+						count[0]++;
+						log.info("[dev-seed] reset password for seeded user '{}' "
+								+ "(tenant={}, password='{}')",
+								email, tid, seedPassword);
+					}
+				});
+				return null;
+			});
+			totalReset += count[0];
+		}
+
+		if (totalReset == 0) {
+			log.debug("[dev-seed] no seeded users with sentinel hash found — nothing to reset");
+		} else {
+			log.info("[dev-seed] reset {} seeded user password(s) to real BCrypt of '{}'",
+					totalReset, seedPassword);
 		}
 	}
 

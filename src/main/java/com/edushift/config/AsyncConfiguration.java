@@ -55,4 +55,40 @@ public class AsyncConfiguration {
 		return executor;
 	}
 
+	/**
+	 * Pool dedicated to long-running AI generation jobs (BE-7c.2).
+	 * Sizing rationale: an LLM call typically takes 1-3s for the
+	 * synchronous quiz-question flow, and up to 30-60s for larger
+	 * generation jobs (rubrics, session outlines, future streaming).
+	 * <ul>
+	 *   <li>Core size 2 keeps 2 generations in flight on every node
+	 *       — enough throughput for the expected tenant count.</li>
+	 *   <li>Max size 4 gives headroom for bursts without starving the
+	 *       Hikari pool (default max 10 connections, shared with the
+	 *       request-serving threads).</li>
+	 *   <li>Queue capacity 50 absorbs traffic spikes; if the queue
+	 *       fills, the caller's {@code POST} is rejected with 503 +
+	 *       a clear "AI busy, retry shortly" message rather than
+	 *       silently dropped.</li>
+	 * </ul>
+	 * Caller-runs rejection is intentional: the controller will
+	 * surface 503 to the client instead of letting generations vanish
+	 * during a reboot.
+	 */
+	@Bean(name = "aiJobExecutor")
+	Executor aiJobExecutor() {
+		ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+		executor.setCorePoolSize(2);
+		executor.setMaxPoolSize(4);
+		executor.setQueueCapacity(50);
+		executor.setThreadNamePrefix("ai-job-");
+		executor.setTaskDecorator(new ContextPropagatingTaskDecorator());
+		// When the queue is full, run on the caller thread instead of
+		// dropping the task. The controller maps that to a 503 with a
+		// retry hint.
+		executor.setRejectedExecutionHandler(new java.util.concurrent.ThreadPoolExecutor.CallerRunsPolicy());
+		executor.initialize();
+		return executor;
+	}
+
 }
