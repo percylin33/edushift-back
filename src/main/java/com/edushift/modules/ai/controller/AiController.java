@@ -1,6 +1,8 @@
 package com.edushift.modules.ai.controller;
 
 import com.edushift.modules.ai.dto.AsyncGenerationAcceptedResponse;
+import com.edushift.modules.ai.dto.GenerateRubricRequest;
+import com.edushift.modules.ai.dto.GenerateSessionRequest;
 import com.edushift.modules.ai.dto.GenerationStatusResponse;
 import com.edushift.modules.ai.dto.QuestionSuggestion;
 import com.edushift.modules.ai.dto.SuggestQuizQuestionsRequest;
@@ -10,6 +12,10 @@ import com.edushift.modules.ai.exception.AiGenerationNotFoundException;
 import com.edushift.modules.ai.repository.AiGenerationRepository;
 import com.edushift.modules.ai.service.AsyncLmsAiOrchestrator;
 import com.edushift.modules.ai.service.LmsAiService;
+import com.edushift.modules.ai.service.RubricGeneratorService;
+import com.edushift.modules.ai.service.RubricGeneratorService.RubricGeneratorResult;
+import com.edushift.modules.ai.service.SessionGeneratorService;
+import com.edushift.modules.ai.service.SessionGeneratorService.SessionGeneratorResult;
 import com.edushift.shared.api.ApiResponse;
 import com.edushift.shared.security.LmsAuthorities;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -35,7 +41,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * REST adapter for the AI module (BE-7c.1 + BE-7c.2).
+ * REST adapter for the AI module (BE-7c.1 + BE-7c.2 + BE-8.1).
  *
  * <h3>Endpoints</h3>
  * <table>
@@ -46,6 +52,14 @@ import org.springframework.web.bind.annotation.RestController;
  *       <td>LMS_AI_GENERATE</td>
  *       <td>{@link SuggestQuizQuestionsResponse} (sync, 200) or
  *           {@link AsyncGenerationAcceptedResponse} (async, 202)</td></tr>
+ *   <tr><td>POST</td>
+ *       <td>/v1/ai/generate-session</td>
+ *       <td>LMS_AI_GENERATE</td>
+ *       <td>{@link SessionGeneratorResult} (200)</td></tr>
+ *   <tr><td>POST</td>
+ *       <td>/v1/ai/generate-rubric</td>
+ *       <td>LMS_AI_GENERATE</td>
+ *       <td>{@link RubricGeneratorResult} (200)</td></tr>
  *   <tr><td>GET</td>
  *       <td>/lms/ai/generations/{publicUuid}</td>
  *       <td>LMS_AI_GENERATE</td>
@@ -81,6 +95,8 @@ public class AiController {
 
     private final LmsAiService lmsAiService;
     private final AsyncLmsAiOrchestrator asyncOrchestrator;
+    private final SessionGeneratorService sessionGeneratorService;
+    private final RubricGeneratorService rubricGeneratorService;
     private final AiGenerationRepository generationRepo;
     private final ObjectMapper objectMapper;
 
@@ -117,6 +133,65 @@ public class AiController {
         }
         SuggestQuizQuestionsResponse body = lmsAiService.suggestQuizQuestions(request);
         return ResponseEntity.ok(ApiResponse.ok(body));
+    }
+
+    @PostMapping("/v1/ai/generate-session")
+    @PreAuthorize("hasAuthority('" + LmsAuthorities.LMS_AI_GENERATE + "')")
+    @Operation(summary = "Generate a learning session outline with AI",
+               description = """
+                       Takes a topic, course, duration, and optional
+                       competency/capacity references; returns a structured
+                       JSON lesson outline (title, summary, INICIO/DESARROLLO/CIERRE
+                       activities, resources, evaluation criteria) aligned to the
+                       MINEDU Perú lesson template.
+
+                       The output is **not** persisted as a `LearningSession` —
+                       the FE shows it in a preview modal and the user explicitly
+                       accepts (FE-8.1 will POST to `/v1/learning-sessions`).
+                       Synchronous only in BE-8.1; the async path lands in
+                       BE-9.x if needed (current 1-3s latency is acceptable for
+                       a teacher-facing flow).
+                       """)
+    @ApiResponses({
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "Session outline generated"),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400", description = "Validation error (topic too short, duration out of range, courseId missing)"),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "403", description = "AI_DISABLED — tenant has AI off, or user lacks LMS_AI_GENERATE"),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "404", description = "courseId not found in caller's tenant"),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "429", description = "AI_QUOTA_EXCEEDED — daily or monthly quota exhausted"),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "502", description = "AI_PARSE_ERROR / LLM_TIMEOUT / LLM_UPSTREAM — provider error or unparseable output")
+    })
+    public ResponseEntity<ApiResponse<SessionGeneratorResult>> generateSession(
+            @Valid @RequestBody GenerateSessionRequest request
+    ) {
+        SessionGeneratorResult result = sessionGeneratorService.generateSession(request);
+        return ResponseEntity.ok(ApiResponse.ok(result));
+    }
+
+    @PostMapping("/v1/ai/generate-rubric")
+    @PreAuthorize("hasAuthority('" + LmsAuthorities.LMS_AI_GENERATE + "')")
+    @Operation(summary = "Generate a rubric draft with AI",
+               description = """
+                       Takes a rubric name, description, list of criteria,
+                       and an optional level count (default 4) and optional
+                       seedRubricId (ADR-8.3: fork from existing). Returns a
+                       structured JSON rubric draft (criteria with weights +
+                       descriptors, levels with codes + order). The output
+                       mirrors `CreateRubricRequest` 1:1 so the FE can feed it
+                       back into `POST /v1/academic/rubrics` to persist.
+                       """)
+    @ApiResponses({
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "Rubric draft generated"),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400", description = "Validation error (criteria empty, levelCount out of range)"),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "403", description = "AI_DISABLED — tenant has AI off, or user lacks LMS_AI_GENERATE"),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "404", description = "seedRubricId not found in caller's tenant"),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "429", description = "AI_QUOTA_EXCEEDED — daily or monthly quota exhausted"),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "502", description = "AI_PARSE_ERROR / LLM_TIMEOUT / LLM_UPSTREAM — provider error or unparseable output")
+    })
+    public ResponseEntity<ApiResponse<RubricGeneratorResult>> generateRubric(
+            @Valid @RequestBody GenerateRubricRequest request
+    ) {
+        RubricGeneratorResult result = rubricGeneratorService.generateRubric(request);
+        return ResponseEntity.ok(ApiResponse.ok(result));
     }
 
     @GetMapping("/generations/{publicUuid}")

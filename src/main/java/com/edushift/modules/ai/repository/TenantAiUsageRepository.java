@@ -80,6 +80,81 @@ public interface TenantAiUsageRepository extends JpaRepository<TenantAiUsage, UU
             """, nativeQuery = true)
     long sumTokensThisMonth(@Param("tenantId") UUID tenantId);
 
+    // ----------------------------------------------------------------
+    // Sprint 8 / BE-8.4 — usage summary (TENANT_ADMIN dashboard)
+    // ----------------------------------------------------------------
+
+    /**
+     * Per-feature breakdown of AI usage for the current UTC month, for
+     * the given tenant. Joins {@code ai_generations} (which carries
+     * the feature label) and {@code tenant_ai_usage} (daily counters)
+     * via the date. The result is a list of rows; the service maps
+     * them into a {@code UsageByFeature} DTO.
+     *
+     * <p>Why a native query: we need a {@code GROUP BY feature} with
+     * {@code COUNT(DISTINCT ...)} that Spring Data JPA's derived
+     * methods can't express cleanly. Native is fine here because the
+     * schema is stable and the query is exercised by the IT.
+     */
+    @Query(value = """
+            SELECT g.feature                                AS feature,
+                   COUNT(*)                                AS request_count,
+                   COALESCE(SUM(g.prompt_tokens), 0)       AS tokens_in_total,
+                   COALESCE(SUM(g.response_tokens), 0)     AS tokens_out_total
+            FROM   edushift.ai_generations g
+            WHERE  g.tenant_id = :tenantId
+              AND  g.created_at >= date_trunc('month', now() AT TIME ZONE 'UTC')
+              AND  g.created_at <  date_trunc('month', now() AT TIME ZONE 'UTC') + INTERVAL '1 month'
+            GROUP BY g.feature
+            ORDER BY request_count DESC
+            """, nativeQuery = true)
+    java.util.List<FeatureUsageRow> sumUsageThisMonthByFeature(
+            @Param("tenantId") UUID tenantId);
+
+    /**
+     * Daily usage rows for the current month, paginated. Used by the
+     * "history" table in the FE-8.4 dashboard.
+     */
+    @Query(value = """
+            SELECT usage_day                       AS usage_day,
+                   request_count                   AS request_count,
+                   success_count                   AS success_count,
+                   failed_count                    AS failed_count,
+                   tokens_in_total                 AS tokens_in_total,
+                   tokens_out_total                AS tokens_out_total
+            FROM   edushift.tenant_ai_usage
+            WHERE  tenant_id = :tenantId
+              AND  usage_day >= date_trunc('month', now() AT TIME ZONE 'UTC')::date
+              AND  usage_day <  date_trunc('month', now() AT TIME ZONE 'UTC')::date + INTERVAL '1 month'
+            ORDER BY usage_day DESC
+            """, nativeQuery = true)
+    org.springframework.data.domain.Page<DailyUsageRow> findDailyUsageThisMonth(
+            @Param("tenantId") UUID tenantId,
+            org.springframework.data.domain.Pageable pageable);
+
+    /**
+     * Projection used by {@link #sumUsageThisMonthByFeature}. Names
+     * MUST match the columns selected in the native query.
+     */
+    interface FeatureUsageRow {
+        String getFeature();
+        long getRequestCount();
+        long getTokensInTotal();
+        long getTokensOutTotal();
+    }
+
+    /**
+     * Projection used by {@link #findDailyUsageThisMonth}.
+     */
+    interface DailyUsageRow {
+        java.time.LocalDate getUsageDay();
+        long getRequestCount();
+        long getSuccessCount();
+        long getFailedCount();
+        long getTokensInTotal();
+        long getTokensOutTotal();
+    }
+
     /**
      * TTL job: hard-delete rows older than the cutoff (DEBT-BE-7C-1).
      *

@@ -27,6 +27,8 @@ import com.edushift.modules.ai.llm.LlmException;
 import com.edushift.modules.ai.repository.AiGenerationRepository;
 import com.edushift.modules.ai.service.AsyncLmsAiOrchestrator;
 import com.edushift.modules.ai.service.LmsAiService;
+import com.edushift.modules.ai.service.RubricGeneratorService;
+import com.edushift.modules.ai.service.SessionGeneratorService;
 import com.edushift.modules.auth.security.JwtAuthenticatedPrincipal;
 import com.edushift.modules.auth.security.JwtAuthenticationToken;
 import com.edushift.modules.auth.service.JwtService;
@@ -71,6 +73,12 @@ class AiControllerTest {
 
     @MockitoBean
     private AsyncLmsAiOrchestrator asyncOrchestrator;
+
+    @MockitoBean
+    private SessionGeneratorService sessionGeneratorService;
+
+    @MockitoBean
+    private RubricGeneratorService rubricGeneratorService;
 
     @MockitoBean
     private AiGenerationRepository generationRepo;

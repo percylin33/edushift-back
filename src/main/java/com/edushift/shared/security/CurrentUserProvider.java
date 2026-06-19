@@ -4,16 +4,24 @@ import java.util.Optional;
 import java.util.UUID;
 
 /**
- * Port that exposes the currently authenticated user. Implementations read from
- * the {@code SecurityContext} (or any other source) without coupling callers
- * to Spring Security.
+ * Resolves the current authenticated user from the security context.
+ *
+ * <p>The default implementation lives in
+ * {@code edushift.infrastructure.security.SecurityContextCurrentUserProvider}
+ * and reads the principal from Spring's {@code SecurityContextHolder}.</p>
+ *
+ * <p>The user is identified by a UUID (public id, not the internal
+ * {@code Long} primary key — see ADR-1.2 about UUID v7 as the
+ * public identifier).</p>
  */
 public interface CurrentUserProvider {
 
-	Optional<UUID> currentUserId();
+    /** UUID of the current authenticated user, empty if anonymous. */
+    Optional<UUID> currentUserId();
 
-	Optional<String> currentUsername();
+    /** Username of the current authenticated user, empty if anonymous. */
+    Optional<String> currentUsername();
 
-	Optional<UUID> currentTenantId();
-
+    /** Tenant id of the current authenticated user, empty if anonymous. */
+    Optional<UUID> currentTenantId();
 }

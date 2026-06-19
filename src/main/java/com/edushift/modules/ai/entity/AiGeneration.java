@@ -80,6 +80,14 @@ public class AiGeneration extends BaseEntity {
     @Column(name = "error_message", columnDefinition = "text")
     private String errorMessage;
 
+    /** SEC-8.1: SHA-256 of the post-mask prompt text (hex). */
+    @Column(name = "input_hash", length = 64)
+    private String inputHash;
+
+    /** SEC-8.1: SHA-256 of the post-mask response text (hex). */
+    @Column(name = "output_hash", length = 64)
+    private String outputHash;
+
     @Column(name = "latency_ms")
     private Integer latencyMs;
 

@@ -59,6 +59,7 @@ import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.security.core.Authentication;
@@ -97,6 +98,7 @@ public class AttendanceServiceImpl implements AttendanceService {
 	private final AttendanceMapper mapper;
 	private final CurrentUserProvider currentUserProvider;
 	private final AttendanceAuditLogger auditLogger;
+	private final ApplicationEventPublisher eventPublisher; // Sprint 9 / BE-9.3
 
 	@Value("${edushift.attendance.future-drift-tolerance-minutes:1}")
 	private long futureDriftToleranceMinutes;
@@ -790,6 +792,37 @@ public class AttendanceServiceImpl implements AttendanceService {
 				saved.getPublicUuid(), prevStatus, saved.getStatus(),
 				actorPublicUuid);
 		auditLogger.logRecordEdited(saved, prevStatus, prevNotes);
+
+		// Sprint 9 / BE-9.3 — fire a notification event when a record
+		// is manually marked ABSENT (the parent should know). The
+		// NotificationEventListener consumes AFTER_COMMIT so a
+		// rollback cancels the notification.
+		if (saved.getStatus() == AttendanceRecordStatus.ABSENT
+				&& prevStatus != AttendanceRecordStatus.ABSENT) {
+			java.util.UUID studentUserId = saved.getStudent() == null ? null : saved.getStudent().getUserId();
+			String studentName = saved.getStudent() == null ? "" : saved.getStudent().fullName();
+			String sectionName = saved.getSession() == null || saved.getSession().getSection() == null
+					? "" : saved.getSession().getSection().getName();
+			eventPublisher.publishEvent(
+					com.edushift.modules.notifications.event.NotificationEvent.builder()
+							.templateKey("STUDENT_ABSENT")
+							.category(com.edushift.modules.notifications.entity.Notification.Category.ABSENCE)
+							.sourceId(saved.getPublicUuid())
+							.recipients(studentUserId == null
+									? java.util.List.of()
+									: java.util.List.of(
+										new com.edushift.modules.notifications.event.NotificationEvent.Recipient(
+												studentUserId, null)))
+							.payload(java.util.Map.of(
+									"studentName", studentName,
+									"date", saved.getSession().getOccurredOn().toString(),
+									"reason", saved.getNotes() == null ? "" : saved.getNotes(),
+									"courseName", sectionName,
+									"parentName", ""
+							))
+							.build());
+		}
+
 		return toRecordResponseWithUsers(saved, null);
 	}
 
