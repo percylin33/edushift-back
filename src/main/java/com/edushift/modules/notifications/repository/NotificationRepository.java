@@ -56,6 +56,8 @@ public interface NotificationRepository extends JpaRepository<Notification, UUID
 
     Optional<Notification> findByPublicUuid(UUID publicUuid);
 
+    java.util.List<Notification> findAllByPublicUuidIn(java.util.Collection<UUID> publicUuids);
+
     /** Mark a single notification as READ (only the recipient can). */
     @Modifying
     @Query("""

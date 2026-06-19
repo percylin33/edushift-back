@@ -139,6 +139,18 @@ public class NotificationService {
                 .toList();
     }
 
+    /**
+     * Same as {@link #notifyAll} but returns the actual {@link Notification}
+     * rows. Used by the realtime layer (Sprint 10 / BE-10.4) so we
+     * can push the full payload via STOMP without a second query.
+     */
+    @Transactional
+    public List<Notification> notifyAllAndReturnRows(List<NotifyCommand> cmds) {
+        List<UUID> publicUuids = notifyAll(cmds);
+        if (publicUuids.isEmpty()) return List.of();
+        return notificationRepo.findAllByPublicUuidIn(publicUuids);
+    }
+
     // ------------------------------------------------------------------
     // Read APIs (used by the controller)
     // ------------------------------------------------------------------

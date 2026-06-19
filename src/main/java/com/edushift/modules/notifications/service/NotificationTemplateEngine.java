@@ -61,6 +61,15 @@ public class NotificationTemplateEngine {
      * attributes, and protocols. Returns the cleaned HTML.
      */
     public String sanitizeBody(String html) {
+        return sanitizeBodyStatic(html);
+    }
+
+    /**
+     * Static variant (Sprint 10 / DEBT-9-FE-1 defense in depth).
+     * DTOs and other non-Spring callers can re-sanitize at the
+     * serialization boundary without injecting the bean.
+     */
+    public static String sanitizeBodyStatic(String html) {
         if (html == null) return "";
         return Jsoup.clean(html, SAFE);
     }

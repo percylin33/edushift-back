@@ -3,6 +3,8 @@ package com.edushift.modules.notifications.security;
 import com.edushift.modules.notifications.entity.Notification.Category;
 import com.edushift.modules.notifications.entity.Notification.Channel;
 import java.nio.charset.StandardCharsets;
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.Base64;
 import java.util.UUID;
 import javax.crypto.Mac;
@@ -12,18 +14,19 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 /**
- * HMAC-based unsubscribe token signer (Sprint 9 / SEC-9.1).
+ * HMAC-based unsubscribe token signer (Sprint 9 / SEC-9.1, refactored
+ * Sprint 10 / DEBT-9-SEC-2).
  *
  * <p>Each email footer contains a one-click unsubscribe link with
  * a signed token. The link looks like:</p>
  *
  * <pre>
- *   https://app.edushift.com/unsubscribe?u={userId}&c={channel}&k={category}&t={expiry}&s={signature}
+ *   https://app.edushift.com/unsubscribe?token={token}
  * </pre>
  *
- * <p>The signature is an HMAC-SHA256 of the previous fields, keyed
- * with a server-side secret. On click, the FE sends the token to
- * the BE which verifies the signature and disables the preference
+ * <p>The token is an HMAC-SHA256 of {@code userId|channel|category|expiry}
+ * keyed with a server-side secret. On click, the FE sends the token
+ * to the BE which verifies the signature and disables the preference
  * row. Without the secret, an attacker can't forge a "disable
  * someone's notifications" link.</p>
  *
@@ -32,21 +35,31 @@ import org.springframework.stereotype.Component;
  * exactly once). JWT is overkill — we don't need a header
  * (alg/kid) or a body with claims. A compact HMAC over the four
  * params (user, channel, category, expiry) is simpler and harder
- * to misuse.
+ * to misuse.</p>
  *
  * <h3>Why a separate secret</h3>
  * The signing key is dedicated to unsubscribe links. If it ever
  * leaks, we rotate just this key — the JWT and password secrets
  * stay safe.
+ *
+ * <h3>Sprint 10 / DEBT-9-SEC-2</h3>
+ * The signer now owns the URL construction ({@link #buildUrl}) so
+ * callers don't need to inject the controller (which was a circular
+ * dependency smell). The renderer lives in
+ * {@code UnsubscribePageRenderer}.
  */
 @Component
 @Slf4j
 public class UnsubscribeTokenSigner {
 
     private final byte[] secret;
+    private final String frontendUrl;
+    private final long tokenTtlHours;
 
     public UnsubscribeTokenSigner(
-            @Value("${app.notifications.email.unsubscribe-secret:}") String secret) {
+            @Value("${app.notifications.email.unsubscribe-secret:}") String secret,
+            @Value("${app.notifications.email.frontend-url:https://app.edushift.com}") String frontendUrl,
+            @Value("${app.notifications.email.unsubscribe-ttl-hours:24}") long tokenTtlHours) {
         // Dev fallback: a deterministic test secret. Real deployments
         // MUST set app.notifications.email.unsubscribe-secret.
         if (secret == null || secret.isBlank()) {
@@ -54,6 +67,8 @@ public class UnsubscribeTokenSigner {
             secret = "edushift-dev-unsubscribe-secret-do-not-use-in-prod";
         }
         this.secret = secret.getBytes(StandardCharsets.UTF_8);
+        this.frontendUrl = frontendUrl;
+        this.tokenTtlHours = tokenTtlHours;
     }
 
     /**
@@ -92,6 +107,23 @@ public class UnsubscribeTokenSigner {
                 Channel.valueOf(channelStr),
                 Category.valueOf(categoryStr),
                 expiry);
+    }
+
+    /**
+     * Build a fresh signed token with the default TTL.
+     */
+    public String buildToken(UUID userId, Channel channel, Category category) {
+        long expiry = Instant.now().plus(tokenTtlHours, ChronoUnit.HOURS).toEpochMilli();
+        return sign(userId, channel, category, expiry);
+    }
+
+    /**
+     * Build the full unsubscribe URL for the email footer.
+     * Centralised here so the {@code EmailSender} doesn't need to
+     * inject the controller (DEBT-9-SEC-2).
+     */
+    public String buildUrl(UUID userId, Channel channel, Category category) {
+        return frontendUrl + "/api/v1/unsubscribe?token=" + buildToken(userId, channel, category);
     }
 
     private String hmacHex(String payload) {

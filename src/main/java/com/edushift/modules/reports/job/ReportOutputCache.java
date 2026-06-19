@@ -14,7 +14,7 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 public final class ReportOutputCache {
 
-    record Entry(byte[] bytes, Format format, long expiryEpochMs) {}
+    public record Entry(byte[] bytes, Format format, long expiryEpochMs) {}
 
     private static final ConcurrentHashMap<UUID, Entry> CACHE = new ConcurrentHashMap<>();
     private static final long TTL_MS = 60 * 60 * 1000L; // 1 hour

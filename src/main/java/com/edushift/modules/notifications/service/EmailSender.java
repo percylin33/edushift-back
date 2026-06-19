@@ -1,9 +1,9 @@
 package com.edushift.modules.notifications.service;
 
 import com.edushift.modules.ai.safety.PiiSafetyFilter;
-import com.edushift.modules.notifications.controller.UnsubscribeController;
 import com.edushift.modules.notifications.entity.Notification.Category;
 import com.edushift.modules.notifications.entity.Notification.Channel;
+import com.edushift.modules.notifications.security.UnsubscribeTokenSigner;
 import jakarta.mail.MessagingException;
 import jakarta.mail.internet.MimeMessage;
 import java.util.UUID;
@@ -42,7 +42,7 @@ public class EmailSender {
 
     private final JavaMailSender mailSender;
     private final PiiSafetyFilter piiFilter;
-    private final UnsubscribeController unsubscribeController;
+    private final UnsubscribeTokenSigner unsubscribeSigner;
 
     @Value("${app.notifications.email.from:noreply@edushift.local}")
     private String fromAddress;
@@ -75,9 +75,10 @@ public class EmailSender {
         String safeSubject = piiFilter.mask(subject);
         String safeBody    = piiFilter.mask(bodyHtml);
 
-        // 2) Inject the unsubscribe footer (Sprint 9 / SEC-9.1).
+        // 2) Inject the unsubscribe footer (Sprint 9 / SEC-9.1,
+        //    refactored Sprint 10 / DEBT-9-SEC-2: signer owns the URL).
         if (userId != null && channel != null && category != null) {
-            String unsubUrl = unsubscribeController.buildUnsubscribeUrl(userId, channel, category);
+            String unsubUrl = unsubscribeSigner.buildUrl(userId, channel, category);
             safeBody = injectUnsubscribeFooter(safeBody, unsubUrl);
         }
 

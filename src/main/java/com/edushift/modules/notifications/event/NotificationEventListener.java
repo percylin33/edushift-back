@@ -1,6 +1,8 @@
 package com.edushift.modules.notifications.event;
 
+import com.edushift.modules.notifications.entity.Notification;
 import com.edushift.modules.notifications.entity.Notification.Channel;
+import com.edushift.modules.notifications.realtime.RealtimeService;
 import com.edushift.modules.notifications.service.NotificationService;
 import com.edushift.modules.notifications.service.NotificationService.NotifyCommand;
 import java.util.List;
@@ -23,6 +25,11 @@ import org.springframework.transaction.event.TransactionalEventListener;
  * (a notification for an event that was rolled back). We also mark
  * the listener {@code @Async} so the publishing thread is not
  * blocked by the email outbox enqueue.</p>
+ *
+ * <h3>Sprint 10 / BE-10.4 — realtime push</h3>
+ * After persisting the in-app rows, we push each one to the
+ * recipient's STOMP topic so the FE bell updates instantly
+ * (replacing the 30s polling from Sprint 9).
  */
 @Component
 @RequiredArgsConstructor
@@ -30,6 +37,7 @@ import org.springframework.transaction.event.TransactionalEventListener;
 public class NotificationEventListener {
 
     private final NotificationService notificationService;
+    private final RealtimeService realtime;
 
     @Async
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
@@ -45,9 +53,20 @@ public class NotificationEventListener {
                             .payload(event.payload())
                             .build())
                     .toList();
-            var sent = notificationService.notifyAll(cmds);
+            List<Notification> rows = notificationService.notifyAllAndReturnRows(cmds);
+            // Push each to the recipient's STOMP topic. If the user
+            // is offline, the message is dropped (no offline queue
+            // for MVP — they re-fetch on next login).
+            for (Notification n : rows) {
+                try {
+                    realtime.pushToUser(n);
+                } catch (Exception pushEx) {
+                    log.warn("[Realtime] push failed for notification {}: {}",
+                            n.getPublicUuid(), pushEx.getMessage());
+                }
+            }
             log.info("[NotificationEvent] template={} recipients={} sent={} source={}",
-                    event.templateKey(), event.recipients().size(), sent.size(), event.sourceId());
+                    event.templateKey(), event.recipients().size(), rows.size(), event.sourceId());
         } catch (Exception ex) {
             // Never let a notification failure roll back the source
             // transaction. We log + swallow; the outbox has the row
