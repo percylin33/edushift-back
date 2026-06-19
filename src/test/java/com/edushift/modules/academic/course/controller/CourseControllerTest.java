@@ -59,6 +59,7 @@ class CourseControllerTest {
 
 	@MockitoBean private CourseService service;
 	@MockitoBean private JwtService jwtService;
+	@MockitoBean private com.edushift.shared.security.LmsRoleAuthorityMapper roleAuthorityMapper;
 
 	private static final String BASE = "/v1/academic/courses";
 

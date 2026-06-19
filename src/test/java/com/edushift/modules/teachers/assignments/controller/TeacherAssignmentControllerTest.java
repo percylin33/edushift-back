@@ -60,8 +60,9 @@ class TeacherAssignmentControllerTest {
 
 	@MockitoBean private TeacherAssignmentService service;
 	@MockitoBean private JwtService jwtService;
+	@MockitoBean private com.edushift.shared.security.LmsRoleAuthorityMapper roleAuthorityMapper;
 
-	private static final String TEACHERS_BASE = "/v1/teachers";
+private static final String TEACHERS_BASE = "/v1/teachers";
 	private static final String ASSIGNMENTS_BASE = "/v1/assignments";
 	private static final String SECTIONS_BASE = "/v1/academic/sections";
 

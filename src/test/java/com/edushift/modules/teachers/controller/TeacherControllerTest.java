@@ -67,8 +67,9 @@ class TeacherControllerTest {
 
 	@MockitoBean private TeacherService service;
 	@MockitoBean private JwtService jwtService;
+	@MockitoBean private com.edushift.shared.security.LmsRoleAuthorityMapper roleAuthorityMapper;
 
-	private static final String BASE = "/v1/teachers";
+private static final String BASE = "/v1/teachers";
 
 	private String json(Object value) throws Exception {
 		return objectMapper.writeValueAsString(value);

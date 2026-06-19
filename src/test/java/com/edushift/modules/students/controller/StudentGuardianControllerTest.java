@@ -64,6 +64,7 @@ class StudentGuardianControllerTest {
 
 	@MockitoBean private StudentGuardianService service;
 	@MockitoBean private JwtService jwtService;
+	@MockitoBean private com.edushift.shared.security.LmsRoleAuthorityMapper roleAuthorityMapper;
 
 	private static final UUID STUDENT_ID = UUID.randomUUID();
 

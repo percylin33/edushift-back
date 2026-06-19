@@ -63,8 +63,9 @@ class StudentEnrollmentControllerTest {
 
 	@MockitoBean private StudentEnrollmentService service;
 	@MockitoBean private JwtService jwtService;
+	@MockitoBean private com.edushift.shared.security.LmsRoleAuthorityMapper roleAuthorityMapper;
 
-	private static final String STUDENTS_BASE = "/v1/students";
+private static final String STUDENTS_BASE = "/v1/students";
 	private static final String ENROLLMENTS_BASE = "/v1/enrollments";
 	private static final String SECTIONS_BASE = "/v1/academic/sections";
 

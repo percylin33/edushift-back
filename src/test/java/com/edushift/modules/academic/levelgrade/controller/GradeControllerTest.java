@@ -55,6 +55,7 @@ class GradeControllerTest {
 
 	@MockitoBean private GradeService service;
 	@MockitoBean private JwtService jwtService;
+	@MockitoBean private com.edushift.shared.security.LmsRoleAuthorityMapper roleAuthorityMapper;
 
 	private static JwtAuthenticationToken adminAuth() {
 		JwtAuthenticatedPrincipal principal = new JwtAuthenticatedPrincipal(

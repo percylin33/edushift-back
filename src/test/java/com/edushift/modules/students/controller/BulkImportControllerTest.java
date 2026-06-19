@@ -57,8 +57,9 @@ class BulkImportControllerTest {
 
 	@MockitoBean private BulkImportService service;
 	@MockitoBean private JwtService jwtService;
+	@MockitoBean private com.edushift.shared.security.LmsRoleAuthorityMapper roleAuthorityMapper;
 
-	private static final String BASE = "/v1/students/bulk-import";
+private static final String BASE = "/v1/students/bulk-import";
 
 	private static JwtAuthenticationToken adminAuth() {
 		JwtAuthenticatedPrincipal principal = new JwtAuthenticatedPrincipal(

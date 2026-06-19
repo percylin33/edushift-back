@@ -73,6 +73,7 @@ class EvaluationRubricEndpointsTest {
     @MockitoBean private EvaluationService evaluationService;
     @MockitoBean private EvaluationRubricService rubricLinkService;
     @MockitoBean private JwtService jwtService;
+    @MockitoBean private com.edushift.shared.security.LmsRoleAuthorityMapper roleAuthorityMapper;
 
     private static final String BASE = "/v1/academic/evaluations";
 

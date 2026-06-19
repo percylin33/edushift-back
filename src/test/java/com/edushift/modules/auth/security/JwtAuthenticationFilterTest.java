@@ -58,6 +58,9 @@ class JwtAuthenticationFilterTest {
 	@Mock
 	private FilterChain chain;
 
+	@Mock
+	private com.edushift.shared.security.LmsRoleAuthorityMapper authorityMapper;
+
 	@InjectMocks
 	private JwtAuthenticationFilter filter;
 
@@ -289,6 +292,37 @@ class JwtAuthenticationFilterTest {
 			assertThat(auth.getAuthorities())
 					.extracting(GrantedAuthority::getAuthority)
 					.containsExactly("ROLE_ADMIN");
+		}
+
+		@Test
+		@DisplayName("TENANT_ADMIN role expands to LMS_AI_GENERATE (and the rest) via LmsRoleAuthorityMapper")
+		void tenantAdminGetsLmsAiGenerate() throws Exception {
+			// Use the real mapper (not a mock) so the test catches regressions in the
+			// role→authority matrix itself, not just the wiring of the filter.
+			com.edushift.shared.security.LmsRoleAuthorityMapper realMapper =
+					new com.edushift.shared.security.LmsRoleAuthorityMapper();
+			JwtAuthenticationFilter realFilter =
+					new JwtAuthenticationFilter(jwtService, realMapper);
+
+			UUID publicUuid = UUID.randomUUID();
+			UUID tenantId = UUID.randomUUID();
+			request.addHeader(HttpHeaders.AUTHORIZATION, "Bearer good.jwt");
+			when(jwtService.parseAndValidate("good.jwt"))
+					.thenReturn(claims(publicUuid.toString(), TokenType.ACCESS,
+							tenantId, "demo", Set.of("TENANT_ADMIN")));
+
+			realFilter.doFilter(request, response, chain);
+
+			Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+			assertThat(auth).isNotNull();
+			// Coarse ROLE_ kept for hasRole(...) checks.
+			assertThat(auth.getAuthorities())
+					.extracting(GrantedAuthority::getAuthority)
+					.contains("ROLE_TENANT_ADMIN");
+			// Granular LMS_ authorities populated for hasAuthority(...) checks.
+			assertThat(auth.getAuthorities())
+					.extracting(GrantedAuthority::getAuthority)
+					.contains("LMS_AI_GENERATE", "LMS_QUIZ_CREATE", "LMS_TASK_READ");
 		}
 
 	}

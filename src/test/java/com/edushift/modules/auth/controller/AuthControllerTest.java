@@ -114,6 +114,8 @@ class AuthControllerTest {
 	 * directly and short-circuits the filter.
 	 */
 	@MockitoBean
+	private com.edushift.shared.security.LmsRoleAuthorityMapper roleAuthorityMapper;
+	@MockitoBean
 	private JwtService jwtService;
 
 	// ---------------------------------------------------------------------------

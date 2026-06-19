@@ -56,8 +56,9 @@ class AcademicLevelControllerTest {
 
 	@MockitoBean private AcademicLevelService service;
 	@MockitoBean private JwtService jwtService;
+	@MockitoBean private com.edushift.shared.security.LmsRoleAuthorityMapper roleAuthorityMapper;
 
-	private static final String BASE = "/v1/academic/levels";
+private static final String BASE = "/v1/academic/levels";
 
 	private static JwtAuthenticationToken adminAuth() {
 		JwtAuthenticatedPrincipal principal = new JwtAuthenticatedPrincipal(

@@ -71,8 +71,9 @@ class GradeRecordControllerTest {
 
     @MockitoBean private GradeRecordService service;
     @MockitoBean private JwtService jwtService;
+    @MockitoBean private com.edushift.shared.security.LmsRoleAuthorityMapper roleAuthorityMapper;
 
-    private static final String EVAL_BASE = "/v1/academic/evaluations";
+private static final String EVAL_BASE = "/v1/academic/evaluations";
     private static final String GRADE_FLAT_BASE = "/v1/academic/grade-records";
 
     private String json(Object value) throws Exception {

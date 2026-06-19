@@ -92,8 +92,9 @@ class TenantControllerTest {
 
 	/** Filter dependency — never invoked in this slice (auth is simulated). */
 	@MockitoBean private JwtService jwtService;
+	@MockitoBean private com.edushift.shared.security.LmsRoleAuthorityMapper roleAuthorityMapper;
 
-	private static final String BASE = "/v1/tenants";
+private static final String BASE = "/v1/tenants";
 	private static final String SLUG = "acme";
 
 	private String json(Object value) throws Exception {

@@ -69,8 +69,9 @@ class UserInvitationControllerTest {
 
 	@MockitoBean private UserInvitationService service;
 	@MockitoBean private JwtService jwtService;
+	@MockitoBean private com.edushift.shared.security.LmsRoleAuthorityMapper roleAuthorityMapper;
 
-	private static final String BASE = "/v1/users/invitations";
+private static final String BASE = "/v1/users/invitations";
 
 	private String json(Object value) throws Exception {
 		return objectMapper.writeValueAsString(value);
