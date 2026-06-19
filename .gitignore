@@ -51,3 +51,6 @@ logs/
 
 ### Local helper scripts (machine-specific JAVA_HOME) ###
 _*.bat
+
+### Accidental sub-repos / local mounts ###
+/edushift-storage/
