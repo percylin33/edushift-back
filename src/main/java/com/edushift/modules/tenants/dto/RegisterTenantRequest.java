@@ -1,5 +1,6 @@
 package com.edushift.modules.tenants.dto;
 
+import com.edushift.shared.validation.annotations.ValidPassword;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
@@ -22,12 +23,13 @@ import jakarta.validation.constraints.Size;
  * round-trip to authenticate. The newly minted refresh token is the
  * client's resume credential — same lifecycle as any other session.
  *
- * <h3>Why the password rules are mild</h3>
- * Sprint 2 reuses the login's {@code @Size(min=1, max=128)} rule. A
- * dedicated password policy (entropy, breached-password check, MFA
- * enrollment) is out of scope here and lives in a future
- * "auth hardening" sprint. We do enforce {@code @NotBlank} so the
- * request can't ship an empty string past validation.
+ * <h3>Password policy</h3>
+ * The {@code adminPassword} field is bound to {@link ValidPassword} (8-72
+ * chars, mixed case + digit + special) so the self-signup flow applies
+ * the same baseline as {@code CreateUserRequest} and
+ * {@code AcceptInvitationRequest}. Without this guard a tenant founder
+ * could create their account with {@code "12345678"} and bypass the
+ * policy enforced elsewhere. Closes DEBT-USR-2.
  *
  * <h3>Slug grammar</h3>
  * Mirrored from the {@code chk_tenants_slug_format} CHECK constraint
@@ -54,8 +56,7 @@ public record RegisterTenantRequest(
 		@Size(max = 254, message = "adminEmail must not exceed 254 characters")
 		String adminEmail,
 
-		@NotBlank(message = "adminPassword is required")
-		@Size(min = 8, max = 128, message = "adminPassword must be between 8 and 128 characters")
+		@ValidPassword
 		String adminPassword,
 
 		@NotBlank(message = "adminFirstName is required")

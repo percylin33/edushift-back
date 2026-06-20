@@ -4,14 +4,18 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.within;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.edushift.modules.audit.events.AuditAction;
+import com.edushift.modules.audit.service.AuditLogger;
 import com.edushift.modules.auth.dto.AuthResponse;
 import com.edushift.modules.auth.dto.LoginRequest;
 import com.edushift.modules.auth.dto.UserSummary;
@@ -38,6 +42,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -73,6 +78,7 @@ class AuthServiceImplTest {
 	@Mock private UserMapper userMapper;
 	@Mock private PasswordEncoder passwordEncoder;
 	@Mock private JwtService jwtService;
+	@Mock private AuditLogger auditLogger;
 
 	/**
 	 * Plain {@link PlatformTransactionManager} mock — Mockito returns {@code null}
@@ -90,6 +96,19 @@ class AuthServiceImplTest {
 	private static final String EMAIL = "admin@demo.edushift.pe";
 	private static final String RAW_PWD = "Edushift123!";
 	private static final String HASH = "$2a$12$dummyhashbutbcryptshape...........................";
+
+	@BeforeEach
+	void initAuthService() {
+		// DEBT-AUTH-1: invoke the @Autowired setter so the decoy hash is
+		// populated before any login() test runs. Mockito's @InjectMocks does
+		// not auto-invoke @Autowired methods on the SUT — it only sets fields
+		// or constructor args — so we wire this manually. Use lenient() so
+		// tests that never call login() (e.g. refresh-only paths) don't
+		// trigger an "unnecessary stubbing" violation in strict mode.
+		org.mockito.Mockito.lenient().when(passwordEncoder.encode(anyString()))
+				.thenReturn("$2a$12$decoy-hash-for-unit-test");
+		authService.initTimingDecoyHash(passwordEncoder);
+	}
 
 	@AfterEach
 	void clearTenantContext() {
@@ -188,9 +207,46 @@ class AuthServiceImplTest {
 				.isInstanceOf(UnauthorizedException.class)
 				.hasMessageContaining("Invalid email or password");
 
-		verify(passwordEncoder, never()).matches(anyString(), anyString());
+		// DEBT-AUTH-1: even on the unknown-email branch, BCrypt is run against
+		// the pre-computed decoy hash so the response time evens out with the
+		// real-user branch (defeats user-enumeration timing attacks).
+		verify(passwordEncoder, times(1)).matches(eq(RAW_PWD), anyString());
 		verify(jwtService, never()).issueAccessToken(any(), any(), any());
 		verify(refreshTokenRepository, never()).saveAndFlush(any(RefreshToken.class));
+	}
+
+	@Test
+	@DisplayName("DEBT-AUTH-1: unknown email triggers BCrypt against decoy hash "
+			+ "(timing-attack mitigation), but no user save/flush or token issue")
+	void loginUnknownEmailIsConstantTime() {
+		Tenant tenant = newTenant(SLUG, TenantStatus.ACTIVE);
+		when(tenantRepository.findBySlugIgnoreCase(SLUG)).thenReturn(Optional.of(tenant));
+		when(userRepository.findByEmail(EMAIL)).thenReturn(Optional.empty());
+
+		// Capture the hash passed to the decoy match — it must NOT be the
+		// real user's password hash (there is no user) and it must NOT
+		// change between calls (deterministic at runtime).
+		ArgumentCaptor<String> decoyHashCaptor = ArgumentCaptor.forClass(String.class);
+		when(passwordEncoder.matches(eq(RAW_PWD), decoyHashCaptor.capture())).thenReturn(false);
+
+		assertThatThrownBy(() -> authService.login(new LoginRequest(EMAIL, RAW_PWD), SLUG))
+				.isInstanceOf(UnauthorizedException.class)
+				.hasMessageContaining("Invalid email or password");
+
+		// The decoy hash was the second arg of `matches(password, hash)`.
+		assertThat(decoyHashCaptor.getValue()).isNotBlank();
+		// A second call should reuse the SAME decoy hash (set once in
+		// initTimingDecoyHash, then read-only).
+		String firstDecoy = decoyHashCaptor.getValue();
+		when(userRepository.findByEmail(EMAIL)).thenReturn(Optional.empty());
+		assertThatThrownBy(() -> authService.login(new LoginRequest(EMAIL, RAW_PWD), SLUG))
+				.isInstanceOf(UnauthorizedException.class);
+		assertThat(decoyHashCaptor.getValue()).isEqualTo(firstDecoy);
+
+		// The decoy hash is the auto-generated BCrypt of a random uuid-based
+		// placeholder — must NOT contain the raw password (defense in depth:
+		// if the encoder log ever leaks, the raw pwd is still not visible).
+		assertThat(firstDecoy).doesNotContain(RAW_PWD);
 	}
 
 	@Test
@@ -209,6 +265,76 @@ class AuthServiceImplTest {
 		verify(jwtService, never()).issueAccessToken(any(), any(), any());
 		verify(userRepository, never()).saveAndFlush(any(User.class));
 		verify(refreshTokenRepository, never()).saveAndFlush(any(RefreshToken.class));
+	}
+
+	// =====================================================================
+	// DEBT-USR-3: audit_logs persistence
+	// The audit module is already in place (AuditEvent, AuditLogger,
+	// AuditEventListener persists to edushift.audit_logs). What's tested
+	// here is that the auth service EMITS the right AuditAction on each
+	// success / failure path.
+	// =====================================================================
+
+	@Test
+	@DisplayName("DEBT-USR-3: successful login emits AuditAction.LOGIN with user publicUuid")
+	void loginEmitsAuditLogOnSuccess() {
+		Tenant tenant = newTenant(SLUG, TenantStatus.ACTIVE);
+		User user = newUser(EMAIL, UserStatus.ACTIVE, HASH);
+		UserSummary summary = new UserSummary(user.getPublicUuid(), "Admin Demo",
+				EMAIL, null, UserStatus.ACTIVE);
+		when(tenantRepository.findBySlugIgnoreCase(SLUG)).thenReturn(Optional.of(tenant));
+		when(userRepository.findByEmail(EMAIL)).thenReturn(Optional.of(user));
+		when(passwordEncoder.matches(RAW_PWD, HASH)).thenReturn(true);
+		when(userRepository.saveAndFlush(any(User.class))).thenAnswer(inv -> inv.getArgument(0));
+		when(jwtService.issueAccessToken(eq(user), eq(tenant), any())).thenReturn("access");
+		when(jwtService.issueRefreshToken(user, tenant)).thenReturn("refresh");
+		when(jwtService.accessTokenTtlSeconds()).thenReturn(900L);
+		when(userMapper.toSummary(user)).thenReturn(summary);
+		when(refreshTokenRepository.saveAndFlush(any(RefreshToken.class)))
+				.thenAnswer(inv -> inv.getArgument(0));
+
+		authService.login(new LoginRequest(EMAIL, RAW_PWD), SLUG);
+
+		// Verify the audit emit with the right action and the user's publicUuid.
+		verify(auditLogger, times(1)).log(
+				eq(AuditAction.LOGIN), eq("user"), eq(user.getPublicUuid()),
+				eq("login OK"), anyMap());
+	}
+
+	@Test
+	@DisplayName("DEBT-USR-3: bad password emits AuditAction.LOGIN_FAILED with user publicUuid")
+	void loginEmitsAuditLogOnBadPassword() {
+		Tenant tenant = newTenant(SLUG, TenantStatus.ACTIVE);
+		User user = newUser(EMAIL, UserStatus.ACTIVE, HASH);
+		when(tenantRepository.findBySlugIgnoreCase(SLUG)).thenReturn(Optional.of(tenant));
+		when(userRepository.findByEmail(EMAIL)).thenReturn(Optional.of(user));
+		when(passwordEncoder.matches("wrong", HASH)).thenReturn(false);
+
+		assertThatThrownBy(() -> authService.login(new LoginRequest(EMAIL, "wrong"), SLUG))
+				.isInstanceOf(UnauthorizedException.class);
+
+		// The audit emit must carry LOGIN_FAILED with the user publicUuid
+		// (we DO know which user it was — only the password was wrong).
+		verify(auditLogger, times(1)).log(
+				eq(AuditAction.LOGIN_FAILED), eq("user"), eq(user.getPublicUuid()),
+				eq("login failed: bad password"), anyMap());
+	}
+
+	@Test
+	@DisplayName("DEBT-USR-3: unknown email emits AuditAction.LOGIN_FAILED with null resourceId (no leak)")
+	void loginEmitsAuditLogOnUnknownEmail() {
+		Tenant tenant = newTenant(SLUG, TenantStatus.ACTIVE);
+		when(tenantRepository.findBySlugIgnoreCase(SLUG)).thenReturn(Optional.of(tenant));
+		when(userRepository.findByEmail(EMAIL)).thenReturn(Optional.empty());
+
+		assertThatThrownBy(() -> authService.login(new LoginRequest(EMAIL, RAW_PWD), SLUG))
+				.isInstanceOf(UnauthorizedException.class);
+
+		// The audit emit must carry LOGIN_FAILED with a NULL resourceId —
+		// the user is unknown so we cannot leak a publicUuid.
+		verify(auditLogger, times(1)).log(
+				eq(AuditAction.LOGIN_FAILED), eq("user_email"), isNull(),
+				anyString(), anyMap());
 	}
 
 	@Test

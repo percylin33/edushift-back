@@ -1,5 +1,6 @@
 package com.edushift.infrastructure.multitenancy;
 
+import com.edushift.infrastructure.ratelimit.RateLimitInterceptor;
 import com.edushift.shared.multitenancy.TenantResolver;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
@@ -18,12 +19,16 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
  * Filter runs near the end of the filter chain (after Spring Security has
  * had a chance to populate the principal); the interceptor then validates
  * the binding against the authenticated principal.
+ *
+ * <p>Also registers the {@link RateLimitInterceptor} for the
+ * {@code POST /v1/tenants/register} public endpoint — closes DEBT-TEN-6.
  */
 @Configuration
 @RequiredArgsConstructor
 public class MultiTenancyConfiguration implements WebMvcConfigurer {
 
 	private final TenantInterceptor tenantInterceptor;
+	private final RateLimitInterceptor rateLimitInterceptor;
 
 	@Bean
 	CurrentTenantIdentifierResolver<UUID> currentTenantIdentifierResolver() {
@@ -51,6 +56,12 @@ public class MultiTenancyConfiguration implements WebMvcConfigurer {
 		registry.addInterceptor(tenantInterceptor)
 				.addPathPatterns("/**")
 				.excludePathPatterns("/actuator/**");
+
+		// DEBT-TEN-6: rate-limit the public self-signup endpoint to
+		// 5 requests per hour per source IP. Mitigation against scripted
+		// tenant creation and DB-bombing via slug enumeration.
+		registry.addInterceptor(rateLimitInterceptor)
+				.addPathPatterns("/v1/tenants/register");
 	}
 
 }

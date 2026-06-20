@@ -1,5 +1,7 @@
 package com.edushift.modules.auth.service.impl;
 
+import com.edushift.modules.audit.events.AuditAction;
+import com.edushift.modules.audit.service.AuditLogger;
 import com.edushift.modules.auth.dto.AuthResponse;
 import com.edushift.modules.auth.dto.LoginRequest;
 import com.edushift.modules.auth.dto.UserResponse;
@@ -30,6 +32,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -103,6 +106,7 @@ public class AuthServiceImpl implements AuthService {
 	private final PasswordEncoder passwordEncoder;
 	private final JwtService jwtService;
 	private final TransactionTemplate txTemplate;
+	private final AuditLogger auditLogger;
 
 	public AuthServiceImpl(TenantRepository tenantRepository,
 	                       UserRepository userRepository,
@@ -110,7 +114,8 @@ public class AuthServiceImpl implements AuthService {
 	                       UserMapper userMapper,
 	                       PasswordEncoder passwordEncoder,
 	                       JwtService jwtService,
-	                       PlatformTransactionManager txManager) {
+	                       PlatformTransactionManager txManager,
+	                       AuditLogger auditLogger) {
 		this.tenantRepository = tenantRepository;
 		this.userRepository = userRepository;
 		this.refreshTokenRepository = refreshTokenRepository;
@@ -118,6 +123,34 @@ public class AuthServiceImpl implements AuthService {
 		this.passwordEncoder = passwordEncoder;
 		this.jwtService = jwtService;
 		this.txTemplate = new TransactionTemplate(txManager);
+		this.auditLogger = auditLogger;
+	}
+
+	/**
+	 * Pre-computed BCrypt hash used as a constant-time decoy when the login
+	 * email is not in the database.
+	 *
+	 * <p>The goal is to defeat user-enumeration timing attacks: a naive
+	 * implementation returns {@code "invalid credentials"} almost instantly
+	 * when the email is unknown, but takes ~80-150 ms when it exists (the
+	 * BCrypt cost). An attacker probing the endpoint can list valid emails
+	 * by measuring the response time. Running {@code passwordEncoder.matches}
+	 * against this dummy hash on the unknown-email branch evens the cost
+	 * without ever leaking whether the email exists.
+	 *
+	 * <p>The hash is generated at class-load time using the same
+	 * {@link PasswordEncoder} bean the rest of the system uses, so the
+	 * algorithm, strength, and salt format all match the real-user branch.
+	 * Generated once; reused on every unknown-email login.
+	 *
+	 * <p>Closes DEBT-AUTH-1.
+	 */
+	private String timingDecoyHash;
+
+	@Autowired
+	public void initTimingDecoyHash(PasswordEncoder passwordEncoder) {
+		this.timingDecoyHash = passwordEncoder.encode(
+				"__edushift_timing_decoy_" + UUID.randomUUID());
 	}
 
 	// =========================================================================
@@ -154,7 +187,20 @@ public class AuthServiceImpl implements AuthService {
 	                              Tenant tenant, String tenantSlug) {
 		User user = userRepository.findByEmail(normalizedEmail).orElse(null);
 		if (user == null) {
+			// DEBT-AUTH-1: timing-attack mitigation. Run a BCrypt compare
+			// against a pre-computed decoy hash so the unknown-email branch
+			// takes the same wall-clock time as the real-user branch. The
+			// result is intentionally discarded — we still return the
+			// generic "Invalid email or password" error.
+			passwordEncoder.matches(request.password(), timingDecoyHash);
 			log.info("[auth] login failed (unknown email) tenant='{}'", tenantSlug);
+			// DEBT-USR-3: persist the failure to audit_logs (was SLF4J only).
+			// resourceType=email identifies the surface; we deliberately do
+			// NOT persist the typed email as a resourceId since the email is
+			// not known to be valid (could be a probing attempt).
+			auditLogger.log(AuditAction.LOGIN_FAILED, "user_email",
+					null, "login failed: unknown email for tenant '" + tenantSlug + "'",
+					java.util.Map.of("tenantSlug", tenantSlug));
 			throw new UnauthorizedException("BAD_CREDENTIALS",
 					"Invalid email or password");
 		}
@@ -162,6 +208,10 @@ public class AuthServiceImpl implements AuthService {
 		if (!passwordEncoder.matches(request.password(), user.getPasswordHash())) {
 			log.info("[auth] login failed (bad password) tenant='{}', email='{}'",
 					tenantSlug, normalizedEmail);
+			// DEBT-USR-3: persist the failure to audit_logs.
+			auditLogger.log(AuditAction.LOGIN_FAILED, "user",
+					user.getPublicUuid(), "login failed: bad password",
+					java.util.Map.of("tenantSlug", tenantSlug, "email", normalizedEmail));
 			throw new UnauthorizedException("BAD_CREDENTIALS",
 					"Invalid email or password");
 		}
@@ -179,6 +229,10 @@ public class AuthServiceImpl implements AuthService {
 
 		log.info("[auth] login OK -- tenant='{}', email='{}', publicUuid='{}'",
 				tenantSlug, user.getEmail(), user.getPublicUuid());
+		// DEBT-USR-3: persist successful login to audit_logs (was SLF4J only).
+		auditLogger.log(AuditAction.LOGIN, "user",
+				user.getPublicUuid(), "login OK",
+				java.util.Map.of("tenantSlug", tenantSlug, "email", user.getEmail()));
 
 		return AuthResponse.bearer(
 				accessToken,
@@ -326,6 +380,16 @@ public class AuthServiceImpl implements AuthService {
 				refreshTokenRepository.saveAndFlush(token);
 				log.info("[auth] logout OK -- tokenId={}, userId={}",
 						token.getId(), token.getUserId());
+				// DEBT-USR-3: persist logout to audit_logs (was SLF4J only).
+				// We capture the publicUuid by reading the user row — the
+				// refresh token's userId is the internal Long id, not the
+				// public UUID. We rely on the user being loaded during the
+				// request; if not, we audit with null (still a valid signal).
+				UUID actorPublicUuid = userRepository.findById(token.getUserId())
+						.map(User::getPublicUuid).orElse(null);
+				auditLogger.log(AuditAction.LOGOUT, "user",
+						actorPublicUuid, "logout OK",
+						java.util.Map.of("refreshTokenId", token.getId()));
 			});
 			return null;
 		});
