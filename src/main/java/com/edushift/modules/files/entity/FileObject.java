@@ -17,6 +17,7 @@ import lombok.NoArgsConstructor;
 import lombok.Setter;
 import lombok.ToString;
 import org.hibernate.annotations.SQLDelete;
+import org.hibernate.annotations.SQLRestriction;
 
 /**
  * Metadata-only registry of an uploaded binary (Sprint 7a / BE-7a.0).
@@ -62,6 +63,7 @@ import org.hibernate.annotations.SQLDelete;
 @SQLDelete(sql = "UPDATE edushift.lms_file_objects "
 		+ "SET deleted = true, deleted_at = NOW(), updated_at = NOW() "
 		+ "WHERE id = ?")
+@SQLRestriction("deleted = false")
 public class FileObject extends TenantAwareEntity {
 
 	@Column(name = "public_uuid", nullable = false, updatable = false,

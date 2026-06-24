@@ -146,6 +146,7 @@ class AuthControllerTest {
 				UserStatus.ACTIVE,
 				true, false,
 				java.util.Set.of("TENANT_ADMIN"),
+				java.util.Set.of("LMS_TASK_READ", "LMS_TASK_CREATE", "LMS_PAYMENT_ADMIN"),
 				Instant.now(), Instant.now(), Instant.now());
 	}
 

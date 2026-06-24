@@ -10,6 +10,7 @@ import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.mail.javamail.MimeMessageHelper;
 import org.springframework.stereotype.Component;
@@ -29,6 +30,25 @@ import org.springframework.stereotype.Component;
  *       in (10× better unsubscribe rate).</li>
  * </ol>
  *
+ * <h3>Why {@code @ConditionalOnProperty} (Sprint 12 / debug-12)</h3>
+ * <p>This bean depends on {@link JavaMailSender}, which Spring Boot
+ * only autoconfigures when {@code spring.mail.host} (or
+ * {@code spring.mail.jndi-name}) is set. In a dev / CI environment
+ * without an SMTP server, the autoconfig backfires and the whole
+ * context fails to start. Gating this bean on
+ * {@code app.notifications.email.enabled=true} (the module's own
+ * flag, not Spring's) lets the rest of the app start with the email
+ * module disabled. Operators that want email must set BOTH flags:</p>
+ *
+ * <pre>
+ * app.notifications.email.enabled=true
+ * spring.mail.host=smtp.example.com
+ * spring.mail.port=587
+ * spring.mail.username=...
+ * spring.mail.password=...
+ * spring.mail.properties.mail.smtp.starttls.enable=true
+ * </pre>
+ *
  * <h3>Failure handling</h3>
  * On any {@code MailException} or {@code MessagingException}, the
  * caller ({@code EmailOutboxProcessor}) catches and re-queues with
@@ -36,6 +56,7 @@ import org.springframework.stereotype.Component;
  * the processor code simple.
  */
 @Component
+@ConditionalOnProperty(name = "app.notifications.email.enabled", havingValue = "true")
 @RequiredArgsConstructor
 @Slf4j
 public class EmailSender {

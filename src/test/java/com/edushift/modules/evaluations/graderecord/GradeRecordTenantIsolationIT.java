@@ -454,7 +454,7 @@ class GradeRecordTenantIsolationIT extends IntegrationTest {
             gradeRecord.setStudent(savedStudent);
             gradeRecord.setScore(new BigDecimal("17.50"));
             gradeRecord.setRecordedAt(Instant.now());
-            gradeRecord.setRecordedByUserId(admin.getId());
+            gradeRecord.setRecordedByUserId(admin.getPublicUuid());
             gradeRecord.setIsActive(Boolean.TRUE);
             GradeRecord savedGrade = gradeRecordRepository.saveAndFlush(gradeRecord);
 

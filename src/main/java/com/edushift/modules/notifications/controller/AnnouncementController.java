@@ -36,7 +36,18 @@ import org.springframework.web.bind.annotation.RestController;
  * </ul>
  */
 @RestController
-@RequestMapping("/api/v1/announcements")
+// DEBT-FK-BUGS-2 / routing: WebConfiguration#configurePathMatch adds "/v1"
+// to every controller in com.edushift.modules.*controller.* (the
+// global /v1 prefix). If we ALSO declare @RequestMapping("/v1/announcements")
+// here, Spring ends up registering the handler under "/v1/v1/announcements"
+// (the prefix is unconditionally prepended) and the route never resolves —
+// every request falls through to the static-resource handler as a 404.
+// Correct pattern: declare only the post-prefix segment here ("/announcements")
+// and let the path-prefix configurer add "/v1". Method-level
+// @GetMapping("/{publicUuid}") then resolves to "/v1/announcements/{publicUuid}",
+// which matches the @RequestMapping used by the test (and by the rest of
+// the EduShift controllers: Attendance, GradeRecord, etc.).
+@RequestMapping("/announcements")
 @RequiredArgsConstructor
 public class AnnouncementController {
 
@@ -79,7 +90,7 @@ public class AnnouncementController {
     // ---------------- Admin surface ----------------
 
     @PostMapping
-    @PreAuthorize("hasAuthority('LMS_ANNOUNCEMENTS_CREATE')")
+    @PreAuthorize("hasAuthority('" + com.edushift.shared.security.LmsAuthorities.LMS_ANNOUNCEMENTS_CREATE + "')")
     public ApiResponse<AnnouncementResponse> create(
             @Valid @RequestBody CreateAnnouncementRequest req) {
         var a = service.create(me(), req.title(), req.bodyHtml(),
@@ -89,7 +100,7 @@ public class AnnouncementController {
     }
 
     @PatchMapping("/{publicUuid}")
-    @PreAuthorize("hasAuthority('LMS_ANNOUNCEMENTS_CREATE')")
+    @PreAuthorize("hasAuthority('" + com.edushift.shared.security.LmsAuthorities.LMS_ANNOUNCEMENTS_CREATE + "')")
     public ApiResponse<AnnouncementResponse> update(
             @PathVariable UUID publicUuid,
             @Valid @RequestBody CreateAnnouncementRequest req) {
@@ -99,20 +110,20 @@ public class AnnouncementController {
     }
 
     @PostMapping("/{publicUuid}/publish")
-    @PreAuthorize("hasAuthority('LMS_ANNOUNCEMENTS_CREATE')")
+    @PreAuthorize("hasAuthority('" + com.edushift.shared.security.LmsAuthorities.LMS_ANNOUNCEMENTS_CREATE + "')")
     public ApiResponse<AnnouncementResponse> publish(@PathVariable UUID publicUuid) {
         return ApiResponse.ok(AnnouncementResponse.from(service.publish(publicUuid)));
     }
 
     @DeleteMapping("/{publicUuid}")
-    @PreAuthorize("hasAuthority('LMS_ANNOUNCEMENTS_CREATE')")
+    @PreAuthorize("hasAuthority('" + com.edushift.shared.security.LmsAuthorities.LMS_ANNOUNCEMENTS_CREATE + "')")
     public ResponseEntity<ApiResponse<Void>> delete(@PathVariable UUID publicUuid) {
         service.delete(publicUuid);
         return ResponseEntity.noContent().build();
     }
 
     @GetMapping("/admin")
-    @PreAuthorize("hasAuthority('LMS_ANNOUNCEMENTS_CREATE')")
+    @PreAuthorize("hasAuthority('" + com.edushift.shared.security.LmsAuthorities.LMS_ANNOUNCEMENTS_CREATE + "')")
     public ApiResponse<List<AnnouncementResponse>> listForAdmin(Pageable pageable) {
         Page<com.edushift.modules.notifications.entity.Announcement> page =
                 service.listForAdmin(pageable);

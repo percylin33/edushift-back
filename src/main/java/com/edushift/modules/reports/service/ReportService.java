@@ -75,6 +75,22 @@ public class ReportService {
     }
 
     /**
+     * DEBT-FK-BUGS-2 / list endpoint: lista los jobs del usuario en el
+     * tenant actual, paginados, mas recientes primero. Filtra por
+     * {@code tenantId} para garantizar que un usuario de tenant B
+     * nunca vea jobs de tenant A, aunque el FE envie el publicUuid
+     * de otra tenant. {@code @TenantId} de Hibernate ya aisla; este
+     * filtro explicito es defense-in-depth.
+     */
+    @Transactional(readOnly = true)
+    public org.springframework.data.domain.Page<ReportJob> listForUser(
+            UUID userId, org.springframework.data.domain.Pageable pageable) {
+        return jobRepo.findByTenantIdAndUserId(
+                com.edushift.shared.multitenancy.TenantContext.currentRequired(),
+                userId, pageable);
+    }
+
+    /**
      * Generate the bytes of a job. Called by the processor. Returns
      * the raw bytes (caller is responsible for uploading to storage).
      */

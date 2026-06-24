@@ -18,7 +18,6 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.springframework.test.util.ReflectionTestUtils;
 
 /**
  * Unit tests for {@link LocalFsStorageService} (Sprint 7a / BE-7a.0).
@@ -57,8 +56,10 @@ class LocalFsStorageServiceTest {
 		props.getLocalFs().setRoot(root);
 		props.setProvider(StorageProvider.LOCAL_FS);
 		service = new LocalFsStorageService(props);
-		// Run the @PostConstruct manually (no Spring in unit tests).
-		ReflectionTestUtils.invokeMethod(service, "init");
+		// No @PostConstruct to invoke: since Sprint 11 / BE-11.3 the
+		// service re-reads the root on every call (see `root()`) so
+		// unit tests can swap the directory without re-creating the
+		// bean. See ADR-11.4 in the sprint-11 doc.
 		tenantId = UUID.randomUUID();
 	}
 
@@ -146,10 +147,11 @@ class LocalFsStorageServiceTest {
 	}
 
 	@Test
-	@DisplayName("init fails fast when the root cannot be created")
+	@DisplayName("put fails fast when the root cannot be created (no @PostConstruct since BE-11.3)")
 	void initFailsFast() {
 		StorageProperties bad = new StorageProperties();
-		// A path under a file (not a directory) makes createDirectories fail.
+		// A path under a file (not a directory) makes createDirectories fail
+		// the first time the service tries to materialize the tenant dir.
 		Path blocked;
 		try {
 			blocked = Files.createTempFile("edushift-blocked-", ".txt");
@@ -159,7 +161,15 @@ class LocalFsStorageServiceTest {
 			throw new StorageUnavailableException("Could not set up blocked path", e);
 		}
 		LocalFsStorageService s = new LocalFsStorageService(bad);
-		assertThatThrownBy(() -> ReflectionTestUtils.invokeMethod(s, "init"))
+		UUID tid = UUID.randomUUID();
+		assertThatThrownBy(() -> s.put(new StoragePutRequest(
+				tid,
+				"materials",
+				UUID.randomUUID(),
+				"x.txt",
+				"text/plain",
+				new ByteArrayInputStream("x".getBytes()),
+				1)))
 				.isInstanceOf(StorageUnavailableException.class);
 	}
 

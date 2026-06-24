@@ -80,10 +80,15 @@ class ReportTenantIsolationIT extends IntegrationTest {
     private record Fixture(Tenant tenantA, Tenant tenantB, User userA, User userB, ReportJob jobA) {}
 
     private Fixture setupTenants() {
-        Tenant tenantA = createTenant("report-iso-a");
-        Tenant tenantB = createTenant("report-iso-b");
-        User userA = createUserIn(tenantA, "userA", SHARED_EMAIL, PASSWORD_A);
-        User userB = createUserIn(tenantB, "userB", SHARED_EMAIL, PASSWORD_B);
+        // DEBT-FK-BUGS-2 / cleanup: slugs suffixed with UUID so each @Test
+        // gets fresh tenants. The shared static PostgreSQLContainer is JVM-
+        // scoped, so multiple @Test methods in the same class would
+        // otherwise collide on the unique slug constraint.
+        String suffix = java.util.UUID.randomUUID().toString().substring(0, 8);
+        Tenant tenantA = createTenant("report-iso-a-" + suffix);
+        Tenant tenantB = createTenant("report-iso-b-" + suffix);
+        User userA = createUserIn(tenantA, "userA-" + suffix, SHARED_EMAIL, PASSWORD_A);
+        User userB = createUserIn(tenantB, "userB-" + suffix, SHARED_EMAIL, PASSWORD_B);
         ReportJob jobA = createReportJobIn(tenantA, userA);
         return new Fixture(tenantA, tenantB, userA, userB, jobA);
     }
@@ -176,14 +181,16 @@ class ReportTenantIsolationIT extends IntegrationTest {
 
             assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
             JsonNode body = objectMapper.readTree(response.getBody());
-            // tolerate either envelope shape (data.content or top-level content)
-            JsonNode content = body.has("data") && body.get("data").has("content")
-                    ? body.get("data").get("content")
-                    : body.get("content");
-            assertThat(content)
+            // DEBT-FK-BUGS-2 / parseo: el ReportController#list devuelve
+            // ApiResponse<List<ReportJobResponse>> con shape {data: [...],
+            // meta: {...}} (no la forma {data: {content: [...]}} que asume
+            // el test original — esa forma es la de Spring Page<>, no la
+            // de ApiResponse.ok(list, Meta.of(page))).
+            JsonNode items = body.has("data") ? body.get("data") : body;
+            assertThat(items)
                     .as("tenant B list response should not be empty (we seeded one)")
                     .isNotNull();
-            for (JsonNode item : content) {
+            for (JsonNode item : items) {
                 String id = item.get("publicUuid").asText();
                 assertThat(id)
                         .as("tenant A report publicUuid leaked into B's listing")
@@ -236,10 +243,16 @@ class ReportTenantIsolationIT extends IntegrationTest {
     // ============================================================ helpers
 
     private AuthResponse login(String tenantSlug, String email, String pwd) {
-        String body = String.format("{\"tenantSlug\":\"%s\",\"email\":\"%s\",\"password\":\"%s\"}",
-                tenantSlug, email, pwd);
+        // DEBT-FK-BUGS-2 / login: AuthController#login reads the tenant slug
+        // from the X-Tenant-Slug HEADER, not from the body. The original test
+        // (commit 3d5c295) set tenantSlug in the body, so the controller's
+        // @RequestHeader(value = TENANT_SLUG_HEADER, required = true) threw
+        // MissingRequestHeaderException → 400 BAD_REQUEST. This fix adds the
+        // header that the controller actually expects.
+        String body = String.format("{\"email\":\"%s\",\"password\":\"%s\"}", email, pwd);
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
+        headers.set("X-Tenant-Slug", tenantSlug);
         ResponseEntity<AuthResponse> response = rest.exchange(
                 AUTH_BASE + "/login", HttpMethod.POST,
                 new HttpEntity<>(body, headers), AuthResponse.class);

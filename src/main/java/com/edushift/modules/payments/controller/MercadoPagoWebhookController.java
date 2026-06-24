@@ -1,13 +1,16 @@
 package com.edushift.modules.payments.controller;
 
 import com.edushift.infrastructure.ratelimit.SimpleRateLimiter;
-import com.edushift.modules.audit.AuditLogger;
+import com.edushift.modules.audit.events.AuditAction;
+import com.edushift.modules.audit.service.AuditLogger;
 import com.edushift.modules.payments.config.MercadoPagoProperties;
 import com.edushift.modules.payments.service.PaymentService;
+import com.edushift.shared.constants.ModuleNames;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.http.HttpServletRequest;
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
+import java.util.UUID;
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 import lombok.RequiredArgsConstructor;
@@ -81,8 +84,10 @@ public class MercadoPagoWebhookController {
         // 2) Signature verification.
         if (!verifySignature(rawBody, signature)) {
             log.warn("[MP webhook] bad or missing signature for requestId={}", requestId);
-            audit.log("mp.webhook.bad_signature", "mercadopago",
-                    AuditLogger.ctx("ip", remoteIp, "requestId", requestId));
+            audit.log(AuditAction.ACCESS_DENIED, "mercadopago", null,
+                    "MP webhook bad signature",
+                    Map.of("ip", remoteIp, "requestId", requestId == null ? "" : requestId),
+                    ModuleNames.PAYMENTS);
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
                     .body(Map.of("error", "invalid signature"));
         }
@@ -105,15 +110,21 @@ public class MercadoPagoWebhookController {
         // 4) Process (idempotent).
         try {
             paymentService.handleMercadoPagoWebhook(dataId, type, rawBody);
-            audit.log("mp.webhook.accepted", "mercadopago",
-                    AuditLogger.ctx("dataId", dataId, "type", type,
-                            "ip", remoteIp, "requestId", requestId));
+            audit.log(AuditAction.CREATE, "mercadopago", null,
+                    "MP webhook accepted",
+                    Map.of("dataId", dataId, "type", type,
+                            "ip", remoteIp,
+                            "requestId", requestId == null ? "" : requestId),
+                    ModuleNames.PAYMENTS);
         } catch (Exception e) {
             log.error("[MP webhook] processing failed for dataId={} type={}: {}",
                     dataId, type, e.getMessage(), e);
-            audit.log("mp.webhook.failed", "mercadopago",
-                    AuditLogger.ctx("dataId", dataId, "type", type,
-                            "ip", remoteIp, "error", e.getMessage()));
+            audit.log(AuditAction.CUSTOM, "mercadopago", null,
+                    "MP webhook processing failed",
+                    Map.of("dataId", dataId, "type", type,
+                            "ip", remoteIp,
+                            "error", e.getMessage() == null ? "" : e.getMessage()),
+                    ModuleNames.PAYMENTS);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body(Map.of("error", "processing failed"));
         }

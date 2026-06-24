@@ -15,7 +15,7 @@ import org.springframework.stereotype.Component;
  *   <caption>Role → LMS authorities</caption>
  *   <tr><th>Role</th><th>Authorities granted</th></tr>
  *   <tr><td>{@link UserRole#TENANT_ADMIN TENANT_ADMIN}</td>
- *       <td>all 11 LMS authorities (tasks + materials + quizzes + AI)</td></tr>
+ *       <td>all 12 LMS authorities (tasks + materials + quizzes + AI + payment admin)</td></tr>
  *   <tr><td>{@link UserRole#TEACHER TEACHER}</td>
  *       <td>LMS_TASK_READ, LMS_TASK_CREATE, LMS_TASK_GRADE,
  *           LMS_MATERIAL_READ, LMS_MATERIAL_WRITE,
@@ -29,7 +29,8 @@ import org.springframework.stereotype.Component;
  *       <td>LMS_TASK_READ, LMS_TASK_SUBMIT,
  *           LMS_MATERIAL_READ, LMS_QUIZ_READ, LMS_QUIZ_SUBMIT</td></tr>
  *   <tr><td>{@link UserRole#STAFF STAFF}</td>
- *       <td>LMS_TASK_READ, LMS_MATERIAL_READ, LMS_QUIZ_READ (read-only)</td></tr>
+ *       <td>LMS_TASK_READ, LMS_MATERIAL_READ, LMS_QUIZ_READ, LMS_PAYMENT_ADMIN
+ *           (read-only LMS + front-desk payments admin)</td></tr>
  * </table>
  *
  * <h3>Design notes</h3>
@@ -89,7 +90,12 @@ public class LmsRoleAuthorityMapper {
 				LmsAuthorities.LMS_QUIZ_CREATE,
 				LmsAuthorities.LMS_QUIZ_GRADE,
 				LmsAuthorities.LMS_QUIZ_SUBMIT,
-				LmsAuthorities.LMS_AI_GENERATE);
+				LmsAuthorities.LMS_AI_GENERATE,
+				LmsAuthorities.LMS_PAYMENT_ADMIN,
+				// DEBT-FK-BUGS-2: announcements are a director / admin
+				// surface (school-wide broadcasts). TENANT_ADMIN must be
+				// able to create / edit / publish / delete them.
+				LmsAuthorities.LMS_ANNOUNCEMENTS_CREATE);
 		case TEACHER -> Set.of(
 				LmsAuthorities.LMS_TASK_READ,
 				LmsAuthorities.LMS_TASK_CREATE,
@@ -116,7 +122,8 @@ public class LmsRoleAuthorityMapper {
 			case STAFF -> Set.of(
 					LmsAuthorities.LMS_TASK_READ,
 					LmsAuthorities.LMS_MATERIAL_READ,
-					LmsAuthorities.LMS_QUIZ_READ);
+					LmsAuthorities.LMS_QUIZ_READ,
+					LmsAuthorities.LMS_PAYMENT_ADMIN);
 		};
 	}
 }

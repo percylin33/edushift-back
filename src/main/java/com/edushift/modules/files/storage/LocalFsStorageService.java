@@ -2,7 +2,6 @@ package com.edushift.modules.files.storage;
 
 import com.edushift.modules.files.config.StorageProperties;
 import com.edushift.modules.files.exception.StorageUnavailableException;
-import jakarta.annotation.PostConstruct;
 import java.io.BufferedInputStream;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -55,23 +54,32 @@ public class LocalFsStorageService implements StorageService {
 
 	private final StorageProperties props;
 
-	private Path root;
-
 	public LocalFsStorageService(StorageProperties props) {
 		this.props = props;
 	}
 
-	@PostConstruct
-	void init() {
-		this.root = props.getLocalFs().getRoot().toAbsolutePath().normalize();
+	/**
+	 * Returns the current storage root, re-reading from
+	 * {@link StorageProperties} on every call.
+	 *
+	 * <p>Reading per call (instead of caching the value at
+	 * {@code @PostConstruct} time) lets integration tests redirect
+	 * the root into a per-class tempdir via
+	 * {@code storageProperties.getLocalFs().setRoot(...)} without
+	 * having to recreate the bean. In production the property is
+	 * fixed at boot, so the cost is one method dispatch per
+	 * operation — negligible.
+	 */
+	private Path root() {
+		Path r = props.getLocalFs().getRoot().toAbsolutePath().normalize();
 		try {
-			Files.createDirectories(root);
+			Files.createDirectories(r);
 		}
 		catch (IOException e) {
 			throw new StorageUnavailableException(
-					"Cannot create local-fs storage root: " + root, e);
+					"Cannot create local-fs storage root: " + r, e);
 		}
-		log.info("[storage] local-fs provider active at {}", root);
+		return r;
 	}
 
 	@Override
@@ -199,8 +207,21 @@ public class LocalFsStorageService implements StorageService {
 	// helpers
 	// ------------------------------------------------------------------
 
+	/**
+	 * Sentinel used for path-escape checks in {@link #delete}. The
+	 * actual on-disk layout is rooted at {@code root} and the
+	 * tenantId is part of the {@code remoteKey} (see
+	 * {@link StoredObject#buildKey}, which emits
+	 * {@code "tenants/{tid}/lms/{module}/{publicUuid}"}). The previous
+	 * implementation mistakenly had {@code tenantRoot = root.resolve(tid)},
+	 * which combined with the {@code "tenants/{tid}/..."} prefix in the
+	 * key produced a path with the tenantId appearing TWICE
+	 * ({@code ${root}/{tid}/tenants/{tid}/...}). Fixed in Sprint 11
+	 * (ADR-11.4): the tenant root for security checks is just
+	 * {@code root}, and the {@code tenants/} prefix comes from the key.
+	 */
 	private Path tenantRoot(UUID tenantId) {
-		return root.resolve(tenantId.toString()).normalize();
+		return root();
 	}
 
 	/**
@@ -212,10 +233,11 @@ public class LocalFsStorageService implements StorageService {
 		if (remoteKey == null || remoteKey.isBlank()) {
 			throw new com.edushift.modules.files.exception.FileNotFoundException("<blank>");
 		}
-		Path resolved = tenantRoot(tenantId)
+		Path root = tenantRoot(tenantId);
+		Path resolved = root
 				.resolve(remoteKey)
 				.normalize();
-		if (!resolved.startsWith(tenantRoot(tenantId))) {
+		if (!resolved.startsWith(root)) {
 			throw new com.edushift.modules.files.exception.FileNotFoundException(remoteKey);
 		}
 		return resolved;

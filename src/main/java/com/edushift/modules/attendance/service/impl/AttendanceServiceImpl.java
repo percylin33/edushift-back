@@ -241,11 +241,17 @@ public class AttendanceServiceImpl implements AttendanceService {
 
 		validateForcedStatus(request);
 
+		// Anti-enumeration (XT-ATT-2 / XT-ATT-3): load the session under the
+		// caller's tenant BEFORE we touch the QR. If the session does not
+		// belong to the current tenant, the tenant-aware repository will
+		// return empty and we raise 404 — leaking neither the QR validation
+		// outcome nor the existence of the resource to a wrong-tenant caller.
+		AttendanceSession session = loadSession(request.sessionPublicUuid());
+
 		Student student = validateQrAndLoadStudent(
 				request.qrToken(), currentTenantId, actorPublicUuid,
 				request.sessionPublicUuid());
 
-		AttendanceSession session = loadSession(request.sessionPublicUuid());
 		if (session.getStatus() == AttendanceSessionStatus.CLOSED) {
 			throw new SessionClosedException(
 					"Session " + session.getPublicUuid() + " is closed");
@@ -548,14 +554,19 @@ public class AttendanceServiceImpl implements AttendanceService {
 				throw new QrExpiredException(
 						"QR was revoked at " + anyQr.get().getRevokedAt());
 			}
-			log.info("[attendance] QR_INVALID (no persisted row) -- actor={} tenant={}",
+			// Anti-enumeration (XT-ATT-3): if the QR is unknown to this
+			// tenant — whether garbage, never-issued, or belonging to a
+			// different tenant — the response must be indistinguishable
+			// from a session-not-found. 404 leaks less than 400 because
+			// the API stays mute on whether the QR itself is "valid".
+			log.info("[attendance] QR not found for current tenant -- actor={} tenant={}",
 					actorPublicUuid, currentTenantId);
 			auditLogger.logQrRejected(
 					AttendanceErrorCodes.QR_INVALID,
 					null,
 					sessionUuidForAudit);
-			throw new QrInvalidException(
-					"QR token was not issued by this system");
+			throw new ResourceNotFoundException(
+					"AttendanceSession", sessionUuidForAudit);
 		}
 
 		Student student = activeQr.get().getStudent();

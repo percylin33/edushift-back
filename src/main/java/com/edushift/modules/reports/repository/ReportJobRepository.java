@@ -16,6 +16,24 @@ public interface ReportJobRepository extends JpaRepository<ReportJob, UUID> {
 
     Optional<ReportJob> findByPublicUuid(UUID publicUuid);
 
+    /**
+     * DEBT-FK-BUGS-2 / list endpoint: lista los jobs del usuario en su
+     * tenant actual, paginados. Se usa desde {@code ReportController#list}
+     * para que el FE pueda mostrar "mis reports" (no cross-tenant).
+     * Filtra por {@code tenantId} explicitamente para defense-in-depth,
+     * aunque el {@code @TenantId} de Hibernate ya aísla por tenant context.
+     */
+    @Query("""
+            SELECT j FROM ReportJob j
+            WHERE j.tenantId = :tenantId
+              AND j.requestedByUserId = :userId
+            ORDER BY j.requestedAt DESC
+            """)
+    org.springframework.data.domain.Page<ReportJob> findByTenantIdAndUserId(
+            @Param("tenantId") UUID tenantId,
+            @Param("userId") UUID userId,
+            org.springframework.data.domain.Pageable pageable);
+
     /** Idempotency lookup. Empty key always misses. */
     @Query("""
             SELECT j FROM ReportJob j

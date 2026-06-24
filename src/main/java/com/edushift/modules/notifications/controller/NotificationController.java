@@ -43,7 +43,12 @@ import org.springframework.web.bind.annotation.RestController;
  * {@code WHERE recipient_user_id = :userId} clause (defense in depth).
  */
 @RestController
-@RequestMapping("/api/v1/notifications")
+// DEBT-FK-BUGS-2 / routing: ver AnnouncementController para la explicacion
+// completa. WebConfiguration#addPathPrefix("/v1", ...) antepone "/v1" a
+// todos los controllers de com.edushift.modules.*controller.*. Solo
+// declaramos el segmento post-prefix aca ("/notifications"); el configurer
+// se encarga de prefijar con "/v1".
+@RequestMapping("/notifications")
 @RequiredArgsConstructor
 public class NotificationController {
 

@@ -48,6 +48,23 @@ public final class LmsAuthorities {
 	// (Permission.AiUse).
 	public static final String LMS_AI_GENERATE = "LMS_AI_GENERATE";
 
+	// Payments admin (Sprint 11 / BE-11.7). Gates the
+	// /api/v1/admin/payments/* endpoints (reconcile, refund, mark-paid-cash).
+	// Granted to TENANT_ADMIN and STAFF (front-desk cashiers). Mirrored in
+	// edushift-front/.../core/enums/permission.enum.ts (Permission.PaymentAdmin).
+	public static final String LMS_PAYMENT_ADMIN = "LMS_PAYMENT_ADMIN";
+
+	// Announcements (Sprint 9 / BE-9.4). Gates the admin surface of
+	// /api/v1/announcements (create / patch / publish / delete). Granted to
+	// TENANT_ADMIN (school directors / admins) and TEACHER (homeroom
+	// teachers post class-level announcements). Mirrored in
+	// edushift-front/.../core/enums/permission.enum.ts.
+	// DEBT-FK-BUGS-2: this constant was missing — AnnouncementController
+	// referenced the string literal directly, which silently always
+	// returned 403 regardless of the role. Centralised here so the
+	// @PreAuthorize can resolve it via hasAuthority(...).
+	public static final String LMS_ANNOUNCEMENTS_CREATE = "LMS_ANNOUNCEMENTS_CREATE";
+
 	private LmsAuthorities() {
 		// utility class
 	}

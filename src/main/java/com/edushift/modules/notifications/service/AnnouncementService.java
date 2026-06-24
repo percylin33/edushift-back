@@ -164,7 +164,13 @@ public class AnnouncementService {
     }
 
     private Announcement mustFind(UUID publicUuid) {
-        return announcementRepo.findByPublicUuid(publicUuid)
+        // DEBT-FK-BUGS-2 / cross-tenant: el query incluye tenantId para que
+        // un admin de tenant B reciba 404 (no 204/200) si intenta operar
+        // sobre un announcement de tenant A. La variante global
+        // findByPublicUuid se conserva para el caso de uso admin interno
+        // (super-admin, jobs) pero NUNCA se usa desde el request scope.
+        return announcementRepo.findByPublicUuidAndTenantId(
+                        publicUuid, TenantContext.currentRequired())
                 .orElseThrow(() -> new com.edushift.shared.exception.NotFoundException(
                         "ANNOUNCEMENT_NOT_FOUND",
                         "Announcement not found in the current tenant"));

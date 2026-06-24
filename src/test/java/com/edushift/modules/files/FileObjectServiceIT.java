@@ -43,7 +43,10 @@ import org.springframework.transaction.support.TransactionTemplate;
  *       owned by tenant A (anti-enumeration 404).</li>
  *   <li><strong>XT-FIL-4</strong> — The storage layer writes under
  *       the tenant-scoped key
- *       {@code ${root}/{tenantId}/lms/{module}/{publicUuid}}.</li>
+ *       {@code ${root}/tenants/{tenantId}/lms/{module}/{publicUuid}}
+ *       (Sprint 11 / ADR-11.4 — the {@code tenants/} prefix is part
+ *       of the canonical multi-tenant layout, see
+ *       {@code .cursor/rules/multi-tenant-rules.mdc}).</li>
  *   <li><strong>XT-FIL-5</strong> — Bytes round-trip with the same
  *       SHA-256 the storage layer reported (no corruption).</li>
  * </ul>
@@ -188,23 +191,29 @@ class FileObjectServiceIT extends IntegrationTest {
 	class StorageLayerGuarantees {
 
 		@Test
-		@DisplayName("LOCAL_FS writes under ${root}/{tenantId}/lms/{module}/{publicUuid}")
+		@DisplayName("LOCAL_FS writes under ${root}/tenants/{tenantId}/lms/{module}/{publicUuid}")
 		void onDiskPathIsTenantScoped() throws IOException {
 			com.edushift.shared.multitenancy.TenantContext.set(tenantA.getId());
 			FileObject stored = fileObjectService.store(tenantA.getId(), "materials",
 					new MockMultipartFile("file", "doc.pdf", "application/pdf",
 							new ByteArrayInputStream("pdf-bytes".getBytes())));
 
+			// ADR-11.4: the on-disk layout is ${root}/tenants/{tid}/lms/{module}/{publicUuid}.
+			// The `tenants/{tid}` prefix is part of the remoteKey itself (the
+			// canonical EduShift file layout, mirrored from the multi-tenant
+			// rules in `.cursor/rules/multi-tenant-rules.mdc`). Earlier
+			// versions of this test joined `storageRoot/tenantId/remoteKey`,
+			// which produced a path with TWO copies of the tenantId; the
+			// fix is to use the remoteKey as-is.
 			Path expected = storageRoot
-					.resolve(tenantA.getId().toString())
 					.resolve(stored.getRemoteKey())
 					.normalize();
 			assertThat(Files.exists(expected))
 					.as("expected file at " + expected)
 					.isTrue();
 			assertThat(stored.getRemoteKey())
-					.as("remoteKey must include tenantId")
-					.contains(tenantA.getId().toString());
+					.as("remoteKey must include tenants/{tenantId}")
+					.contains("tenants/" + tenantA.getId());
 		}
 
 		@Test

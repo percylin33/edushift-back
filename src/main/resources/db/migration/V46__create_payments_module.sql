@@ -39,6 +39,7 @@ CREATE TABLE edushift.subscriptions (
 );
 
 CREATE UNIQUE INDEX uq_subscriptions_pubuuid ON edushift.subscriptions (public_uuid);
+CREATE UNIQUE INDEX uq_subscriptions_tenant_id ON edushift.subscriptions (tenant_id, id);
 CREATE INDEX        idx_subscriptions_tenant  ON edushift.subscriptions (tenant_id);
 CREATE INDEX        idx_subscriptions_student ON edushift.subscriptions (tenant_id, student_id);
 CREATE INDEX        idx_subscriptions_guardian ON edushift.subscriptions (tenant_id, guardian_user_id);
@@ -76,6 +77,7 @@ CREATE TABLE edushift.invoices (
 );
 
 CREATE UNIQUE INDEX uq_invoices_pubuuid   ON edushift.invoices (public_uuid);
+CREATE UNIQUE INDEX uq_invoices_tenant_id ON edushift.invoices (tenant_id, id);
 CREATE UNIQUE INDEX uq_invoices_idem      ON edushift.invoices (tenant_id, idempotency_key) WHERE deleted_at IS NULL;
 CREATE INDEX        idx_invoices_tenant   ON edushift.invoices (tenant_id);
 CREATE INDEX        idx_invoices_student  ON edushift.invoices (tenant_id, student_id, status);
@@ -140,6 +142,13 @@ COMMENT ON COLUMN edushift.payments.external_reference IS 'Our invoice public_uu
 
 
 -- ----- FKs (added last to avoid forward-ref errors) -----
+-- NB: we FK to students(tenant_id, id) and a UNIQUE index on (tenant_id, id) is
+-- required. `students.id` is the PK (so unique), but Postgres does not infer
+-- a composite UNIQUE from the PK alone. We add an explicit index that pairs
+-- the tenant discriminator with the PK column so the FKs declared below can
+-- reference a real UNIQUE key.
+CREATE UNIQUE INDEX uq_students_tenant_id ON edushift.students (tenant_id, id);
+
 ALTER TABLE edushift.subscriptions
     ADD CONSTRAINT fk_subscriptions_student
         FOREIGN KEY (tenant_id, student_id)

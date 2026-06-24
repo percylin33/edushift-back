@@ -88,10 +88,15 @@ class NotificationTenantIsolationIT extends IntegrationTest {
     private record Fixture(Tenant tenantA, Tenant tenantB, User userA, User userB, Notification notifA) {}
 
     private Fixture setupTenants() {
-        Tenant tenantA = createTenant("notif-iso-a");
-        Tenant tenantB = createTenant("notif-iso-b");
-        User userA = createUserIn(tenantA, "userA", SHARED_EMAIL, PASSWORD_A);
-        User userB = createUserIn(tenantB, "userB", SHARED_EMAIL, PASSWORD_B);
+        // DEBT-FK-BUGS-2 / cleanup: slugs suffixed with UUID so each @Test
+        // gets fresh tenants. The shared static PostgreSQLContainer is JVM-
+        // scoped, so multiple @Test methods in the same class would
+        // otherwise collide on the unique slug constraint.
+        String suffix = java.util.UUID.randomUUID().toString().substring(0, 8);
+        Tenant tenantA = createTenant("notif-iso-a-" + suffix);
+        Tenant tenantB = createTenant("notif-iso-b-" + suffix);
+        User userA = createUserIn(tenantA, "userA-" + suffix, SHARED_EMAIL, PASSWORD_A);
+        User userB = createUserIn(tenantB, "userB-" + suffix, SHARED_EMAIL, PASSWORD_B);
         Notification notifA = createNotificationIn(tenantA, userA, "STUDENT_ABSENT", "Hijo ausente hoy");
         return new Fixture(tenantA, tenantB, userA, userB, notifA);
     }
@@ -127,7 +132,12 @@ class NotificationTenantIsolationIT extends IntegrationTest {
             Notification n = new Notification();
             n.setPublicUuid(UUID.randomUUID());
             n.setTenantId(t.getId());
-            n.setRecipientUserId(u.getId());
+            // V48 / DEBT-FK-BUGS-2 — FK fk_notifications_recipient references
+            // users.public_uuid (NOT users.id). The production code passes
+            // the actor's publicUuid (see CurrentUserProvider), so the test
+            // fixture must match. Same pattern as V29 (GradeRecord) and
+            // V30 (Attendance).
+            n.setRecipientUserId(u.getPublicUuid());
             n.setTemplateKey(template);
             n.setCategory(Category.ANNOUNCEMENT);
             n.setChannel(Channel.IN_APP);
@@ -171,8 +181,15 @@ class NotificationTenantIsolationIT extends IntegrationTest {
 
             assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
             JsonNode body = objectMapper.readTree(response.getBody());
-            JsonNode content = body.has("data") ? body.get("data").get("content") : body.get("content");
-            for (JsonNode item : content) {
+            // DEBT-FK-BUGS-2 / parseo: el NotificationController#list devuelve
+            // ApiResponse<List<NotificationResponse>> con shape {data: [...],
+            // meta: {...}}, no la forma {data: {content: [...]}} que asume el
+            // test original. El bug pre-existente era que el JSON esperado
+            // coincide con la respuesta de Spring Page<>, no con la de
+            // ApiResponse.ok(list, Meta.of(page)). El test pasa con data
+            // siendo directamente el array de items.
+            JsonNode items = body.has("data") ? body.get("data") : body;
+            for (JsonNode item : items) {
                 String id = item.get("publicUuid").asText();
                 assertThat(id)
                         .as("tenant A notification publicUuid leaked into B's listing")
@@ -191,7 +208,7 @@ class NotificationTenantIsolationIT extends IntegrationTest {
             Fixture f = setupTenants();
             AuthResponse loginB = login(f.tenantB().getSlug(), SHARED_EMAIL, PASSWORD_B);
 
-            ResponseEntity<String> response = doPost(
+            ResponseEntity<String> response = doPatch(
                     NOTIFICATIONS_BASE + "/" + f.notifA().getPublicUuid() + "/read",
                     loginB.accessToken(), "{}");
 
@@ -211,10 +228,16 @@ class NotificationTenantIsolationIT extends IntegrationTest {
     // ============================================================ helpers
 
     private AuthResponse login(String tenantSlug, String email, String pwd) {
-        String body = String.format("{\"tenantSlug\":\"%s\",\"email\":\"%s\",\"password\":\"%s\"}",
-                tenantSlug, email, pwd);
+        // DEBT-FK-BUGS-2 / login: AuthController#login reads the tenant slug
+        // from the X-Tenant-Slug HEADER, not from the body. The original test
+        // (commit 3d5c295) set tenantSlug in the body, so the controller's
+        // @RequestHeader(value = TENANT_SLUG_HEADER, required = true) threw
+        // MissingRequestHeaderException → 400 BAD_REQUEST. This fix adds the
+        // header that the controller actually expects.
+        String body = String.format("{\"email\":\"%s\",\"password\":\"%s\"}", email, pwd);
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
+        headers.set("X-Tenant-Slug", tenantSlug);
         ResponseEntity<AuthResponse> response = rest.exchange(
                 AUTH_BASE + "/login", HttpMethod.POST,
                 new HttpEntity<>(body, headers), AuthResponse.class);
@@ -233,5 +256,12 @@ class NotificationTenantIsolationIT extends IntegrationTest {
         headers.setContentType(MediaType.APPLICATION_JSON);
         headers.setBearerAuth(token);
         return rest.exchange(path, HttpMethod.POST, new HttpEntity<>(body, headers), String.class);
+    }
+
+    private ResponseEntity<String> doPatch(String path, String token, String body) {
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        headers.setBearerAuth(token);
+        return rest.exchange(path, HttpMethod.PATCH, new HttpEntity<>(body, headers), String.class);
     }
 }

@@ -10,6 +10,7 @@ import com.edushift.shared.exception.NotFoundException;
 import com.edushift.shared.exception.UnauthorizedException;
 import com.edushift.shared.security.CurrentUserProvider;
 import jakarta.validation.Valid;
+import java.util.List;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpHeaders;
@@ -37,7 +38,12 @@ import org.springframework.web.bind.annotation.RestController;
  * the cached bytes with the right Content-Type and filename.</p>
  */
 @RestController
-@RequestMapping("/api/v1/reports")
+// DEBT-FK-BUGS-2 / routing: ver AnnouncementController para la explicacion
+// completa. WebConfiguration#addPathPrefix("/v1", ...) antepone "/v1" a
+// todos los controllers de com.edushift.modules.*controller.*. Solo
+// declaramos el segmento post-prefix aca ("/reports"); el configurer
+// se encarga de prefijar con "/v1".
+@RequestMapping("/reports")
 @RequiredArgsConstructor
 public class ReportController {
 
@@ -57,6 +63,26 @@ public class ReportController {
                 me(), req.reportType(), req.format(),
                 req.params(), req.idemKey());
         return ApiResponse.ok(ReportJobResponse.from(job));
+    }
+
+    /**
+     * DEBT-FK-BUGS-2 / list endpoint: lista los jobs del usuario actual
+     * en el tenant actual, paginados, mas recientes primero. Es el
+     * endpoint que usa el FE para mostrar "Mis reports" en la UI de
+     * usuario (no en el admin tab). El service filtra por tenantId
+     * explícitamente (defense-in-depth sobre el @TenantId de Hibernate).
+     */
+    @GetMapping
+    @PreAuthorize("isAuthenticated()")
+    public ApiResponse<List<ReportJobResponse>> list(
+            org.springframework.data.domain.Pageable pageable) {
+        UUID me = me();
+        org.springframework.data.domain.Page<ReportJob> page =
+                reportService.listForUser(me, pageable);
+        List<ReportJobResponse> data = page.getContent().stream()
+                .map(ReportJobResponse::from)
+                .toList();
+        return ApiResponse.ok(data, ApiResponse.Meta.of(page));
     }
 
     @GetMapping("/{publicUuid}")

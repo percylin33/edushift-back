@@ -22,7 +22,7 @@ class LmsRoleAuthorityMapperTest {
 	private final LmsRoleAuthorityMapper mapper = new LmsRoleAuthorityMapper();
 
 	@Test
-	@DisplayName("tenant_admin gets all LMS authorities (tasks + materials + quizzes + AI)")
+	@DisplayName("tenant_admin gets all LMS authorities (tasks + materials + quizzes + AI + payment-admin + announcements)")
 	void tenantAdminHasAllAuthorities() {
 		Set<String> auths = mapper.grantFor(UserRole.TENANT_ADMIN);
 		assertThat(auths).containsExactlyInAnyOrder(
@@ -37,7 +37,10 @@ class LmsRoleAuthorityMapperTest {
 				LmsAuthorities.LMS_QUIZ_CREATE,
 				LmsAuthorities.LMS_QUIZ_GRADE,
 				LmsAuthorities.LMS_QUIZ_SUBMIT,
-				LmsAuthorities.LMS_AI_GENERATE);
+				LmsAuthorities.LMS_AI_GENERATE,
+				LmsAuthorities.LMS_PAYMENT_ADMIN,
+				// DEBT-FK-BUGS-2: announcements admin surface (BE-9.4).
+				LmsAuthorities.LMS_ANNOUNCEMENTS_CREATE);
 	}
 
 	@Test
@@ -57,7 +60,8 @@ class LmsRoleAuthorityMapperTest {
 				LmsAuthorities.LMS_AI_GENERATE);
 		assertThat(auths).doesNotContain(
 				LmsAuthorities.LMS_TASK_SUBMIT,
-				LmsAuthorities.LMS_QUIZ_SUBMIT);
+				LmsAuthorities.LMS_QUIZ_SUBMIT,
+				LmsAuthorities.LMS_PAYMENT_ADMIN);
 	}
 
 	@Test
@@ -85,13 +89,14 @@ class LmsRoleAuthorityMapperTest {
 	}
 
 	@Test
-	@DisplayName("staff is read-only: tasks + materials + quizzes")
+	@DisplayName("staff is read-only: tasks + materials + quizzes + payment-admin")
 	void staffIsReadOnly() {
 		Set<String> auths = mapper.grantFor(UserRole.STAFF);
 		assertThat(auths).containsExactlyInAnyOrder(
 				LmsAuthorities.LMS_TASK_READ,
 				LmsAuthorities.LMS_MATERIAL_READ,
-				LmsAuthorities.LMS_QUIZ_READ);
+				LmsAuthorities.LMS_QUIZ_READ,
+				LmsAuthorities.LMS_PAYMENT_ADMIN);
 	}
 
 	@Test
@@ -122,10 +127,12 @@ class LmsRoleAuthorityMapperTest {
 	}
 
 	@Test
-	@DisplayName("combined tenant_admin + teacher → still all 12 (admin has them all)")
+	@DisplayName("combined tenant_admin + teacher → still all 14 (admin has them all)")
 	void tenantAdminAndTeacherStillHasAll() {
+		// DEBT-FK-BUGS-2: +1 authority (LMS_ANNOUNCEMENTS_CREATE) added to
+		// TENANT_ADMIN set, so the union goes from 13 to 14.
 		Set<String> auths = mapper.mapAuthorities(
 				EnumSet.of(UserRole.TENANT_ADMIN, UserRole.TEACHER));
-		assertThat(auths).hasSize(12);
+		assertThat(auths).hasSize(14);
 	}
 }

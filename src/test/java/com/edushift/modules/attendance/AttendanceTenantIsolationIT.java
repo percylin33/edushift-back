@@ -38,6 +38,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.UUID;
+import java.util.Optional;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -126,6 +127,8 @@ class AttendanceTenantIsolationIT extends IntegrationTest {
 	@Autowired private PasswordEncoder passwordEncoder;
 	@Autowired private PlatformTransactionManager txManager;
 	@Autowired private ObjectMapper objectMapper;
+	@jakarta.persistence.PersistenceContext
+	private jakarta.persistence.EntityManager em;
 
 	private TransactionTemplate tx() {
 		return new TransactionTemplate(txManager);
@@ -260,53 +263,44 @@ class AttendanceTenantIsolationIT extends IntegrationTest {
 	class UuidIsolation {
 
 		@Test
-		@DisplayName("XT-ATT-6: same student.publicUuid across two tenants resolves to two distinct rows")
+		@DisplayName("XT-ATT-6: publicUuid is globally unique; cross-tenant collision is prevented at DB level")
 		void sharedPublicUuidDoesNotCollide() throws Exception {
 			Fixture fx = setupTenants();
-			// We force the same publicUuid in both tenants to
-			// demonstrate that the @TenantId discriminator is the
-			// only thing protecting against cross-tenant
-			// collisions. UUIDv4 collisions are astronomically
-			// rare in production but the test exercises the
-			// "explicit collision" case directly.
-			UUID sharedUuid = UUID.randomUUID();
-			TenantContext.runAs(fx.tenantA().getId(), () ->
-					tx().execute(s -> {
-						fx.studentA().setPublicUuid(sharedUuid);
-						studentRepository.saveAndFlush(fx.studentA());
-						return null;
-					}));
-			TenantContext.runAs(fx.tenantB().getId(), () ->
-					tx().execute(s -> {
-						fx.studentB().setPublicUuid(sharedUuid);
-						studentRepository.saveAndFlush(fx.studentB());
-						return null;
-					}));
 
-			// Same shared publicUuid in both tenants:
-			assertThat(fx.studentA().getPublicUuid())
-					.isEqualTo(sharedUuid);
-			assertThat(fx.studentB().getPublicUuid())
-					.isEqualTo(sharedUuid);
+			// Each student gets its own publicUuid on @PrePersist; the
+			// two tenants' students must therefore have distinct
+			// publicUuids (the global UNIQUE constraint on
+			// edushift.students.public_uuid forbids duplicates).
+			UUID pubA = fx.studentA().getPublicUuid();
+			UUID pubB = fx.studentB().getPublicUuid();
 
-			// But under tenant A's context only A's student
-			// is visible.
-			UUID foundInA = TenantContext.runAs(fx.tenantA().getId(), () ->
+			assertThat(pubA)
+					.as("publicUuid must be unique per row (global UNIQUE)")
+					.isNotEqualTo(pubB);
+
+			// Each tenant's view of the world is still isolated:
+			// looking up A's publicUuid from B's tenant context must
+			// not return A's row (the @TenantId filter hides it).
+			Optional<Student> aFromB = TenantContext.runAs(fx.tenantB().getId(), () ->
 					tx().execute(s ->
-							studentRepository.findByPublicUuid(sharedUuid)
-									.orElseThrow().getId()));
-			UUID foundInB = TenantContext.runAs(fx.tenantB().getId(), () ->
-					tx().execute(s ->
-							studentRepository.findByPublicUuid(sharedUuid)
-									.orElseThrow().getId()));
+							studentRepository.findByPublicUuid(pubA)));
+			assertThat(aFromB)
+					.as("publicUuid of tenant A must NOT be visible from tenant B")
+					.isEmpty();
 
-			assertThat(foundInA)
-					.isEqualTo(fx.studentA().getId());
-			assertThat(foundInB)
-					.isEqualTo(fx.studentB().getId());
-			assertThat(foundInA)
-					.as("internal ids must differ even when publicUuids match")
-					.isNotEqualTo(foundInB);
+			Optional<Student> aFromA = TenantContext.runAs(fx.tenantA().getId(), () ->
+					tx().execute(s ->
+							studentRepository.findByPublicUuid(pubA)));
+			assertThat(aFromA)
+					.as("publicUuid of tenant A IS visible from tenant A")
+					.isPresent();
+
+			Optional<Student> bFromA = TenantContext.runAs(fx.tenantA().getId(), () ->
+					tx().execute(s ->
+							studentRepository.findByPublicUuid(pubB)));
+			assertThat(bFromA)
+					.as("publicUuid of tenant B must NOT be visible from tenant A")
+					.isEmpty();
 		}
 	}
 
@@ -592,7 +586,7 @@ class AttendanceTenantIsolationIT extends IntegrationTest {
 			record.setStudent(savedStudent);
 			record.setStatus(AttendanceRecordStatus.PRESENT);
 			record.setOccurredAt(Instant.now());
-			record.setScannedByUserId(admin.getId());
+			record.setScannedByUserId(admin.getPublicUuid());
 			AttendanceRecord savedRecord =
 					recordRepository.saveAndFlush(record);
 

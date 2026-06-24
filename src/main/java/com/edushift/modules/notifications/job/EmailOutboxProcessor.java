@@ -10,6 +10,7 @@ import java.util.List;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Propagation;
@@ -29,8 +30,16 @@ import org.springframework.transaction.annotation.Transactional;
  * {@code notification_id}) and pass the userId / channel / category
  * to the sender so it can build the per-recipient HMAC-signed
  * unsubscribe link.
+ *
+ * <h3>Why {@code @ConditionalOnProperty} (Sprint 12 / debug-12)</h3>
+ * <p>This bean depends on {@link EmailSender}, which is itself gated
+ * on {@code app.notifications.email.enabled=true}. Without the same
+ * gate, this bean's constructor would fail to autowire
+ * {@link EmailSender} in environments where email is disabled.
+ * Keep both gates in sync: any change to one needs the other.</p>
  */
 @Component
+@ConditionalOnProperty(name = "app.notifications.email.enabled", havingValue = "true")
 @RequiredArgsConstructor
 @Slf4j
 public class EmailOutboxProcessor {

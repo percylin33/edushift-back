@@ -28,4 +28,22 @@ public interface AnnouncementRepository extends JpaRepository<Announcement, UUID
     Page<Announcement> findAllForAdmin(Pageable pageable);
 
     Optional<Announcement> findByPublicUuid(UUID publicUuid);
+
+    /**
+     * DEBT-FK-BUGS-2 / cross-tenant fix: the bare {@link #findByPublicUuid(UUID)}
+     * ignores the current tenant and would happily resolve a row owned by
+     * another tenant, letting admin B mutate or delete A's announcement.
+     * The service-layer {@code mustFind} must use THIS variant so the
+     * cross-tenant ITs ({@code deleteAsBReturns404},
+     * {@code patchAsBReturns404}, {@code markReadReturns404}) get a 404
+     * instead of a 204 / 400.
+     */
+    @Query("""
+            SELECT a FROM Announcement a
+            WHERE a.publicUuid = :publicUuid
+              AND a.tenantId = :tenantId
+            """)
+    Optional<Announcement> findByPublicUuidAndTenantId(
+            @Param("publicUuid") UUID publicUuid,
+            @Param("tenantId") UUID tenantId);
 }

@@ -81,10 +81,15 @@ class AnnouncementTenantIsolationIT extends IntegrationTest {
             Announcement announcementA) {}
 
     private Fixture setupTenants() {
-        Tenant tenantA = createTenant("announce-iso-a");
-        Tenant tenantB = createTenant("announce-iso-b");
-        User userA = createUserIn(tenantA, "userA", SHARED_EMAIL, PASSWORD_A);
-        User userB = createUserIn(tenantB, "userB", SHARED_EMAIL, PASSWORD_B);
+        // DEBT-FK-BUGS-2 / cleanup: slugs are suffixed with a random UUID so
+        // each @Test gets fresh tenants (the shared static PostgreSQLContainer
+        // is JVM-scoped, so multiple @Test methods in the same class share the
+        // same DB and would otherwise collide on the unique slug constraint).
+        String suffix = java.util.UUID.randomUUID().toString().substring(0, 8);
+        Tenant tenantA = createTenant("announce-iso-a-" + suffix);
+        Tenant tenantB = createTenant("announce-iso-b-" + suffix);
+        User userA = createUserIn(tenantA, "userA-" + suffix, SHARED_EMAIL, PASSWORD_A);
+        User userB = createUserIn(tenantB, "userB-" + suffix, SHARED_EMAIL, PASSWORD_B);
         Announcement a = createAnnouncementIn(tenantA, userA, "Reunión de padres lunes 8 AM");
         return new Fixture(tenantA, tenantB, userA, userB, a);
     }
@@ -210,8 +215,14 @@ class AnnouncementTenantIsolationIT extends IntegrationTest {
             String originalTitle = f.announcementA().getTitle();
             AuthResponse loginB = login(f.tenantB().getSlug(), SHARED_EMAIL, PASSWORD_B);
 
+            // DEBT-FK-BUGS-2 / DTO: el AudienceType es un enum (SCHOOL,
+            // GRADE, SECTION, COURSE). El test original mandaba "ALL" que
+            // no existe y disparaba 400 Bean Validation ANTES de llegar
+            // al service (que es donde estaba el cross-tenant check).
+            // Usamos un valor valido para que el request llegue al
+            // service y ahi dispare 404 cross-tenant.
             String body = "{\"title\":\"HACKED\",\"bodyHtml\":\"<p>x</p>\","
-                    + "\"audienceType\":\"ALL\",\"pinned\":false}";
+                    + "\"audienceType\":\"SCHOOL\",\"pinned\":false}";
             ResponseEntity<String> response = doPatch(
                     ANNOUNCEMENTS_BASE + "/" + f.announcementA().getPublicUuid(),
                     loginB.accessToken(), body);
@@ -256,10 +267,16 @@ class AnnouncementTenantIsolationIT extends IntegrationTest {
     // ============================================================ helpers
 
     private AuthResponse login(String tenantSlug, String email, String pwd) {
-        String body = String.format("{\"tenantSlug\":\"%s\",\"email\":\"%s\",\"password\":\"%s\"}",
-                tenantSlug, email, pwd);
+        // DEBT-FK-BUGS-2 / login: AuthController#login reads the tenant slug
+        // from the X-Tenant-Slug HEADER, not from the body. The original test
+        // (commit 3d5c295) set tenantSlug in the body, so the controller's
+        // @RequestHeader(value = TENANT_SLUG_HEADER, required = true) threw
+        // MissingRequestHeaderException → 400 BAD_REQUEST. This fix adds the
+        // header that the controller actually expects.
+        String body = String.format("{\"email\":\"%s\",\"password\":\"%s\"}", email, pwd);
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
+        headers.set("X-Tenant-Slug", tenantSlug);
         ResponseEntity<AuthResponse> response = rest.exchange(
                 AUTH_BASE + "/login", HttpMethod.POST,
                 new HttpEntity<>(body, headers), AuthResponse.class);
