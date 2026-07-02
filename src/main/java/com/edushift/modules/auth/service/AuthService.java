@@ -2,6 +2,7 @@ package com.edushift.modules.auth.service;
 
 import com.edushift.modules.auth.dto.AuthResponse;
 import com.edushift.modules.auth.dto.LoginRequest;
+import com.edushift.modules.auth.dto.MfaRequiredResponse;
 import com.edushift.modules.auth.dto.UserResponse;
 import com.edushift.modules.auth.entity.User;
 import com.edushift.modules.tenants.entity.Tenant;
@@ -27,14 +28,26 @@ import com.edushift.modules.tenants.entity.Tenant;
 public interface AuthService {
 
 	/**
-	 * Verifies credentials, issues a fresh access + refresh JWT pair, and
-	 * stamps {@code last_login_at} on the user.
+	 * Result of the login flow (Sprint 17 / BE-17.2). Either we have a
+	 * full session ({@link AuthResponse}) or we have an MFA challenge
+	 * pending ({@link MfaRequiredResponse}). Sealed in a {@link LoginResult}
+	 * so the controller can switch on the variant.
+	 */
+	sealed interface LoginResult permits LoginResult.Session, LoginResult.MfaRequired {
+		record Session(AuthResponse authResponse) implements LoginResult {}
+		record MfaRequired(MfaRequiredResponse mfaRequiredResponse) implements LoginResult {}
+	}
+
+	/**
+	 * Verifies credentials and either issues a full session or, when the
+	 * user has MFA enabled, returns an {@link MfaRequiredResponse} so the
+	 * client can complete the challenge.
 	 *
 	 * @param request    validated login payload
 	 * @param tenantSlug slug carried in the {@code X-Tenant-Slug} header
 	 *                   (or, in Sprint 2, derived from the subdomain)
 	 */
-	AuthResponse login(LoginRequest request, String tenantSlug);
+	LoginResult login(LoginRequest request, String tenantSlug);
 
 	/**
 	 * Validates the refresh token, rotates it (revokes old + issues new), and
@@ -87,5 +100,30 @@ public interface AuthService {
 	 * inside a {@code TenantContext.runAs} block.
 	 */
 	AuthResponse issueSession(User user, Tenant tenant);
+
+	/**
+	 * Complete the MFA step of the login flow (Sprint 17 / BE-17.2). The
+	 * caller has already presented a valid {@code mfaToken} as a bearer
+	 * (carrying the user publicUuid + tenant). This method:
+	 * <ol>
+	 *   <li>Resolves the user and tenant from the bearer.</li>
+	 *   <li>Delegates the TOTP / recovery code check to
+	 *       {@link MfaService#verifyChallenge(java.util.UUID, String)}.</li>
+	 *   <li>On success, mints a full access + refresh pair via
+	 *       {@link #issueSession(User, Tenant)}.</li>
+	 * </ol>
+	 *
+	 * @param tenantSlug the tenant from the {@code X-Tenant-Slug} header
+	 *                   (must match the {@code mfaToken} claim)
+	 * @param mfaCode    the 6-digit TOTP or 10-character recovery code
+	 */
+	AuthResponse completeMfaLogin(String tenantSlug, String mfaCode);
+
+	/**
+	 * Returns the {@link com.edushift.modules.auth.repository.UserRepository}
+	 * so callers (e.g. MFA controller endpoints) can re-load the
+	 * authenticated user entity from the publicUuid.
+	 */
+	com.edushift.modules.auth.repository.UserRepository userRepository();
 
 }

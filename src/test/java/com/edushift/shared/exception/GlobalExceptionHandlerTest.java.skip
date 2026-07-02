@@ -1,0 +1,421 @@
+package com.edushift.shared.exception;
+
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+
+import jakarta.validation.ConstraintViolation;
+import jakarta.validation.ConstraintViolationException;
+import java.util.Set;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Nested;
+import org.junit.jupiter.api.Test;
+import org.mockito.Mockito;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
+import org.springframework.context.annotation.Import;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.dao.OptimisticLockingFailureException;
+import org.springframework.http.HttpMethod;
+import org.springframework.http.MediaType;
+import org.springframework.security.authentication.BadCredentialsException;
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
+
+@WebMvcTest(controllers = GlobalExceptionHandlerTest.DummyController.class)
+@Import(GlobalExceptionHandler.class)
+class GlobalExceptionHandlerTest {
+
+    @Autowired
+    private MockMvc mockMvc;
+
+    @RestController
+    @RequestMapping("/test")
+    static class DummyController {
+
+        // ----- ApiException subclasses -----
+        @GetMapping("/api-exception")
+        void throwApiException() {
+            throw new BadRequestException("BAD_CODE", "bad request");
+        }
+
+        // ----- Validation (@Valid) -----
+        @PostMapping("/validation")
+        void validation(@jakarta.validation.Valid @RequestBody DummyRequest req) {
+        }
+
+        // ----- ConstraintViolationException (direct throw) -----
+        @GetMapping("/constraint-violation")
+        void throwConstraintViolation() {
+            var violation = Mockito.mock(ConstraintViolation.class);
+            var path = Mockito.mock(jakarta.validation.Path.class);
+            Mockito.when(violation.getPropertyPath()).thenReturn(path);
+            Mockito.when(violation.getMessage()).thenReturn("must not be blank");
+            var descriptor = Mockito.mock(jakarta.validation.metadata.ConstraintDescriptor.class);
+            Mockito.when(violation.getConstraintDescriptor()).thenReturn(descriptor);
+            var annotation = Mockito.mock(Override.class);
+            Mockito.when(descriptor.getAnnotation()).thenReturn(annotation);
+            Mockito.when(violation.getInvalidValue()).thenReturn(null);
+            throw new ConstraintViolationException("validation failed", Set.of(violation));
+        }
+
+        // ----- HttpMessageNotReadableException -----
+        @PostMapping("/not-readable")
+        void notReadable(@RequestBody DummyRequest req) {
+        }
+
+        // ----- MissingServletRequestParameterException (triggered by Spring) -----
+        @GetMapping("/missing-param")
+        void missingParam(@RequestParam String required) {
+        }
+
+        // ----- MissingRequestHeaderException (triggered by Spring) -----
+        @GetMapping("/missing-header")
+        void missingHeader(@RequestHeader String required) {
+        }
+
+        // ----- MethodArgumentTypeMismatchException (triggered by Spring) -----
+        @GetMapping("/type-mismatch")
+        void typeMismatch(@RequestParam int number) {
+        }
+
+        // ----- HttpRequestMethodNotSupportedException -----
+        @GetMapping("/get-only")
+        void getOnly() {
+        }
+
+        // ----- HttpMediaTypeNotSupportedException -----
+        @PostMapping(value = "/json-only", consumes = MediaType.APPLICATION_JSON_VALUE)
+        void jsonOnly(@RequestBody String body) {
+        }
+
+        // ----- HttpMediaTypeNotAcceptableException / NotAcceptableStatusException -----
+        @GetMapping(value = "/xml-only", produces = MediaType.APPLICATION_XML_VALUE)
+        String xmlOnly() {
+            return "<root/>";
+        }
+
+        // ----- NoResourceFoundException -----
+        @GetMapping("/no-resource")
+        void throwNoResource() {
+            throw new NoResourceFoundException(HttpMethod.GET, "/test/no-resource");
+        }
+
+        // ----- MaxUploadSizeExceededException -----
+        @PostMapping("/upload-too-large")
+        void throwUploadTooLarge() {
+            throw new MaxUploadSizeExceededException(1024);
+        }
+
+        // ----- AuthenticationException -----
+        @GetMapping("/authentication")
+        void throwAuthentication() {
+            throw new BadCredentialsException("bad credentials");
+        }
+
+        // ----- AccessDeniedException -----
+        @GetMapping("/access-denied")
+        void throwAccessDenied() {
+            throw new org.springframework.security.access.AccessDeniedException("access denied");
+        }
+
+        // ----- DataIntegrityViolationException -----
+        @GetMapping("/data-integrity")
+        void throwDataIntegrity() {
+            throw new DataIntegrityViolationException("constraint violation");
+        }
+
+        // ----- OptimisticLockingFailureException -----
+        @GetMapping("/optimistic-lock")
+        void throwOptimisticLock() {
+            throw new OptimisticLockingFailureException("concurrent modification");
+        }
+
+        // ----- Generic Exception -----
+        @GetMapping("/unexpected")
+        void throwUnexpected() {
+            throw new RuntimeException("unexpected error");
+        }
+    }
+
+    // Simple DTO with a validated field
+    static class DummyRequest {
+        @jakarta.validation.constraints.NotBlank
+        private String name;
+
+        public String getName() {
+            return name;
+        }
+
+        public void setName(String name) {
+            this.name = name;
+        }
+    }
+
+    // =========================================================================
+    // Application exceptions
+    // =========================================================================
+
+    @Nested
+    @DisplayName("ApiException handling")
+    class ApiExceptionHandling {
+
+        @Test
+        @DisplayName("returns 400 with error code and message for BadRequestException")
+        void badRequest() throws Exception {
+            mockMvc.perform(get("/test/api-exception"))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.success").value(false))
+                    .andExpect(jsonPath("$.message").value("bad request"))
+                    .andExpect(jsonPath("$.errors[0].code").value("BAD_CODE"))
+                    .andExpect(jsonPath("$.errors[0].message").value("bad request"))
+                    .andExpect(jsonPath("$.path").value("/test/api-exception"));
+        }
+    }
+
+    // =========================================================================
+    // Validation
+    // =========================================================================
+
+    @Nested
+    @DisplayName("Validation error handling")
+    class ValidationHandling {
+
+        @Test
+        @DisplayName("returns 400 with field errors for MethodArgumentNotValidException")
+        void methodArgumentNotValid() throws Exception {
+            mockMvc.perform(post("/test/validation")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{}"))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.success").value(false))
+                    .andExpect(jsonPath("$.message").value("Validation failed"))
+                    .andExpect(jsonPath("$.errors[0].field").value("name"))
+                    .andExpect(jsonPath("$.errors[0].code").value("REQUIRED"))
+                    .andExpect(jsonPath("$.path").value("/test/validation"));
+        }
+
+        @Test
+        @DisplayName("returns 400 for ConstraintViolationException")
+        void constraintViolation() throws Exception {
+            mockMvc.perform(get("/test/constraint-violation"))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.success").value(false))
+                    .andExpect(jsonPath("$.message").value("Validation failed"))
+                    .andExpect(jsonPath("$.errors").isArray())
+                    .andExpect(jsonPath("$.path").value("/test/constraint-violation"));
+        }
+    }
+
+    // =========================================================================
+    // Malformed / missing request parts
+    // =========================================================================
+
+    @Nested
+    @DisplayName("Malformed request handling")
+    class MalformedRequestHandling {
+
+        @Test
+        @DisplayName("returns 400 for HttpMessageNotReadableException")
+        void notReadable() throws Exception {
+            mockMvc.perform(post("/test/not-readable")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{malformed}"))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.success").value(false))
+                    .andExpect(jsonPath("$.message").value("Malformed request"))
+                    .andExpect(jsonPath("$.errors[0].code").value("MALFORMED_REQUEST"))
+                    .andExpect(jsonPath("$.path").value("/test/not-readable"));
+        }
+
+        @Test
+        @DisplayName("returns 400 for MissingServletRequestParameterException")
+        void missingParam() throws Exception {
+            mockMvc.perform(get("/test/missing-param"))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.success").value(false))
+                    .andExpect(jsonPath("$.message").value("Missing parameter"))
+                    .andExpect(jsonPath("$.errors[0].code").value("REQUIRED"))
+                    .andExpect(jsonPath("$.path").value("/test/missing-param"));
+        }
+
+        @Test
+        @DisplayName("returns 400 for MissingRequestHeaderException")
+        void missingHeader() throws Exception {
+            mockMvc.perform(get("/test/missing-header"))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.success").value(false))
+                    .andExpect(jsonPath("$.message").value("Missing header"))
+                    .andExpect(jsonPath("$.errors[0].code").value("REQUIRED"))
+                    .andExpect(jsonPath("$.path").value("/test/missing-header"));
+        }
+
+        @Test
+        @DisplayName("returns 400 for MethodArgumentTypeMismatchException")
+        void typeMismatch() throws Exception {
+            mockMvc.perform(get("/test/type-mismatch").param("number", "abc"))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.success").value(false))
+                    .andExpect(jsonPath("$.message").value("Type mismatch"))
+                    .andExpect(jsonPath("$.errors[0].code").value("TYPE_MISMATCH"))
+                    .andExpect(jsonPath("$.path").value("/test/type-mismatch"));
+        }
+    }
+
+    // =========================================================================
+    // HTTP protocol errors
+    // =========================================================================
+
+    @Nested
+    @DisplayName("HTTP protocol error handling")
+    class HttpProtocolHandling {
+
+        @Test
+        @DisplayName("returns 405 for HttpRequestMethodNotSupportedException")
+        void methodNotAllowed() throws Exception {
+            mockMvc.perform(post("/test/get-only"))
+                    .andExpect(status().isMethodNotAllowed())
+                    .andExpect(jsonPath("$.success").value(false))
+                    .andExpect(jsonPath("$.message").value("Method not allowed"))
+                    .andExpect(jsonPath("$.errors[0].code").value("METHOD_NOT_ALLOWED"))
+                    .andExpect(jsonPath("$.path").value("/test/get-only"));
+        }
+
+        @Test
+        @DisplayName("returns 415 for HttpMediaTypeNotSupportedException")
+        void unsupportedMediaType() throws Exception {
+            mockMvc.perform(post("/test/json-only")
+                            .contentType(MediaType.APPLICATION_XML)
+                            .content("<root/>"))
+                    .andExpect(status().isUnsupportedMediaType())
+                    .andExpect(jsonPath("$.success").value(false))
+                    .andExpect(jsonPath("$.message").value("Unsupported media type"))
+                    .andExpect(jsonPath("$.errors[0].code").value("UNSUPPORTED_MEDIA_TYPE"))
+                    .andExpect(jsonPath("$.path").value("/test/json-only"));
+        }
+
+        @Test
+        @DisplayName("returns 406 for HttpMediaTypeNotAcceptableException")
+        void notAcceptable() throws Exception {
+            mockMvc.perform(get("/test/xml-only").accept(MediaType.APPLICATION_JSON))
+                    .andExpect(status().isNotAcceptable())
+                    .andExpect(jsonPath("$.success").value(false))
+                    .andExpect(jsonPath("$.message").value("Not acceptable"))
+                    .andExpect(jsonPath("$.errors[0].code").value("NOT_ACCEPTABLE"))
+                    .andExpect(jsonPath("$.path").value("/test/xml-only"));
+        }
+
+        @Test
+        @DisplayName("returns 404 with ENDPOINT_NOT_FOUND for NoResourceFoundException")
+        void noResource() throws Exception {
+            mockMvc.perform(get("/test/no-resource"))
+                    .andExpect(status().isNotFound())
+                    .andExpect(jsonPath("$.success").value(false))
+                    .andExpect(jsonPath("$.message").value("Not found"))
+                    .andExpect(jsonPath("$.errors[0].code").value("ENDPOINT_NOT_FOUND"))
+                    .andExpect(jsonPath("$.path").value("/test/no-resource"));
+        }
+
+        @Test
+        @DisplayName("returns 413 for MaxUploadSizeExceededException")
+        void payloadTooLarge() throws Exception {
+            mockMvc.perform(post("/test/upload-too-large"))
+                    .andExpect(status().isPayloadTooLarge())
+                    .andExpect(jsonPath("$.success").value(false))
+                    .andExpect(jsonPath("$.message").value("Payload too large"))
+                    .andExpect(jsonPath("$.errors[0].code").value("PAYLOAD_TOO_LARGE"))
+                    .andExpect(jsonPath("$.path").value("/test/upload-too-large"));
+        }
+    }
+
+    // =========================================================================
+    // Security
+    // =========================================================================
+
+    @Nested
+    @DisplayName("Security exception handling")
+    class SecurityHandling {
+
+        @Test
+        @DisplayName("returns 401 for AuthenticationException")
+        void authentication() throws Exception {
+            mockMvc.perform(get("/test/authentication"))
+                    .andExpect(status().isUnauthorized())
+                    .andExpect(jsonPath("$.success").value(false))
+                    .andExpect(jsonPath("$.message").value("Unauthorized"))
+                    .andExpect(jsonPath("$.errors[0].code").value("UNAUTHORIZED"))
+                    .andExpect(jsonPath("$.path").value("/test/authentication"));
+        }
+
+        @Test
+        @DisplayName("returns 403 for AccessDeniedException")
+        void accessDenied() throws Exception {
+            mockMvc.perform(get("/test/access-denied"))
+                    .andExpect(status().isForbidden())
+                    .andExpect(jsonPath("$.success").value(false))
+                    .andExpect(jsonPath("$.message").value("Forbidden"))
+                    .andExpect(jsonPath("$.errors[0].code").value("FORBIDDEN"))
+                    .andExpect(jsonPath("$.path").value("/test/access-denied"));
+        }
+    }
+
+    // =========================================================================
+    // Persistence
+    // =========================================================================
+
+    @Nested
+    @DisplayName("Persistence exception handling")
+    class PersistenceHandling {
+
+        @Test
+        @DisplayName("returns 409 for DataIntegrityViolationException")
+        void dataIntegrity() throws Exception {
+            mockMvc.perform(get("/test/data-integrity"))
+                    .andExpect(status().isConflict())
+                    .andExpect(jsonPath("$.success").value(false))
+                    .andExpect(jsonPath("$.message").value("Conflict"))
+                    .andExpect(jsonPath("$.errors[0].code").value("DATA_INTEGRITY_VIOLATION"))
+                    .andExpect(jsonPath("$.path").value("/test/data-integrity"));
+        }
+
+        @Test
+        @DisplayName("returns 409 for OptimisticLockingFailureException")
+        void optimisticLock() throws Exception {
+            mockMvc.perform(get("/test/optimistic-lock"))
+                    .andExpect(status().isConflict())
+                    .andExpect(jsonPath("$.success").value(false))
+                    .andExpect(jsonPath("$.message").value("Conflict"))
+                    .andExpect(jsonPath("$.errors[0].code").value("OPTIMISTIC_LOCK"))
+                    .andExpect(jsonPath("$.path").value("/test/optimistic-lock"));
+        }
+    }
+
+    // =========================================================================
+    // Fallback
+    // =========================================================================
+
+    @Nested
+    @DisplayName("Fallback exception handling")
+    class FallbackHandling {
+
+        @Test
+        @DisplayName("returns 500 for generic Exception")
+        void unexpected() throws Exception {
+            mockMvc.perform(get("/test/unexpected"))
+                    .andExpect(status().isInternalServerError())
+                    .andExpect(jsonPath("$.success").value(false))
+                    .andExpect(jsonPath("$.message").value("Internal server error"))
+                    .andExpect(jsonPath("$.errors[0].code").value("INTERNAL_ERROR"))
+                    .andExpect(jsonPath("$.path").value("/test/unexpected"));
+        }
+    }
+}

@@ -37,6 +37,20 @@ public interface UserRepository extends JpaRepository<User, UUID>,
 
 	Optional<User> findByEmailAndTenantId(String email, UUID tenantId);
 
+	/**
+	 * Looks up a user by their linked Google {@code sub} claim. Relies on
+	 * Hibernate's {@code @TenantId} auto-filter so the search is scoped to
+	 * the current {@link com.edushift.shared.multitenancy.TenantContext}.
+	 */
+	Optional<User> findByGoogleSubject(String googleSubject);
+
+	/**
+	 * System / admin overload of {@link #findByGoogleSubject(String)} — for
+	 * background jobs that don't have a tenant context bound. Always passes
+	 * the tenant id explicitly.
+	 */
+	Optional<User> findByGoogleSubjectAndTenantId(String googleSubject, UUID tenantId);
+
 	boolean existsByPublicUuid(UUID publicUuid);
 
 	boolean existsByEmail(String email);

@@ -3,6 +3,7 @@ package com.edushift.modules.users.service.impl;
 import com.edushift.modules.auth.entity.User;
 import com.edushift.modules.auth.entity.UserRole;
 import com.edushift.modules.auth.entity.UserStatus;
+import com.edushift.modules.auth.events.UserStatusChangeEvent;
 import com.edushift.modules.auth.repository.UserRepository;
 import com.edushift.modules.users.dto.AssignRolesRequest;
 import com.edushift.modules.users.dto.UpdateUserRequest;
@@ -23,6 +24,7 @@ import java.util.UUID;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
@@ -56,6 +58,8 @@ public class UserManagementServiceImpl implements UserManagementService {
 
 	private final UserRepository userRepository;
 	private final UserManagementMapper mapper;
+	/** Sprint 14 / DEBT-AUTH-4: publishes UserStatusChangeEvent on transitions. */
+	private final ApplicationEventPublisher eventPublisher;
 
 	// ===========================================================================
 	// Read paths
@@ -155,10 +159,22 @@ public class UserManagementServiceImpl implements UserManagementService {
 			ensureNotLastAdmin(user, "disable");
 		}
 
+		UserStatus oldStatus = user.getStatus();
 		user.setStatus(UserStatus.SUSPENDED);
 		User saved = userRepository.save(user);
 		log.info("[users] disabled -- publicUuid={} by={}",
 				saved.getPublicUuid(), currentAdminPublicUuid());
+
+		// DEBT-AUTH-4: publish event so the auth listener can revoke all
+		// active refresh tokens for this user. AFTER_COMMIT semantics mean
+		// the listener sees the persisted SUSPENDED status.
+		eventPublisher.publishEvent(new UserStatusChangeEvent(
+				saved.getPublicUuid(),
+				oldStatus,
+				UserStatus.SUSPENDED,
+				"admin-disable",
+				currentAdminPublicUuid()));
+
 		return mapper.toDetail(saved);
 	}
 
@@ -182,10 +198,22 @@ public class UserManagementServiceImpl implements UserManagementService {
 							+ "; use the matching dedicated flow");
 		}
 
+		UserStatus oldStatus = user.getStatus();
 		user.setStatus(UserStatus.ACTIVE);
 		User saved = userRepository.save(user);
 		log.info("[users] enabled -- publicUuid={} by={}",
 				saved.getPublicUuid(), currentAdminPublicUuid());
+
+		// DEBT-AUTH-4: publish event. Re-enabling does NOT touch existing
+		// refresh tokens (the listener only acts on ACTIVE→non-AUTHENTICATABLE
+		// transitions). Listed here for symmetry / future hooks.
+		eventPublisher.publishEvent(new UserStatusChangeEvent(
+				saved.getPublicUuid(),
+				oldStatus,
+				UserStatus.ACTIVE,
+				"admin-enable",
+				currentAdminPublicUuid()));
+
 		return mapper.toDetail(saved);
 	}
 

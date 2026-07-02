@@ -21,6 +21,8 @@ public enum AuditAction {
 	PERMISSION_REVOKED,
 	CONFIG_CHANGED,
 	JOB_EXECUTED,
+	/** Sprint 14 (MVP Closure) / DEBT-AUTH-4: refresh-token mass revocation triggered by user status change. */
+	ADMIN_REVOKE,
 	CUSTOM
 
 }

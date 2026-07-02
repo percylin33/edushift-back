@@ -11,7 +11,7 @@ import java.util.List;
  * {@code NotificationTemplateEngine} expands from the payload JSON
  * at send time.</p>
  *
- * <h3>Why these 8</h3>
+ * <h3>Why these 9</h3>
  * <ol>
  *   <li><b>WELCOME_TENANT</b> — onboarding email when a tenant is
  *       created (system category).</li>
@@ -29,6 +29,8 @@ import java.util.List;
  *       is generated (PAYMENT category, future Sprint 10).</li>
  *   <li><b>ANNOUNCEMENT</b> — generic announcement from
  *       TENANT_ADMIN (ANNOUNCEMENT category, BE-9.4).</li>
+ *   <li><b>PASSWORD_RESET</b> — to the user who clicked "forgot
+ *       password" (SYSTEM category, Sprint 17 / BE-17.1).</li>
  * </ol>
  */
 public final class NotificationTemplateSeed {
@@ -106,6 +108,20 @@ public final class NotificationTemplateSeed {
                                 <p>{{body}}</p>
                                 <hr/>
                                 <p style="color:#888;font-size:0.85em">Enviado por {{senderName}} — {{tenantName}}</p>
+                                """),
+                build("PASSWORD_RESET", "SYSTEM",
+                                "Restablece tu contraseña — {{tenantName}}",
+                                """
+                                <h2>Restablece tu contraseña</h2>
+                                <p>Hola <b>{{userFirstName}}</b>,</p>
+                                <p>Recibimos una solicitud para restablecer la contraseña de tu cuenta en
+                                   <b>{{tenantName}}</b>. Si no realizaste esta solicitud, puedes ignorar este mensaje.</p>
+                                <p>Para continuar, haz clic en el siguiente enlace (válido por
+                                   <b>{{ttlMinutes}} minutos</b>):</p>
+                                <p><a href="{{resetLink}}" style="display:inline-block;padding:10px 20px;background:#0a5;color:#fff;border-radius:4px;text-decoration:none">Restablecer contraseña</a></p>
+                                <p>Si el botón no funciona, copia y pega este enlace en tu navegador:<br/>
+                                   <code>{{resetLink}}</code></p>
+                                <p style="color:#888;font-size:0.85em">Equipo {{tenantName}}</p>
                                 """)
         );
     }

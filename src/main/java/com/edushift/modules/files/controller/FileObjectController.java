@@ -2,17 +2,24 @@ package com.edushift.modules.files.controller;
 
 import com.edushift.modules.files.config.StorageProperties;
 import com.edushift.modules.files.dto.FileObjectResponse;
+import com.edushift.modules.files.dto.UploadConfirmation;
+import com.edushift.modules.files.dto.UploadRequest;
+import com.edushift.modules.files.dto.UploadRequestResponse;
 import com.edushift.modules.files.entity.FileObject;
 import com.edushift.modules.files.exception.FileNotFoundException;
 import com.edushift.modules.files.service.FileObjectService;
 import com.edushift.modules.files.storage.FirebaseStorageService;
 import com.edushift.modules.files.storage.StorageService;
 import com.edushift.shared.api.ApiResponse;
+import com.edushift.shared.security.CurrentUserProvider;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
 import java.io.InputStream;
 import java.net.URI;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -26,8 +33,13 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RequestPart;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.multipart.MultipartFile;
 
 /**
  * REST adapter for the {@code files} module (Sprint 7a / BE-7a.0).
@@ -67,6 +79,7 @@ public class FileObjectController {
 	private final FileObjectService fileObjectService;
 	private final StorageService storageService;
 	private final StorageProperties storageProperties;
+	private final CurrentUserProvider currentUserProvider;
 
 	// =====================================================================
 	// GET /v1/files/{publicUuid}
@@ -143,6 +156,92 @@ public class FileObjectController {
 			@PathVariable UUID publicUuid) {
 		fileObjectService.delete(publicUuid);
 		return ResponseEntity.ok(ApiResponse.ok());
+	}
+
+	// =====================================================================
+	// POST /v1/files  (BE-proxied multipart upload — fallback path)
+	// =====================================================================
+
+	@PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE,
+			produces = MediaType.APPLICATION_JSON_VALUE)
+	@SecurityRequirement(name = "bearerAuth")
+	@PreAuthorize("isAuthenticated()")
+	@Operation(summary = "Upload a file via multipart/form-data (BE-proxied)",
+			description = "The classic upload path: the BE streams the bytes "
+					+ "to the active storage provider. Use this on LOCAL_FS or "
+					+ "when the signed-URL flow is not desired.")
+	public ResponseEntity<ApiResponse<FileObjectResponse>> upload(
+			@RequestParam("module") String module,
+			@RequestPart("file") MultipartFile file) throws java.io.IOException {
+
+		UUID tenantId = currentUserProvider.currentTenantId()
+				.orElseThrow(() -> new com.edushift.shared.exception.UnauthorizedException(
+						"NO_TENANT",
+						"Authenticated user has no tenant binding"));
+
+		FileObject entity = fileObjectService.store(tenantId, module, file);
+		String url = resolveDownloadUrl(entity, entity.getPublicUuid());
+		return ResponseEntity.status(HttpStatus.CREATED)
+				.body(ApiResponse.ok(FileObjectResponse.fromEntity(entity, url)));
+	}
+
+	// =====================================================================
+	// POST /v1/files/upload-requests  (V50, signed-URL flow)
+	// =====================================================================
+
+	@PostMapping(value = "/upload-requests", produces = MediaType.APPLICATION_JSON_VALUE)
+	@SecurityRequirement(name = "bearerAuth")
+	@PreAuthorize("isAuthenticated()")
+	@Operation(summary = "Mint a signed PUT URL for direct upload to Firebase",
+			description = "Returns a short-lived URL the client can PUT the bytes "
+					+ "to directly. For LOCAL_FS the URL is null — the FE must "
+					+ "fall back to the BE-proxied multipart endpoint instead.")
+	public ResponseEntity<ApiResponse<UploadRequestResponse>> createUploadRequest(
+			@Valid @RequestBody UploadRequest request) {
+
+		UUID tenantId = currentUserProvider.currentTenantId()
+				.orElseThrow(() -> new com.edushift.shared.exception.UnauthorizedException(
+						"NO_TENANT",
+						"Authenticated user has no tenant binding"));
+
+		FileObjectService.SignedUpload signed = fileObjectService.createUploadRequest(
+				tenantId, request.module(), request.originalName(),
+				request.contentType(), request.sizeBytes());
+
+		Map<String, String> headers = new LinkedHashMap<>();
+		if (signed.uploadUrl() != null) {
+			headers.put("Content-Type", signed.contentType());
+		}
+
+		return ResponseEntity.ok(ApiResponse.ok(new UploadRequestResponse(
+				storageService.provider().name(),
+				signed.publicUuid(),
+				signed.uploadUrl(),
+				signed.expiresAt(),
+				headers)));
+	}
+
+	// =====================================================================
+	// POST /v1/files/{publicUuid}/confirm  (V50, signed-URL flow)
+	// =====================================================================
+
+	@PostMapping(value = "/{publicUuid}/confirm", produces = MediaType.APPLICATION_JSON_VALUE)
+	@SecurityRequirement(name = "bearerAuth")
+	@PreAuthorize("isAuthenticated()")
+	@Operation(summary = "Confirm the PUT to Firebase succeeded",
+			description = "Flips the row from PENDING to READY and persists the "
+					+ "client-computed SHA-256. Idempotent: re-confirming a READY "
+					+ "row is a no-op.")
+	public ResponseEntity<ApiResponse<FileObjectResponse>> confirmUpload(
+			@PathVariable UUID publicUuid,
+			@Valid @RequestBody UploadConfirmation confirmation) {
+
+		FileObject entity = fileObjectService.confirmUpload(
+				publicUuid, confirmation.sizeBytes(), confirmation.checksumSha256());
+
+		String url = resolveDownloadUrl(entity, publicUuid);
+		return ResponseEntity.ok(ApiResponse.ok(
+				FileObjectResponse.fromEntity(entity, url)));
 	}
 
 	// =====================================================================

@@ -78,7 +78,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 	static final String BEARER_PREFIX = "Bearer ";
 
 	private final JwtService jwtService;
-	private final LmsRoleAuthorityMapper authorityMapper;
+	private final LmsRoleAuthorityMapper lmsRoleAuthorityMapper;
 
 	@Override
 	protected void doFilterInternal(HttpServletRequest request,
@@ -174,32 +174,30 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 		if (roles == null || roles.isEmpty()) {
 			return List.of();
 		}
-		LinkedHashSet<GrantedAuthority> out = new LinkedHashSet<>();
-		// 1) Coarse ROLE_* authorities (kept for @PreAuthorize("hasRole('...')") checks
-		//    and for any code that hasn't been migrated to hasAuthority(...)).
+		// (Sprint 7a / BE-7a.3) Two-tier authority shape:
+		//   1. Coarse ROLE_* authorities (backward-compat for
+		//      @PreAuthorize("hasRole('TENANT_ADMIN')") and friends).
+		//   2. Granular LMS_* authorities (the new
+		//      @PreAuthorize("hasAuthority('LMS_TASK_SUBMIT')") pattern).
+		// The set is dedup'd via LinkedHashSet for stable iteration
+		// order (testability).
+		Set<String> authorities = new LinkedHashSet<>();
+		List<UserRole> parsedRoles = new ArrayList<>();
 		for (String r : roles) {
-			if (r == null || r.isBlank()) { continue; }
-			String prefixed = r.startsWith("ROLE_") ? r : "ROLE_" + r;
-			out.add(new SimpleGrantedAuthority(prefixed));
-		}
-		// 2) Granular LMS_* authorities expanded from the same roles via
-		//    LmsRoleAuthorityMapper. This is what @PreAuthorize("hasAuthority('LMS_AI_GENERATE')")
-		//    and the rest of the LMS controllers gate on.
-		List<UserRole> userRoles = new ArrayList<>();
-		for (String r : roles) {
-			if (r == null) { continue; }
-			String stripped = r.startsWith("ROLE_") ? r.substring("ROLE_".length()) : r;
-			try {
-				userRoles.add(UserRole.valueOf(stripped));
-			} catch (IllegalArgumentException ignore) {
-				// unknown role name — LmsRoleAuthorityMapper.mapAuthorities silently
-				// ignores it, which is the right forward-compat behaviour.
+			if (r == null || r.isBlank()) continue;
+			String roleName = r.startsWith("ROLE_") ? r.substring("ROLE_".length()) : r;
+			authorities.add("ROLE_" + roleName);
+			UserRole parsed = UserRole.fromName(roleName);
+			if (parsed != null) {
+				parsedRoles.add(parsed);
 			}
 		}
-		out.addAll(authorityMapper.mapAuthorities(userRoles).stream()
+		// Add the LMS_* mapping. Unknown / future roles silently
+		// contribute no granular authority (defensive).
+		authorities.addAll(lmsRoleAuthorityMapper.mapAuthorities(parsedRoles));
+		return authorities.stream()
 				.<GrantedAuthority>map(SimpleGrantedAuthority::new)
-				.toList());
-		return new ArrayList<>(out);
+				.toList();
 	}
 
 }

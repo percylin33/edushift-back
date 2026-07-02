@@ -77,6 +77,14 @@ public class SessionGeneratorService {
     private final CourseLevelRepository courseLevelRepository;
     private final CompetencyRepository competencyRepository;
     private final CapacityRepository capacityRepository;
+    /**
+     * Sprint 18 — when the LLM returns a usable outline we persist it
+     * as a draft {@code LearningSession} so the teacher can review and
+     * edit before starting. This is the "AI generation creates a real
+     * session" gap from {@code 04-backlog.md} §2.
+     */
+    private final com.edushift.modules.sessions.learning.service.LearningSessionService learningSessionService;
+    private final com.edushift.modules.teachers.assignments.repository.TeacherAssignmentRepository teacherAssignmentRepository;
 
     public SessionGeneratorService(LlmClient llmClient,
                                    SessionGeneratorPromptBuilder promptBuilder,
@@ -87,7 +95,9 @@ public class SessionGeneratorService {
                                    CourseRepository courseRepository,
                                    CourseLevelRepository courseLevelRepository,
                                    CompetencyRepository competencyRepository,
-                                   CapacityRepository capacityRepository) {
+                                   CapacityRepository capacityRepository,
+                                   com.edushift.modules.sessions.learning.service.LearningSessionService learningSessionService,
+                                   com.edushift.modules.teachers.assignments.repository.TeacherAssignmentRepository teacherAssignmentRepository) {
         this.llmClient = llmClient;
         this.promptBuilder = promptBuilder;
         this.quotaService = quotaService;
@@ -98,6 +108,8 @@ public class SessionGeneratorService {
         this.courseLevelRepository = courseLevelRepository;
         this.competencyRepository = competencyRepository;
         this.capacityRepository = capacityRepository;
+        this.learningSessionService = learningSessionService;
+        this.teacherAssignmentRepository = teacherAssignmentRepository;
     }
 
     /**
@@ -147,13 +159,16 @@ public class SessionGeneratorService {
         gen.setStatus(AiGeneration.Status.PENDING);
         generationRepo.saveAndFlush(gen);
 
-        return runGeneration(gen, llmRequest, request);
+        return runGeneration(gen, llmRequest, request, userId, course, tenantId);
     }
 
     @Transactional
     public SessionGeneratorResult runGeneration(AiGeneration gen,
                                                 LlmRequest llmRequest,
-                                                GenerateSessionRequest request) {
+                                                GenerateSessionRequest request,
+                                                UUID userId,
+                                                Course course,
+                                                UUID tenantId) {
         gen.setStatus(AiGeneration.Status.PROCESSING);
         generationRepo.saveAndFlush(gen);
 
@@ -196,12 +211,131 @@ public class SessionGeneratorService {
                 longOrZero(llmResponse.tokensIn()),
                 longOrZero(llmResponse.tokensOut()));
 
+        // Sprint 18 — persist the LLM output as a draft `LearningSession`
+        // so the teacher can review and edit before starting. We resolve
+        // the teacher's primary assignment for (course, unit) and
+        // delegate the actual entity creation to the existing
+        // LearningSessionService so we don't duplicate the rich
+        // validation (period window, unit-in-course, etc.).
+        var persistedSession = persistAsLearningSession(
+                request, userId, parsed, course, tenantId);
+
         return new SessionGeneratorResult(
                 parsed,
                 llmResponse.model(),
                 llmClient.providerId(),
                 SessionGeneratorPromptBuilder.PROMPT_VERSION,
-                gen.getPublicUuid());
+                gen.getPublicUuid(),
+                persistedSession);
+    }
+
+    /**
+     * Persist the LLM-generated outline as a draft {@code LearningSession}.
+     * Failure to persist (e.g. teacher has no assignment for the unit)
+     * does NOT fail the generation — the teacher still gets the parsed
+     * outline and can re-trigger persistence from the editor with the
+     * correct unit. We log the failure for ops review.
+     */
+    private java.util.UUID persistAsLearningSession(
+            GenerateSessionRequest request,
+            java.util.UUID userId,
+            com.edushift.modules.ai.dto.GenerateSessionResponse parsed,
+            Course course,
+            java.util.UUID tenantId) {
+        if (userId == null) {
+            // Anonymous / service token — no user to attach a session to.
+            return null;
+        }
+        try {
+            // Find an active assignment for the (teacher, course) pair.
+            // The teacher is expected to have exactly one active assignment
+            // per course; if multiple match we pick the most recent
+            // (newest `assignedAt`).
+            var assignments = teacherAssignmentRepository
+                    .findActiveByCourseAndTeacherUuid(course, userId);
+            if (assignments == null || assignments.isEmpty()) {
+                log.warn("[ai/generate-session] no active assignment for teacher={} course={} — outline not persisted",
+                        userId, course.getPublicUuid());
+                return null;
+            }
+            var assignment = assignments.get(0);
+
+            // The persisted SessionContentDto is intentionally minimal
+            // (objective + activities[] + materials[] + observations);
+            // we flatten the AI's rich structure into a single markdown-
+            // style string per slot. The session editor lets the teacher
+            // clean up before starting the session.
+            var content = flattenToSessionContent(parsed);
+
+            com.edushift.modules.sessions.learning.dto.CreateLearningSessionRequest createReq =
+                    new com.edushift.modules.sessions.learning.dto.CreateLearningSessionRequest(
+                            assignment.getPublicUuid(),
+                            request.unitId(),
+                            parsed.title() != null && !parsed.title().isBlank()
+                                    ? parsed.title()
+                                    : request.topic(),
+                            parsed.summary(),
+                            java.time.LocalDate.now(), // scheduledDate = today by default
+                            request.durationMinutes(),
+                            content,
+                            request.competencyIds(),
+                            request.capacityIds());
+            var created = learningSessionService.create(createReq);
+            log.info("[ai/generate-session] persisted draft session -- publicUuid={} title={}",
+                    created.publicUuid(), createReq.title());
+            return created.publicUuid();
+        }
+        catch (Exception e) {
+            log.warn("[ai/generate-session] failed to persist outline (teacher can still see LLM output): {}",
+                    e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * Flatten the AI's rich outline into the persisted session's
+     * flat shape. Activities become "START (15 min) — Welcome";
+     * resources become a "Name — url (kind) — notes" list; evaluation
+     * criteria become a "Name (weight%): description" list. The teacher
+     * can clean up in the editor.
+     */
+    private com.edushift.modules.sessions.learning.dto.SessionContentDto flattenToSessionContent(
+            com.edushift.modules.ai.dto.GenerateSessionResponse parsed) {
+        var activities = new java.util.ArrayList<String>();
+        if (parsed.activities() != null) {
+            for (var a : parsed.activities()) {
+                String phase = a.phase() != null ? a.phase().name() : "-";
+                String name = a.name() == null ? "" : a.name();
+                String dur = a.durationMinutes() > 0 ? a.durationMinutes() + " min" : "";
+                String desc = a.description() == null ? "" : a.description();
+                activities.add(String.format("[%s] %s (%s) — %s", phase, name, dur, desc));
+            }
+        }
+        var materials = new java.util.ArrayList<String>();
+        if (parsed.resources() != null) {
+            for (var r : parsed.resources()) {
+                String name = r.title() == null ? "" : r.title();
+                String url = r.url() == null ? "" : r.url();
+                String kind = r.type() != null ? r.type().name() : "";
+                String desc = r.description() == null ? "" : r.description();
+                materials.add(String.format("%s — %s (%s) %s", name, url, kind, desc).trim());
+            }
+        }
+        var observations = new StringBuilder();
+        if (parsed.evaluationCriteria() != null) {
+            observations.append("Criterios de evaluación:\n");
+            for (var c : parsed.evaluationCriteria()) {
+                String name = c.name() == null ? "" : c.name();
+                String desc = c.description() == null ? "" : c.description();
+                int weightPct = (int) Math.round(c.weight() * 100);
+                observations.append(String.format("• %s (%d%%) — %s\n", name, weightPct, desc));
+            }
+        }
+        return new com.edushift.modules.sessions.learning.dto.SessionContentDto(
+                parsed.summary(),
+                activities,
+                materials,
+                observations.length() == 0 ? null : observations.toString().trim());
     }
 
     // ---------------------------------------------------------------------
@@ -341,13 +475,20 @@ public class SessionGeneratorService {
     /**
      * Result envelope. Includes the parsed response plus enough audit
      * metadata for the FE to show "Generated by {model} · UUID {generationUuid}".
+     *
+     * <p>Sprint 18: {@code persistedSessionUuid} carries the {@code publicUuid}
+     * of the draft {@code LearningSession} created from the LLM output, so
+     * the FE can navigate the user straight to the editor. {@code null} if
+     * the persistence step was skipped (no active assignment, or any
+     * non-fatal failure during create).
      */
     public record SessionGeneratorResult(
             GenerateSessionResponse session,
             String model,
             String provider,
             String promptVersion,
-            UUID generationUuid
+            UUID generationUuid,
+            UUID persistedSessionUuid
     ) {
     }
 }

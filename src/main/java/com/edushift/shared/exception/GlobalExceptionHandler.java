@@ -1,5 +1,6 @@
 package com.edushift.shared.exception;
 
+import com.edushift.modules.auth.exception.UserLockedException;
 import com.edushift.shared.api.ApiError;
 import com.edushift.shared.api.ApiErrorResponse;
 import com.edushift.shared.constants.LoggerNames;
@@ -62,6 +63,23 @@ public class GlobalExceptionHandler {
 	public ResponseEntity<ApiErrorResponse> handleApiException(ApiException ex, HttpServletRequest req) {
 		ApiError error = ApiError.of(ex.getCode(), ex.getMessage());
 		return build(ex.getStatus(), ex.getMessage(), List.of(error), req, ex, false);
+	}
+
+	/**
+	 * Sprint 14 (MVP Closure) / DEBT-AUTH-7: dedicated handler for
+	 * {@link UserLockedException} that adds the {@code Retry-After}
+	 * header per RFC 6585 §4. The generic {@link ApiException} handler
+	 * does NOT add headers, so we wire this ahead of it.
+	 */
+	@ExceptionHandler(UserLockedException.class)
+	public ResponseEntity<ApiErrorResponse> handleUserLocked(
+			UserLockedException ex, HttpServletRequest req) {
+		ApiError error = ApiError.of(ex.getCode(), ex.getMessage());
+		ResponseEntity<ApiErrorResponse> base = build(
+				ex.getStatus(), ex.getMessage(), List.of(error), req, ex, false);
+		return ResponseEntity.status(ex.getStatus())
+				.header("Retry-After", String.valueOf(ex.getRetryAfterSeconds()))
+				.body(base.getBody());
 	}
 
 	// ---------------------------------------------------------------------------

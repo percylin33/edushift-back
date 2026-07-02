@@ -122,6 +122,28 @@ public class User extends TenantAwareEntity {
 	@Column(name = "mfa_enabled", nullable = false)
 	private boolean mfaEnabled = false;
 
+	/**
+	 * BCrypt-hashed TOTP secret (RFC 6238). Stored hashed so a DB leak
+	 * does not let an attacker forge codes. Cleared when MFA is disabled.
+	 * Sprint 17 / BE-17.2.
+	 */
+	@Column(name = "mfa_secret_hash", length = 255)
+	private String mfaSecretHash;
+
+	/**
+	 * JSONB array of BCrypt hashes of the user's recovery codes. At
+	 * enrollment, 10 codes are generated; the user is shown them once
+	 * and we keep only the hashes. A code is consumed (replaced by null)
+	 * after successful use. Sprint 17 / BE-17.2.
+	 */
+	@org.hibernate.annotations.JdbcTypeCode(org.hibernate.type.SqlTypes.JSON)
+	@Column(name = "mfa_recovery_codes_hash", columnDefinition = "jsonb")
+	private java.util.List<String> mfaRecoveryCodesHash;
+
+	/** When the user enrolled MFA. Used for audit + re-enrollment detection. */
+	@Column(name = "mfa_enrolled_at")
+	private Instant mfaEnrolledAt;
+
 	@Column(name = "last_login_at")
 	private Instant lastLoginAt;
 
@@ -147,6 +169,36 @@ public class User extends TenantAwareEntity {
 	 */
 	@Column(name = "deleted_at")
 	private Instant deletedAt;
+
+	/**
+	 * Stable Google subject ({@code sub} claim) when this user has linked
+	 * a Google account. {@code null} for legacy email/password users that
+	 * have not yet gone through {@code POST /auth/google}.
+	 *
+	 * <p>Uniqueness is enforced PER TENANT on non-deleted rows by the
+	 * {@code uk_users_tenant_google_subject} partial unique index declared
+	 * in {@code V49__add_google_identity_and_tokens.sql}. The {@code sub}
+	 * itself is opaque (lowercase, max 128 chars) — we don't try to
+	 * normalize it.
+	 */
+	@Column(name = "google_subject", length = 128)
+	private String googleSubject;
+
+	/**
+	 * DEBT-AUTH-7: temporary lockout timestamp. When a user accumulates
+	 * 5 failed login attempts within 15 minutes, this field is set to
+	 * {@code now() + 15 minutes}. {@link com.edushift.modules.auth.service.LoginAttemptService}
+	 * checks this field on every login attempt.
+	 *
+	 * <p>Semantics:
+	 * <ul>
+	 *   <li>{@code null} → no active lock.</li>
+	 *   <li>{@code future} → account locked; login rejected until the timestamp passes.</li>
+	 *   <li>{@code past} → lock has expired; cleared lazily on the next successful authentication.</li>
+	 * </ul>
+	 */
+	@Column(name = "temporarily_locked_until")
+	private Instant temporarilyLockedUntil;
 
 	@PrePersist
 	private void onPrePersist() {

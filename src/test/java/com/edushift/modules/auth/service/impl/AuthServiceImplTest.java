@@ -29,6 +29,8 @@ import com.edushift.modules.auth.repository.UserRepository;
 import com.edushift.modules.auth.service.JwtService;
 import com.edushift.modules.auth.service.JwtService.JwtClaims;
 import com.edushift.modules.auth.service.JwtService.TokenType;
+import com.edushift.modules.auth.service.AuthService;
+import com.edushift.modules.auth.service.LoginAttemptService;
 import com.edushift.modules.tenants.entity.Tenant;
 import com.edushift.modules.tenants.entity.TenantStatus;
 import com.edushift.modules.tenants.exception.TenantNotFoundException;
@@ -79,6 +81,8 @@ class AuthServiceImplTest {
 	@Mock private PasswordEncoder passwordEncoder;
 	@Mock private JwtService jwtService;
 	@Mock private AuditLogger auditLogger;
+	/** Sprint 14 / DEBT-AUTH-7: failed-login lockout counter service. */
+	@Mock private LoginAttemptService loginAttemptService;
 
 	/**
 	 * Plain {@link PlatformTransactionManager} mock — Mockito returns {@code null}
@@ -138,9 +142,10 @@ class AuthServiceImplTest {
 		when(refreshTokenRepository.saveAndFlush(any(RefreshToken.class)))
 				.thenAnswer(inv -> inv.getArgument(0));
 
-		AuthResponse response = authService.login(new LoginRequest(EMAIL, RAW_PWD), SLUG);
+		AuthService.LoginResult result = authService.login(new LoginRequest(EMAIL, RAW_PWD), SLUG);
 
-		assertThat(response).isNotNull();
+		assertThat(result).isNotNull().isInstanceOf(AuthService.LoginResult.Session.class);
+		AuthResponse response = ((AuthService.LoginResult.Session) result).authResponse();
 		assertThat(response.accessToken()).isEqualTo("access.token.value");
 		assertThat(response.refreshToken()).isEqualTo("refresh.token.value");
 		assertThat(response.tokenType()).isEqualTo("Bearer");
@@ -490,7 +495,7 @@ class AuthServiceImplTest {
 		User user = newUser(EMAIL, UserStatus.ACTIVE, HASH);
 		JwtClaims accessClaims = new JwtClaims(user.getPublicUuid().toString(),
 				tenant.getId(), tenant.getSlug(), Set.of(),
-				TokenType.ACCESS, Instant.now(), Instant.now().plusSeconds(900));
+				TokenType.ACCESS, UUID.randomUUID(), Instant.now(), Instant.now().plusSeconds(900));
 
 		when(jwtService.parseAndValidate("any")).thenReturn(accessClaims);
 
@@ -633,6 +638,7 @@ class AuthServiceImplTest {
 				tenant.getSlug(),
 				Set.of(),
 				TokenType.REFRESH,
+				UUID.randomUUID(),
 				Instant.now().minusSeconds(60),
 				Instant.now().plusSeconds(3600));
 	}

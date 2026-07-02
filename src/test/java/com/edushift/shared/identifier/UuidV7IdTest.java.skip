@@ -1,0 +1,37 @@
+package com.edushift.shared.identifier;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+import java.lang.annotation.ElementType;
+import java.lang.annotation.RetentionPolicy;
+import java.lang.annotation.Target;
+import org.hibernate.annotations.IdGeneratorType;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+
+class UuidV7IdTest {
+
+    @Test
+    @DisplayName("annotation is present on fields and methods")
+    void targetIsFieldAndMethod() {
+        var target = UuidV7Id.class.getAnnotation(Target.class);
+        assertThat(target).isNotNull();
+        assertThat(target.value()).contains(ElementType.FIELD, ElementType.METHOD);
+    }
+
+    @Test
+    @DisplayName("retention is RUNTIME")
+    void retentionIsRuntime() {
+        var retention = UuidV7Id.class.getAnnotation(Retention.class);
+        assertThat(retention).isNotNull();
+        assertThat(retention.value()).isEqualTo(RetentionPolicy.RUNTIME);
+    }
+
+    @Test
+    @DisplayName("is annotated with @IdGeneratorType")
+    void hasIdGeneratorTypeAnnotation() {
+        var idGeneratorType = UuidV7Id.class.getAnnotation(IdGeneratorType.class);
+        assertThat(idGeneratorType).isNotNull();
+        assertThat(idGeneratorType.value()).isEqualTo(UuidV7Generator.class);
+    }
+}

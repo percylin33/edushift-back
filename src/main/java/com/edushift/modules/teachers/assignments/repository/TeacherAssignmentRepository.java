@@ -107,6 +107,28 @@ public interface TeacherAssignmentRepository extends JpaRepository<TeacherAssign
 	boolean existsActiveByCourse(@Param("course") Course course);
 
 	/**
+	 * Sprint 18 / BE-18.1 — pick the teacher's primary (most recently
+	 * assigned, still active) assignment for a course. The AI generator
+	 * uses this to attach the generated outline as a draft
+	 * {@code LearningSession} to the right teacher × course × period × section.
+	 *
+	 * <p>Returns an empty list if the teacher has no active assignment in
+	 * the course — the caller treats that as "outline not persisted, but
+	 * still returned to the FE" (the teacher can re-trigger with the
+	 * correct unit via the editor).
+	 */
+	@Query("""
+			select a from TeacherAssignment a
+			where a.course = :course
+			  and a.teacher.publicUuid = :teacherUuid
+			  and a.unassignedAt is null
+			order by a.assignedAt desc
+			""")
+	List<TeacherAssignment> findActiveByCourseAndTeacherUuid(
+			@Param("course") Course course,
+			@Param("teacherUuid") UUID teacherUuid);
+
+	/**
 	 * Existence check used by {@code AcademicPeriodServiceImpl.deletePeriod}
 	 * (DEBT-ACAD-4).
 	 */

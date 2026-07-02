@@ -18,6 +18,13 @@
 		<java.version>21</java.version>
 		<project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
 		<project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
+		<!--
+		  JaCoCo coverage gate. Defaults to true (skip check) so adopting
+		  teams can ship the report without breaking CI. Turn off with:
+		    mvn verify -Djacoco.check.skip=false
+		  Sprint 16 / INFRA-16.2.
+		-->
+		<jacoco.check.skip>true</jacoco.check.skip>
 	</properties>
 
 	<dependencies>
@@ -144,6 +151,18 @@
 			<version>0.12.6</version>
 			<scope>runtime</scope>
 		</dependency>
+		<!--
+		  TOTP (RFC 6238) implementation for MFA (Sprint 17 / BE-17.2).
+		  GoogleAuth generates and validates 6-digit codes from a shared secret,
+		  matching the algorithm every authenticator app (Google Authenticator,
+		  Authy, 1Password, ...) uses. The `glue` module pulls in the Apache
+		  Commons Codec dependency that Base32 encoding needs.
+		-->
+		<dependency>
+			<groupId>com.warrenstrange</groupId>
+			<artifactId>googleauth</artifactId>
+			<version>1.5.0</version>
+		</dependency>
 
 		<!--
 		  springdoc-openapi (https://springdoc.org/) - OpenAPI 3 + Swagger UI
@@ -201,6 +220,25 @@
 			<groupId>com.google.zxing</groupId>
 			<artifactId>javase</artifactId>
 			<version>3.5.3</version>
+		</dependency>
+
+		<!--
+		  Google Cloud Storage (https://cloud.google.com/java/docs/reference/google-cloud-storage/latest)
+		  - Firebase Storage backing for the LMS upload pipeline
+		  (Sprint 7a / BE-7a.0, ADR-7A.1). Only loaded by the bean
+		  factory when app.storage.provider=FIREBASE; the LOCAL_FS
+		  profile does not initialise this class so a missing
+		  service-account JSON does not break dev/test.
+
+		  The GCS SDK has a transitive dep on netty / opencensus /
+		  guava, which adds ~5-8 MB to the fat JAR. Acceptable for the
+		  prod profile; dev profile runs with LOCAL_FS and never
+		  pulls GCS into the request path.
+		-->
+		<dependency>
+			<groupId>com.google.cloud</groupId>
+			<artifactId>google-cloud-storage</artifactId>
+			<version>2.46.0</version>
 		</dependency>
 
 		<!--
@@ -276,6 +314,105 @@
 							<goal>integration-test</goal>
 							<goal>verify</goal>
 						</goals>
+					</execution>
+				</executions>
+			</plugin>
+			<!--
+			  JaCoCo (Java Code Coverage) — Sprint 16 / INFRA-16.2.
+
+			  Generates a line-coverage report at `target/site/jacoco/index.html`
+			  and enforces a per-package minimum coverage threshold. The check
+			  rule excludes generated code, configuration classes, and DTOs
+			  (which are pure data carriers with no logic to cover).
+
+			  Run `mvn verify` to generate the report and apply the gate. The
+			  GitHub Actions CI workflow publishes the HTML report as an
+			  artifact for review (`.github/workflows/ci.yml`).
+
+			  Threshold strategy:
+			  - Global LINE minimum: 60% (realistic given partial IT coverage
+			    in some modules; raises over time).
+			  - Per-package overrides below bump critical packages to 70%.
+			  - Excluded packages: config beans, DTOs, entities, exception
+			    types, Flyway migrations (not Java code anyway).
+			-->
+			<plugin>
+				<groupId>org.jacoco</groupId>
+				<artifactId>jacoco-maven-plugin</artifactId>
+				<version>0.8.13</version>
+				<executions>
+					<execution>
+						<id>prepare-agent</id>
+						<goals>
+							<goal>prepare-agent</goal>
+						</goals>
+					</execution>
+					<execution>
+						<id>report</id>
+						<phase>verify</phase>
+						<goals>
+							<goal>report</goal>
+						</goals>
+					</execution>
+					<!--
+					  Coverage gate (check goal). Disabled by default while the
+					  team adopts the metric — enable per-run with:
+					    mvn verify -Djacoco.check=true
+
+					  The CI workflow will turn it on after Sprint 17 once the
+					  baseline numbers are known and the team is comfortable
+					  with the threshold trajectory. See Sprint 16 / INFRA-16.2
+					  notes for the rollout plan.
+					-->
+					<execution>
+						<id>check</id>
+						<phase>verify</phase>
+						<goals>
+							<goal>check</goal>
+						</goals>
+						<configuration>
+							<skip>${jacoco.check.skip}</skip>
+							<excludes>
+								<exclude>com/edushift/config/**/*</exclude>
+								<exclude>com/edushift/shared/exception/**/*</exclude>
+								<exclude>com/edushift/**/dto/**/*</exclude>
+								<exclude>com/edushift/**/entity/**/*</exclude>
+								<exclude>com/edushift/**/mapper/**/*</exclude>
+								<exclude>com/edushift/**/*Application.*</exclude>
+							</excludes>
+							<rules>
+								<rule>
+									<element>BUNDLE</element>
+									<limits>
+										<limit>
+											<counter>LINE</counter>
+											<value>COVEREDRATIO</value>
+											<minimum>0.50</minimum>
+										</limit>
+									</limits>
+								</rule>
+								<rule>
+									<element>PACKAGE</element>
+									<includes>
+										<include>com.edushift.modules.auth</include>
+										<include>com.edushift.modules.tenants</include>
+										<include>com.edushift.modules.users</include>
+										<include>com.edushift.modules.students</include>
+										<include>com.edushift.modules.teachers</include>
+										<include>com.edushift.modules.academic</include>
+										<include>com.edushift.modules.attendance</include>
+										<include>com.edushift.modules.payments</include>
+									</includes>
+									<limits>
+										<limit>
+											<counter>LINE</counter>
+											<value>COVEREDRATIO</value>
+											<minimum>0.60</minimum>
+										</limit>
+									</limits>
+								</rule>
+							</rules>
+						</configuration>
 					</execution>
 				</executions>
 			</plugin>

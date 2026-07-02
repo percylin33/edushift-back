@@ -1,0 +1,54 @@
+package com.edushift.shared.api;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+
+class ApiErrorTest {
+
+    @Test
+    @DisplayName("of(code, message) creates error with null field and rejectedValue")
+    void ofCodeAndMessage() {
+        var error = ApiError.of("NOT_FOUND", "Resource not found");
+        assertThat(error.code()).isEqualTo("NOT_FOUND");
+        assertThat(error.message()).isEqualTo("Resource not found");
+        assertThat(error.field()).isNull();
+        assertThat(error.rejectedValue()).isNull();
+    }
+
+    @Test
+    @DisplayName("of(code, field, message) creates error with field, null rejectedValue")
+    void ofCodeFieldAndMessage() {
+        var error = ApiError.of("INVALID_FORMAT", "email", "Invalid email format");
+        assertThat(error.code()).isEqualTo("INVALID_FORMAT");
+        assertThat(error.field()).isEqualTo("email");
+        assertThat(error.message()).isEqualTo("Invalid email format");
+        assertThat(error.rejectedValue()).isNull();
+    }
+
+    @Test
+    @DisplayName("of(code, field, message, rejectedValue) creates full error")
+    void ofCodeFieldMessageAndRejectedValue() {
+        var error = ApiError.of("INVALID_VALUE", "age", "Age must be positive", -1);
+        assertThat(error.code()).isEqualTo("INVALID_VALUE");
+        assertThat(error.field()).isEqualTo("age");
+        assertThat(error.message()).isEqualTo("Age must be positive");
+        assertThat(error.rejectedValue()).isEqualTo(-1);
+    }
+
+    @Test
+    @DisplayName("null field is omitted in @JsonInclude(NON_NULL)")
+    void nullFieldIsOmitted() {
+        var error = ApiError.of("OK", "Message only");
+        assertThat(error.field()).isNull();
+        assertThat(error.rejectedValue()).isNull();
+    }
+
+    @Test
+    @DisplayName("rejectedValue can be any object type")
+    void rejectedValueAnyType() {
+        var error = ApiError.of("BAD", "role", "Invalid role", List.of("admin", "user"));
+        assertThat(error.rejectedValue()).isInstanceOf(java.util.List.class);
+    }
+}

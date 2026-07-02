@@ -1,0 +1,61 @@
+package com.edushift.shared.validation.validators;
+
+import jakarta.validation.ConstraintValidatorContext;
+import jakarta.validation.ConstraintViolation;
+import java.util.Set;
+
+/**
+ * Minimal stub for {@link ConstraintValidatorContext} used by validators that
+ * need to call {@code disableDefaultConstraintViolation()} and
+ * {@code buildConstraintViolationWithTemplate()}.
+ */
+class TestConstraintValidatorContext implements ConstraintValidatorContext {
+
+    static TestConstraintValidatorContext create() {
+        return new TestConstraintValidatorContext();
+    }
+
+    @Override
+    public void disableDefaultConstraintViolation() {
+    }
+
+    @Override
+    public String getDefaultConstraintMessageTemplate() {
+        return "{default}";
+    }
+
+    @Override
+    public ConstraintViolationBuilder buildConstraintViolationWithTemplate(String template) {
+        return new ConstraintViolationBuilder() {
+            @Override
+            public ConstraintValidatorContext.ConstraintViolationBuilder.NodeBuilderDefinedContext addNode(String name) {
+                return null;
+            }
+
+            @Override
+            public ConstraintValidatorContext.ConstraintViolationBuilder.NodeBuilderCustomizableContext addPropertyNode(String name) {
+                return null;
+            }
+
+            @Override
+            public ConstraintValidatorContext.ConstraintViolationBuilder.LeafNodeBuilderCustomizableContext addBeanNode() {
+                return null;
+            }
+
+            @Override
+            public ConstraintValidatorContext.ConstraintViolationBuilder.ContainerElementNodeBuilderCustomizableContext addContainerElementNode(String name, Class<?> containerType, Integer typeArgumentIndex) {
+                return null;
+            }
+
+            @Override
+            public ConstraintViolation addConstraintViolation() {
+                return null;
+            }
+        };
+    }
+
+    @Override
+    public <T> T unwrap(Class<T> type) {
+        throw new UnsupportedOperationException();
+    }
+}

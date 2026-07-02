@@ -73,4 +73,30 @@ public interface RefreshTokenRepository extends JpaRepository<RefreshToken, UUID
 		return revokeChain(rootId, reason.name());
 	}
 
+	/**
+	 * Sprint 14 (MVP Closure) / DEBT-AUTH-4: revoke every non-revoked
+	 * refresh token belonging to {@code userId}.
+	 *
+	 * <p>Used by the auth event listener when a user's
+	 * {@code UserStatus} transitions to a non-authenticatable state.
+	 * Idempotent: re-running on an already-revoked user is a no-op
+	 * because of the {@code revoked_at IS NULL} filter.
+	 *
+	 * @return number of rows updated.
+	 */
+	@Modifying
+	@Query(value = """
+			UPDATE edushift.refresh_tokens
+			SET revoked_at = NOW(),
+			    revoked_reason = :reason,
+			    updated_at = NOW()
+			WHERE user_id = :userId
+			  AND revoked_at IS NULL
+			""", nativeQuery = true)
+	int revokeAllByUser(@Param("userId") UUID userId, @Param("reason") String reason);
+
+	default int revokeAllByUser(UUID userId, RevocationReason reason) {
+		return revokeAllByUser(userId, reason.name());
+	}
+
 }

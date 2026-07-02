@@ -38,6 +38,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
@@ -67,6 +68,8 @@ class UserManagementServiceImplTest {
 
 	@Mock private UserRepository userRepository;
 
+	@Mock private ApplicationEventPublisher eventPublisher;
+
 	private UserManagementServiceImpl service;
 
 	private static final UUID TENANT_ID = UUID.fromString("11111111-1111-1111-1111-111111111111");
@@ -74,7 +77,7 @@ class UserManagementServiceImplTest {
 
 	@BeforeEach
 	void setUp() {
-		service = new UserManagementServiceImpl(userRepository, new UserManagementMapper());
+		service = new UserManagementServiceImpl(userRepository, new UserManagementMapper(), eventPublisher);
 		TenantContext.set(TENANT_ID);
 		seedSecurityContext(ADMIN_PUBLIC_UUID);
 	}

@@ -1,4 +1,4 @@
 /**
- * REST adapters: HTTP endpoints and request/response mapping.
+ * REST controllers for the files module (Sprint 7a / BE-7a.0).
  */
 package com.edushift.modules.files.controller;

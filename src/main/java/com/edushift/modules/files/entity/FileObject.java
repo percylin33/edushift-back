@@ -96,6 +96,16 @@ public class FileObject extends TenantAwareEntity {
 	@Column(name = "reference_count", nullable = false)
 	private int referenceCount;
 
+	/**
+	 * Upload lifecycle. See V50 migration. Defaults to {@code READY} for
+	 * the BE-proxied upload flow; the signed-URL flow uses
+	 * {@code PENDING} until the client calls
+	 * {@code POST /api/v1/files/{publicUuid}/confirm}.
+	 */
+	@Enumerated(EnumType.STRING)
+	@Column(name = "status", nullable = false, length = 16)
+	private FileUploadStatus status = FileUploadStatus.READY;
+
 	@Column(name = "deleted_at")
 	private Instant deletedAt;
 
@@ -103,6 +113,9 @@ public class FileObject extends TenantAwareEntity {
 	private void onPrePersist() {
 		if (publicUuid == null) {
 			publicUuid = UUID.randomUUID();
+		}
+		if (status == null) {
+			status = FileUploadStatus.READY;
 		}
 	}
 }

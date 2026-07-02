@@ -103,6 +103,9 @@ class AuthControllerTest {
 	@MockitoBean
 	private AuthService authService;
 
+	@MockitoBean
+	private com.edushift.modules.auth.service.PasswordResetService passwordResetService;
+
 	/**
 	 * BE-1.6 wired the JWT filter into the security chain via the production
 	 * {@code SecurityConfig}. The filter is constructor-injected with
@@ -166,7 +169,7 @@ class AuthControllerTest {
 		@DisplayName("happy path — 200 with bearer envelope + tokens")
 		void happyPath() throws Exception {
 			given(authService.login(any(LoginRequest.class), eq(DEMO_SLUG)))
-					.willReturn(stubAuthResponse());
+					.willReturn(new AuthService.LoginResult.Session(stubAuthResponse()));
 
 			LoginRequest body = new LoginRequest(VALID_EMAIL, VALID_PASSWORD);
 

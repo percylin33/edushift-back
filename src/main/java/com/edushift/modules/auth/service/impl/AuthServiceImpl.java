@@ -14,8 +14,10 @@ import com.edushift.modules.auth.repository.RefreshTokenRepository;
 import com.edushift.modules.auth.repository.UserRepository;
 import com.edushift.modules.auth.service.AuthService;
 import com.edushift.modules.auth.service.JwtService;
+import com.edushift.modules.auth.service.MfaService;
 import com.edushift.modules.auth.service.JwtService.JwtClaims;
 import com.edushift.modules.auth.service.JwtService.TokenType;
+import com.edushift.modules.auth.service.LoginAttemptService;
 import com.edushift.modules.tenants.entity.Tenant;
 import com.edushift.modules.tenants.entity.TenantStatus;
 import com.edushift.modules.tenants.exception.TenantNotFoundException;
@@ -107,6 +109,10 @@ public class AuthServiceImpl implements AuthService {
 	private final JwtService jwtService;
 	private final TransactionTemplate txTemplate;
 	private final AuditLogger auditLogger;
+	/** Sprint 14 / DEBT-AUTH-7: failed-login lockout (5 attempts → 15 min). */
+	private final LoginAttemptService loginAttemptService;
+	/** Sprint 17 / BE-17.2: MFA (TOTP) support. */
+	private final MfaService mfaService;
 
 	public AuthServiceImpl(TenantRepository tenantRepository,
 	                       UserRepository userRepository,
@@ -115,7 +121,9 @@ public class AuthServiceImpl implements AuthService {
 	                       PasswordEncoder passwordEncoder,
 	                       JwtService jwtService,
 	                       PlatformTransactionManager txManager,
-	                       AuditLogger auditLogger) {
+	                       AuditLogger auditLogger,
+	                       LoginAttemptService loginAttemptService,
+	                       MfaService mfaService) {
 		this.tenantRepository = tenantRepository;
 		this.userRepository = userRepository;
 		this.refreshTokenRepository = refreshTokenRepository;
@@ -124,6 +132,8 @@ public class AuthServiceImpl implements AuthService {
 		this.jwtService = jwtService;
 		this.txTemplate = new TransactionTemplate(txManager);
 		this.auditLogger = auditLogger;
+		this.loginAttemptService = loginAttemptService;
+		this.mfaService = mfaService;
 	}
 
 	/**
@@ -158,7 +168,7 @@ public class AuthServiceImpl implements AuthService {
 	// =========================================================================
 
 	@Override
-	public AuthResponse login(LoginRequest request, String tenantSlug) {
+	public LoginResult login(LoginRequest request, String tenantSlug) {
 		if (tenantSlug == null || tenantSlug.isBlank()) {
 			throw new UnauthorizedException("TENANT_REQUIRED",
 					"Tenant slug is required to authenticate");
@@ -183,7 +193,7 @@ public class AuthServiceImpl implements AuthService {
 						doLogin(request, normalizedEmail, tenant, tenantSlug)));
 	}
 
-	private AuthResponse doLogin(LoginRequest request, String normalizedEmail,
+	private LoginResult doLogin(LoginRequest request, String normalizedEmail,
 	                              Tenant tenant, String tenantSlug) {
 		User user = userRepository.findByEmail(normalizedEmail).orElse(null);
 		if (user == null) {
@@ -201,9 +211,18 @@ public class AuthServiceImpl implements AuthService {
 			auditLogger.log(AuditAction.LOGIN_FAILED, "user_email",
 					null, "login failed: unknown email for tenant '" + tenantSlug + "'",
 					java.util.Map.of("tenantSlug", tenantSlug));
+			// DEBT-AUTH-7: even unknown-email failures count toward lockout.
+			// We use a synthesized email here so attackers can't enumerate
+			// which addresses exist. The lookup in recordFailure()
+			// short-circuits on user-not-found.
+			loginAttemptService.recordFailure(normalizedEmail);
 			throw new UnauthorizedException("BAD_CREDENTIALS",
 					"Invalid email or password");
 		}
+
+		// DEBT-AUTH-7: BEFORE running BCrypt, check the lockout flag.
+		// We do not run a bcrypt check on a locked account — short-circuit.
+		loginAttemptService.assertNotLocked(user);
 
 		if (!passwordEncoder.matches(request.password(), user.getPasswordHash())) {
 			log.info("[auth] login failed (bad password) tenant='{}', email='{}'",
@@ -212,6 +231,8 @@ public class AuthServiceImpl implements AuthService {
 			auditLogger.log(AuditAction.LOGIN_FAILED, "user",
 					user.getPublicUuid(), "login failed: bad password",
 					java.util.Map.of("tenantSlug", tenantSlug, "email", normalizedEmail));
+			// DEBT-AUTH-7: record the failure for lockout accounting.
+			loginAttemptService.recordFailure(normalizedEmail);
 			throw new UnauthorizedException("BAD_CREDENTIALS",
 					"Invalid email or password");
 		}
@@ -220,6 +241,10 @@ public class AuthServiceImpl implements AuthService {
 
 		user.recordSuccessfulLogin();
 		userRepository.saveAndFlush(user);
+
+		// DEBT-AUTH-7: success — clear any pending counter so the user can
+		// try again later.
+		loginAttemptService.recordSuccessfulLogin(normalizedEmail);
 
 		String accessToken = jwtService.issueAccessToken(user, tenant, user.getRoleNames());
 		String refreshToken = jwtService.issueRefreshToken(user, tenant);
@@ -234,11 +259,23 @@ public class AuthServiceImpl implements AuthService {
 				user.getPublicUuid(), "login OK",
 				java.util.Map.of("tenantSlug", tenantSlug, "email", user.getEmail()));
 
-		return AuthResponse.bearer(
+		// Sprint 17 / BE-17.2: if the user has MFA enabled, return an MFA
+		// challenge instead of the full session. The client must then call
+		// /auth/mfa/challenge with the mfaToken as bearer + the TOTP code.
+		if (user.isMfaEnabled()) {
+			String mfaToken = jwtService.issueMfaToken(user, tenant);
+			log.info("[auth] login MFA-required -- tenant='{}', publicUuid='{}'",
+					tenantSlug, user.getPublicUuid());
+			return new AuthService.LoginResult.MfaRequired(
+					com.edushift.modules.auth.dto.MfaRequiredResponse.bearer(
+							mfaToken, jwtService.mfaTokenTtlSeconds()));
+		}
+
+		return new AuthService.LoginResult.Session(AuthResponse.bearer(
 				accessToken,
 				refreshToken,
 				jwtService.accessTokenTtlSeconds(),
-				userMapper.toSummary(user));
+				userMapper.toSummary(user)));
 	}
 
 	// =========================================================================
@@ -461,8 +498,53 @@ public class AuthServiceImpl implements AuthService {
 	}
 
 	// =========================================================================
-	// Internals
+	// MFA challenge completion (Sprint 17 / BE-17.2)
 	// =========================================================================
+
+	@Override
+	public AuthResponse completeMfaLogin(String tenantSlug, String mfaCode) {
+		// Resolve tenant + user from the MFA bearer (typed claim). The
+		// bearer has already been validated by JwtAuthenticationFilter, so
+		// we just need the principal + tenant to issue the full session.
+		var auth = org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication();
+		if (auth == null || !auth.isAuthenticated() || auth.getPrincipal() == null) {
+			throw new UnauthorizedException("MFA_TOKEN_MISSING", "MFA token is required");
+		}
+		UUID userPublicUuid = UUID.fromString(auth.getName());
+		Tenant tenant = tenantRepository.findBySlugIgnoreCase(tenantSlug)
+				.orElseThrow(() -> TenantNotFoundException.forSlug(tenantSlug));
+		// Defense in depth: tenant from the JWT must match the slug.
+		JwtService.JwtClaims claims = jwtService.parseAndValidate(
+				(String) auth.getCredentials());
+		if (claims.type() != JwtService.TokenType.MFA
+				|| !tenant.getId().equals(claims.tenantId())) {
+			throw new UnauthorizedException("MFA_TOKEN_INVALID",
+					"MFA token does not match the tenant");
+		}
+
+		return TenantContext.runAs(tenant.getId(), () ->
+				txTemplate.execute(status -> {
+					// Verify the TOTP / recovery code.
+					mfaService.verifyChallenge(userPublicUuid, mfaCode);
+
+					User user = userRepository.findByPublicUuid(userPublicUuid)
+							.orElseThrow(() -> new UnauthorizedException("USER_NOT_FOUND",
+									"User not found"));
+					user.recordSuccessfulLogin();
+					userRepository.saveAndFlush(user);
+					loginAttemptService.recordSuccessfulLogin(user.getEmail());
+					auditLogger.log(AuditAction.LOGIN, "user",
+							user.getPublicUuid(), "login OK (MFA)",
+							java.util.Map.of("tenantSlug", tenantSlug,
+									"email", user.getEmail()));
+					return issueSession(user, tenant);
+				}));
+	}
+
+	@Override
+	public com.edushift.modules.auth.repository.UserRepository userRepository() {
+		return userRepository;
+	}
 
 	private void persistRefreshToken(String rawToken, User user, UUID parentTokenId) {
 		RefreshToken token = new RefreshToken();

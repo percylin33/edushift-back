@@ -76,6 +76,7 @@ class SessionGeneratorServiceTest {
     private final UUID tenantId = UUID.fromString("11111111-1111-1111-1111-111111111111");
     private final UUID userId = UUID.fromString("22222222-2222-2222-2222-222222222222");
     private final UUID courseId = UUID.fromString("33333333-3333-3333-3333-333333333333");
+    private final UUID unitId = UUID.fromString("44444444-4444-4444-4444-444444444444");
 
     @BeforeEach
     void setUp() {
@@ -92,7 +93,9 @@ class SessionGeneratorServiceTest {
 
         service = new SessionGeneratorService(
                 llmClient, promptBuilder, quotaService, generationRepo, currentUser, objectMapper,
-                courseRepository, courseLevelRepository, competencyRepository, capacityRepository);
+                courseRepository, courseLevelRepository, competencyRepository, capacityRepository,
+                null, // learningSessionService — null OK because tests don't exercise persist
+                null); // teacherAssignmentRepository — same
 
         // Default wiring.
         TenantContext.set(tenantId);
@@ -118,7 +121,7 @@ class SessionGeneratorServiceTest {
             when(quotaService.verifyCanCall()).thenThrow(new AiDisabledException());
 
             GenerateSessionRequest req = new GenerateSessionRequest(
-                    "Fotosíntesis", courseId, 45, null, null);
+                    "Fotosíntesis", courseId, unitId, 45, null, null);
 
             assertThatThrownBy(() -> service.generateSession(req))
                     .isInstanceOf(AiDisabledException.class);
@@ -134,7 +137,7 @@ class SessionGeneratorServiceTest {
             when(quotaService.verifyCanCall()).thenThrow(new AiQuotaExceededException("daily cap"));
 
             GenerateSessionRequest req = new GenerateSessionRequest(
-                    "Fotosíntesis", courseId, 45, null, null);
+                    "Fotosíntesis", courseId, unitId, 45, null, null);
 
             assertThatThrownBy(() -> service.generateSession(req))
                     .isInstanceOf(AiQuotaExceededException.class);
@@ -155,7 +158,7 @@ class SessionGeneratorServiceTest {
             when(courseRepository.findByPublicUuid(courseId)).thenReturn(Optional.empty());
 
             GenerateSessionRequest req = new GenerateSessionRequest(
-                    "Fotosíntesis", courseId, 45, null, null);
+                    "Fotosíntesis", courseId, unitId, 45, null, null);
 
             assertThatThrownBy(() -> service.generateSession(req))
                     .isInstanceOf(ResourceNotFoundException.class);
@@ -200,7 +203,7 @@ class SessionGeneratorServiceTest {
                     new LlmResponse(llmJson, "mock-model", 200, 350, 1234L));
 
             GenerateSessionRequest req = new GenerateSessionRequest(
-                    "Fotosíntesis", courseId, 45, null, null);
+                    "Fotosíntesis", courseId, unitId, 45, null, null);
 
             SessionGeneratorService.SessionGeneratorResult result = service.generateSession(req);
 
@@ -286,7 +289,7 @@ class SessionGeneratorServiceTest {
                     new LlmResponse(llmJson, "mock-model", 200, 350, 1234L));
 
             GenerateSessionRequest req = new GenerateSessionRequest(
-                    "Fotosíntesis", courseId, 45, null, null);
+                    "Fotosíntesis", courseId, unitId, 45, null, null);
 
             assertThatThrownBy(() -> service.generateSession(req))
                     .isInstanceOf(AiParseException.class)
@@ -307,7 +310,7 @@ class SessionGeneratorServiceTest {
             when(llmClient.complete(any())).thenThrow(new LlmException("TIMEOUT", "upstream timeout"));
 
             GenerateSessionRequest req = new GenerateSessionRequest(
-                    "Fotosíntesis", courseId, 45, null, null);
+                    "Fotosíntesis", courseId, unitId, 45, null, null);
 
             assertThatThrownBy(() -> service.generateSession(req))
                     .isInstanceOf(LlmException.class)

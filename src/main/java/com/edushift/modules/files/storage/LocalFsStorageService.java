@@ -185,6 +185,17 @@ public class LocalFsStorageService implements StorageService {
 		return null;
 	}
 
+	/**
+	 * The signed-PUT-URL flow is only meaningful for the FIREBASE provider
+	 * (V50). For LOCAL_FS the caller should fall back to the BE-proxied
+	 * multipart upload. The {@code FileObjectController} hides this
+	 * branch by inspecting {@link com.edushift.modules.files.storage.StorageProvider}.
+	 */
+	@Override
+	public String presignedPutUrl(UUID tenantId, String remoteKey, String contentType, long ttlSeconds) {
+		return null;
+	}
+
 	@Override
 	public void delete(UUID tenantId, String remoteKey) {
 		Path target = resolveTenantPath(tenantId, remoteKey);

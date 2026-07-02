@@ -334,7 +334,7 @@ class JwtAuthenticationFilterTest {
 	private static JwtClaims claims(String subject, TokenType type, UUID tenantId,
 	                                 String tenantSlug, Set<String> roles) {
 		Instant now = Instant.now();
-		return new JwtClaims(subject, tenantId, tenantSlug, roles, type, now,
+		return new JwtClaims(subject, tenantId, tenantSlug, roles, type, UUID.randomUUID(), now,
 				now.plusSeconds(900));
 	}
 

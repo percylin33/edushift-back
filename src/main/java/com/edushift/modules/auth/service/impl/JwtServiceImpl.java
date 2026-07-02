@@ -123,6 +123,32 @@ public class JwtServiceImpl implements JwtService {
 	}
 
 	@Override
+	public String issueResetToken(User user, Tenant tenant, UUID jti) {
+		Instant now = Instant.now();
+		Map<String, Object> claims = new LinkedHashMap<>();
+		claims.put(CLAIM_TENANT_ID, tenant.getId().toString());
+		claims.put(CLAIM_TENANT_SLUG, tenant.getSlug());
+		claims.put(CLAIM_TYPE, TokenType.RESET.name().toLowerCase());
+		// Caller-provided jti so the DB row and the token stay in sync; if
+		// absent, JJWT will auto-generate one but it would be invisible to
+		// us. We require it explicitly here to keep the contract tight.
+		claims.put(CLAIM_JWT_ID, jti.toString());
+
+		return buildToken(user.getPublicUuid().toString(), claims, now, properties.getResetTokenTtl());
+	}
+
+	@Override
+	public String issueMfaToken(User user, Tenant tenant) {
+		Instant now = Instant.now();
+		Map<String, Object> claims = new LinkedHashMap<>();
+		claims.put(CLAIM_TENANT_ID, tenant.getId().toString());
+		claims.put(CLAIM_TENANT_SLUG, tenant.getSlug());
+		claims.put(CLAIM_TYPE, TokenType.MFA.name().toLowerCase());
+		claims.put(CLAIM_JWT_ID, UUID.randomUUID().toString());
+		return buildToken(user.getPublicUuid().toString(), claims, now, properties.getMfaTokenTtl());
+	}
+
+	@Override
 	public JwtClaims parseAndValidate(String token) {
 		if (token == null || token.isBlank()) {
 			throw new UnauthorizedException("INVALID_TOKEN", "Token is missing");
@@ -146,6 +172,7 @@ public class JwtServiceImpl implements JwtService {
 					body.get(CLAIM_TENANT_SLUG, String.class),
 					roles,
 					type,
+					parseUuid(body.get(CLAIM_JWT_ID, String.class), CLAIM_JWT_ID),
 					body.getIssuedAt() == null ? null : body.getIssuedAt().toInstant(),
 					body.getExpiration() == null ? null : body.getExpiration().toInstant()
 			);
@@ -164,6 +191,16 @@ public class JwtServiceImpl implements JwtService {
 	@Override
 	public long accessTokenTtlSeconds() {
 		return properties.getAccessTokenTtl().toSeconds();
+	}
+
+	@Override
+	public Duration resetTokenTtl() {
+		return properties.getResetTokenTtl();
+	}
+
+	@Override
+	public long mfaTokenTtlSeconds() {
+		return properties.getMfaTokenTtl().toSeconds();
 	}
 
 	private String buildToken(String subject, Map<String, Object> claims, Instant now, Duration ttl) {

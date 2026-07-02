@@ -87,8 +87,19 @@ public class SecurityConfig {
 	 */
 	private static final String[] PUBLIC_PATHS = {
 			"/v1/auth/login",
+			"/v1/auth/google",
 			"/v1/auth/refresh",
 			"/v1/auth/logout",
+			// Sprint 17 / BE-17.1 — forgot/reset password flow.
+			// All three endpoints are public by design: the user does not have
+			// a bearer token at this point. Security is enforced by:
+			//   * signed JWT (forgot-password → reset-password) with 1h TTL
+			//   * single-use `used_at` on the DB row
+			//   * tenant_id claim + tenant_id column cross-check
+			//   * generic 200 OK on /forgot-password (anti-enumeration)
+			"/v1/auth/forgot-password",
+			"/v1/auth/reset-password",
+			"/v1/auth/reset-password/validate",
 			// `tenants/by-slug` powers the tenant-aware login screen — anyone
 			// rendering /auth/login on a given subdomain needs to read its
 			// branding before having any credentials. Sensitive fields are
@@ -171,6 +182,46 @@ public class SecurityConfig {
 				.exceptionHandling(eh -> eh
 						.authenticationEntryPoint(restAuthenticationEntryPoint())
 						.accessDeniedHandler(restAccessDeniedHandler()))
+				.headers(headers -> headers
+						/*
+						 * Defense in depth: Nginx already emits these headers
+						 * (see docs/devops/nginx-edushift.conf), but if the BE
+						 * is ever exposed through a different proxy/port the
+						 * headers must still travel with the response.
+						 * Sprint 16 / INFRA-16.1.
+						 */
+						.contentSecurityPolicy(csp -> csp.policyDirectives(
+								"default-src 'self'; "
+										+ "img-src 'self' data: https:; "
+										+ "script-src 'self'; "
+										+ "style-src 'self' 'unsafe-inline'; "
+										+ "font-src 'self' data:; "
+										+ "connect-src 'self' https: wss:; "
+										+ "frame-ancestors 'none'; "
+										+ "base-uri 'self'; "
+										+ "form-action 'self'"))
+						.httpStrictTransportSecurity(hsts -> hsts
+								.includeSubDomains(true)
+								.maxAgeInSeconds(31_536_000)
+								.preload(false))
+						.frameOptions(frame -> frame.deny())
+						.referrerPolicy(referrer -> referrer.policy(
+								org.springframework.security.web.header.writers.ReferrerPolicyHeaderWriter.ReferrerPolicy.STRICT_ORIGIN_WHEN_CROSS_ORIGIN))
+						.permissionsPolicyHeader(permissions -> permissions.policy(
+								"geolocation=(), "
+										+ "microphone=(), "
+										+ "camera=(self), "
+										+ "payment=(), "
+										+ "usb=(), "
+										+ "magnetometer=(), "
+										+ "gyroscope=(), "
+										+ "accelerometer=()"))
+						.crossOriginOpenerPolicy(coop -> coop.policy(
+								org.springframework.security.web.header.writers.CrossOriginOpenerPolicyHeaderWriter.CrossOriginOpenerPolicy.SAME_ORIGIN))
+						.crossOriginEmbedderPolicy(coep -> coep.policy(
+								org.springframework.security.web.header.writers.CrossOriginEmbedderPolicyHeaderWriter.CrossOriginEmbedderPolicy.REQUIRE_CORP))
+						.crossOriginResourcePolicy(corp -> corp.policy(
+								org.springframework.security.web.header.writers.CrossOriginResourcePolicyHeaderWriter.CrossOriginResourcePolicy.SAME_ORIGIN)))
 				.addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
 
 		return http.build();

@@ -77,6 +77,19 @@ public interface StorageService {
 	String presignedGetUrl(UUID tenantId, String remoteKey, long ttlSeconds);
 
 	/**
+	 * Mint a time-limited URL the client can {@code PUT} the bytes to
+	 * without a bearer (V50 signed-upload flow, docs/infra/firebase.md).
+	 *
+	 * <p>Returns {@code null} when the active provider does not support
+	 * direct uploads (LOCAL_FS — caller should fall back to
+	 * {@link #put}). The controller hides this branch.</p>
+	 *
+	 * @param ttlSeconds URL validity window; provider-specific minimum
+	 *                   may apply (e.g. GCS requires {@code > 0})
+	 */
+	String presignedPutUrl(UUID tenantId, String remoteKey, String contentType, long ttlSeconds);
+
+	/**
 	 * Remove the bytes. Idempotent — a missing object is not an error.
 	 */
 	void delete(UUID tenantId, String remoteKey);

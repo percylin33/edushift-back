@@ -8,6 +8,7 @@ import com.google.auth.oauth2.GoogleCredentials;
 import com.google.cloud.storage.Blob;
 import com.google.cloud.storage.BlobId;
 import com.google.cloud.storage.BlobInfo;
+import com.google.cloud.storage.HttpMethod;
 import com.google.cloud.storage.Storage;
 import com.google.cloud.storage.StorageException;
 import com.google.cloud.storage.StorageOptions;
@@ -216,6 +217,47 @@ public class FirebaseStorageService implements StorageService {
 		catch (StorageException e) {
 			throw mapStorageException(
 					"Failed to sign URL for " + remoteKey, e);
+		}
+	}
+
+	/**
+	 * Mint a signed {@code PUT} URL (V50 / docs/infra/firebase.md). The
+	 * browser uses this to upload the bytes directly to Firebase without
+	 * the BE ever seeing the payload. The URL embeds:
+	 * <ul>
+	 *   <li>{@code httpMethod = PUT}</li>
+	 *   <li>{@code contentType} — bound via the {@code BlobInfo} (with the
+	 *       {@code withContentType()} marker option) so the browser must
+	 *       send the exact same MIME or GCS will reject the PUT with 403.</li>
+	 *   <li>Expiry — passed as the {@code duration} argument; defaults
+	 *       to {@code app.storage.firebase.signed-url-ttl-seconds}.</li>
+	 *   <li>V4 signing — modern Firebase bucket signing.</li>
+	 * </ul>
+	 */
+	@Override
+	public String presignedPutUrl(UUID tenantId, String remoteKey, String contentType, long ttlSeconds) {
+		long ttl = ttlSeconds > 0
+				? ttlSeconds
+				: props.getFirebase().getSignedUrlTtlSeconds();
+		BlobInfo.Builder builder = BlobInfo.newBuilder(BlobId.of(bucket, remoteKey));
+		if (contentType != null && !contentType.isBlank()) {
+			builder.setContentType(contentType);
+		}
+		BlobInfo info = builder.build();
+		Storage.SignUrlOption httpMethod =
+				Storage.SignUrlOption.httpMethod(HttpMethod.PUT);
+		Storage.SignUrlOption bindContentType =
+				Storage.SignUrlOption.withContentType();
+		Storage.SignUrlOption v4 =
+				Storage.SignUrlOption.withV4Signature();
+		try {
+			URL url = client.signUrl(info, ttl, TimeUnit.SECONDS,
+					httpMethod, bindContentType, v4);
+			return url.toString();
+		}
+		catch (StorageException e) {
+			throw mapStorageException(
+					"Failed to mint signed PUT URL for " + remoteKey, e);
 		}
 	}
 
