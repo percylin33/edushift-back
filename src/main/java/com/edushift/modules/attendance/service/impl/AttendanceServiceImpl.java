@@ -99,6 +99,8 @@ public class AttendanceServiceImpl implements AttendanceService {
 	private final CurrentUserProvider currentUserProvider;
 	private final AttendanceAuditLogger auditLogger;
 	private final ApplicationEventPublisher eventPublisher; // Sprint 9 / BE-9.3
+	/** Sprint 18 / BE-18.6 — SSE pub/sub for live attendance events. */
+	private final com.edushift.modules.attendance.events.AttendanceEventPublisher realtimePublisher;
 
 	@Value("${edushift.attendance.future-drift-tolerance-minutes:1}")
 	private long futureDriftToleranceMinutes;
@@ -312,6 +314,7 @@ public class AttendanceServiceImpl implements AttendanceService {
 				session.getPublicUuid(), student.getPublicUuid(),
 				saved.getStatus(), saved.getPublicUuid());
 		auditLogger.logCheckedIn(saved, false);
+		publishRealtime(saved, false);
 		return toRecordResponseWithUsers(saved, false);
 	}
 
@@ -412,6 +415,7 @@ public class AttendanceServiceImpl implements AttendanceService {
 				saved.getStatus(), saved.getPublicUuid(), resolved.opened(),
 				actorPublicUuid);
 		auditLogger.logManualCheckedIn(saved, false, resolved.opened());
+		publishRealtime(saved, false);
 		return toRecordResponseWithUsers(saved, false);
 	}
 
@@ -512,6 +516,7 @@ public class AttendanceServiceImpl implements AttendanceService {
 				saved.getStatus(), saved.getPublicUuid(), resolved.opened(),
 				actorPublicUuid);
 		auditLogger.logCheckedIn(saved, false);
+		publishRealtime(saved, false);
 		return toRecordResponseWithUsers(saved, false);
 	}
 
@@ -890,6 +895,22 @@ public class AttendanceServiceImpl implements AttendanceService {
 			AttendanceRecord record, Boolean wasIdempotent) {
 		Map<UUID, User> users = resolveUsersForRecords(List.of(record));
 		return mapper.toResponse(record, wasIdempotent, users);
+	}
+
+	/**
+	 * Sprint 18 / BE-18.6 — fan the freshly-created record out to any
+	 * SSE subscribers waiting on the session. We re-derive the DTO
+	 * with the user map (so subscribers see names, not just UUIDs)
+	 * but skip idempotent re-reads to avoid duplicate UI events.
+	 */
+	private void publishRealtime(AttendanceRecord record, boolean wasIdempotent) {
+		if (wasIdempotent || record == null || record.getSession() == null) {
+			return;
+		}
+		AttendanceRecordResponse dto =
+				toRecordResponseWithUsers(record, false);
+		realtimePublisher.publishRecordCreated(
+				record.getSession().getPublicUuid(), dto);
 	}
 
 	private Map<UUID, User> resolveUsersForRecords(List<AttendanceRecord> records) {

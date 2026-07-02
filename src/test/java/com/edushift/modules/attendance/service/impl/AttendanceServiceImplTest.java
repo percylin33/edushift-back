@@ -35,6 +35,7 @@ class AttendanceServiceImplTest {
     @Mock com.edushift.modules.attendance.audit.AttendanceAuditLogger auditLogger;
     @Mock com.edushift.modules.tenants.service.TenantSettingsService tenantSettings;
     @Mock org.springframework.context.ApplicationEventPublisher eventPublisher;
+    @Mock com.edushift.modules.attendance.events.AttendanceEventPublisher realtimePublisher;
     @InjectMocks AttendanceServiceImpl service;
     @BeforeEach void setUp() { when(currentUser.currentTenantId()).thenReturn(Optional.of(UUID.randomUUID())); }
     @Test void openSessionThrowsWhenOpen() { var s = new AttendanceSession(); s.setStatus(AttendanceSessionStatus.ACTIVE); when(sectionRepo.findByPublicUuid(any())).thenReturn(Optional.of(new com.edushift.modules.academic.section.entity.Section())); when(sessionRepo.findActiveBySectionDaySlot(any(), any(), any())).thenReturn(Optional.of(s)); assertThatThrownBy(() -> service.openSession(new CreateSessionRequest(UUID.randomUUID(), LocalDate.now(), AttendanceSessionSlot.MORNING, Instant.now(), null))).isInstanceOf(SessionAlreadyOpenException.class); }

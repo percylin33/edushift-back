@@ -93,4 +93,27 @@ public class AsyncConfiguration {
 		return executor;
 	}
 
+	/**
+	 * Single-thread scheduler for SSE heartbeats (Sprint 18 / BE-18.6).
+	 * 15-second heartbeat × N concurrent subscribers = at most N/15 wake-ups
+	 * per second, well within a single thread. A dedicated pool keeps
+	 * heartbeats off the request-serving and AI executors — a slow
+	 * SSE subscriber can't starve a real user.
+	 */
+	@Bean(name = "heartbeatScheduler", destroyMethod = "shutdown")
+	java.util.concurrent.ScheduledExecutorService heartbeatScheduler() {
+		java.util.concurrent.ScheduledThreadPoolExecutor executor =
+				new java.util.concurrent.ScheduledThreadPoolExecutor(
+						1, // corePoolSize — single thread, sequential heartbeats
+						r -> {
+							Thread t = new Thread(r, "attendance-heartbeat-");
+							t.setDaemon(true); // never block JVM shutdown
+							return t;
+						});
+		// Allow cancelled tasks to be removed from the queue so a
+		// disconnected subscriber's pending heartbeats don't pile up.
+		executor.setRemoveOnCancelPolicy(true);
+		return executor;
+	}
+
 }

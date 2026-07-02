@@ -24,6 +24,8 @@ import org.springframework.test.web.servlet.MockMvc;
 class AttendanceControllerTest {
     @Autowired MockMvc mockMvc;
     @MockitoBean AttendanceService attendanceService;
+    @MockitoBean com.edushift.modules.attendance.events.AttendanceEventPublisher attendanceEventPublisher;
+    @MockitoBean java.util.concurrent.ScheduledExecutorService heartbeatScheduler;
     @MockitoBean CurrentUserProvider currentUserProvider; @MockitoBean TenantResolver tenantResolver;
     @MockitoBean JwtService jwtService; @MockitoBean LmsRoleAuthorityMapper roleAuthorityMapper;
     private static JwtAuthenticationToken admin() { return new JwtAuthenticationToken(new JwtAuthenticatedPrincipal(UUID.randomUUID(), UUID.randomUUID(), "a", "a@t"), "t", List.of(new SimpleGrantedAuthority("ROLE_TENANT_ADMIN"))); }

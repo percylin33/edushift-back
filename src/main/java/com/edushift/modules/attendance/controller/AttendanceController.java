@@ -9,6 +9,7 @@ import com.edushift.modules.attendance.dto.ManualCheckInRequest;
 import com.edushift.modules.attendance.dto.UpdateRecordRequest;
 import com.edushift.modules.attendance.entity.AttendanceSessionSlot;
 import com.edushift.modules.attendance.entity.AttendanceSessionStatus;
+import com.edushift.modules.attendance.events.AttendanceEventPublisher;
 import com.edushift.modules.attendance.service.AttendanceService;
 import com.edushift.shared.api.ApiResponse;
 import io.swagger.v3.oas.annotations.Operation;
@@ -21,6 +22,8 @@ import jakarta.validation.Valid;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.atomic.AtomicLong;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
@@ -42,6 +45,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 /**
  * REST adapter for the {@code AttendanceSession} +
@@ -80,6 +84,12 @@ import org.springframework.web.bind.annotation.RestController;
  *       <td>/v1/attendance/records/{publicUuid}</td>
  *       <td>TENANT_ADMIN, TEACHER</td>
  *       <td>{@link AttendanceRecordResponse}</td></tr>
+ *   <tr><td>GET</td>
+ *       <td>/v1/attendance/sessions/{publicUuid}/events</td>
+ *       <td>TENANT_ADMIN, TEACHER</td>
+ *       <td>{@code text/event-stream} (SSE — 30 min,
+ *           heartbeat every 15s; emits {@code record-created}
+ *           on each new attendance record)</td></tr>
  * </table>
  *
  * <h3>Path layout — flat vs nested</h3>
@@ -115,6 +125,16 @@ import org.springframework.web.bind.annotation.RestController;
 public class AttendanceController {
 
 	private final AttendanceService attendanceService;
+	private final AttendanceEventPublisher eventPublisher;
+
+	/**
+	 * Heartbeat scheduler for live SSE streams. Single-thread with
+	 * daemon semantics — it survives requests but won't block JVM
+	 * shutdown. Bound in
+	 * {@link com.edushift.config.AsyncConfiguration} so it shares
+	 * the application's task executor.
+	 */
+	private final java.util.concurrent.ScheduledExecutorService heartbeatExecutor;
 
 	// =====================================================================
 	// Sessions
@@ -325,5 +345,83 @@ public class AttendanceController {
 		AttendanceRecordResponse response = attendanceService.updateRecord(
 				publicUuid, request);
 		return ResponseEntity.ok(ApiResponse.ok(response));
+	}
+
+	// =====================================================================
+	// Live events (Sprint 18 / BE-18.6)
+	// =====================================================================
+	//
+	// SSE stream of attendance events for one session. Teachers /
+	// admins open this from the session-detail page to see new
+	// check-ins as they happen (replaces the manual "refresh" loop).
+	//
+	// Wire format: text/event-stream with two event names:
+	//   - "record-created"  data: AttendanceRecordResponse JSON
+	//   - "heartbeat"       data: null (every 15s to keep proxies awake)
+	//
+	// Lifecycle: 30-minute server-side timeout. The emitter is
+	// removed from the publisher's bucket on completion / timeout /
+	// error so we never leak a stale reference.
+
+	@GetMapping(value = "/attendance/sessions/{publicUuid}/events",
+			produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+	@SecurityRequirement(name = "bearerAuth")
+	@PreAuthorize("hasAnyRole('TENANT_ADMIN','TEACHER')")
+	@Operation(summary = "Stream live attendance events for one session",
+			description = "Server-Sent Events. Each new attendance "
+					+ "record (checkIn / manualCheckIn / scanCheckIn) emits a "
+					+ "`record-created` event. A `heartbeat` event is sent "
+					+ "every 15s to keep proxies from idling the connection. "
+					+ "Max stream duration 30 minutes — clients can reconnect.")
+	public SseEmitter streamSessionEvents(@PathVariable UUID publicUuid) {
+		// 30 min server-side timeout — see ADR for max open-connection
+		// rationale (no auth-side resource constraint, the limit is
+		// operating-system file descriptors per backend pod).
+		SseEmitter emitter = new SseEmitter(30L * 60L * 1000L);
+
+		eventPublisher.subscribe(publicUuid, emitter);
+
+		// Cleanup on every terminal state. `unsubscribe` is idempotent
+		// so double-call (e.g. timeout + completion race) is harmless.
+		Runnable cleanup = () -> eventPublisher.unsubscribe(publicUuid, emitter);
+		emitter.onCompletion(cleanup);
+		emitter.onTimeout(cleanup);
+		emitter.onError(t -> cleanup.run());
+
+		// Immediate "subscribed" event so the FE can flip its
+		// connection state to "live" without waiting for the first
+		// real record.
+		try {
+			emitter.send(SseEmitter.event()
+					.name("subscribed")
+					.data(java.util.Map.of(
+							"sessionPublicUuid", publicUuid.toString(),
+							"serverTime", java.time.Instant.now().toString())));
+		}
+		catch (Exception ex) {
+			cleanup.run();
+		}
+
+		// Heartbeat scheduler. We use a per-emitter single-thread
+		// scheduled future so closing the emitter cancels the
+		// heartbeat automatically (no leaked timers). 15s interval
+		// matches the default nginx / cloud LB idle timeout so a
+		// typical proxy won't drop the connection between events.
+		AtomicLong heartbeatSeq = new AtomicLong();
+		ScheduledFuture<?> heartbeat = heartbeatExecutor.scheduleAtFixedRate(() -> {
+			try {
+				emitter.send(SseEmitter.event()
+						.name("heartbeat")
+						.data(java.util.Map.of("seq", heartbeatSeq.incrementAndGet())));
+			}
+			catch (Exception ex) {
+				cleanup.run();
+			}
+		}, 15, 15, java.util.concurrent.TimeUnit.SECONDS);
+		emitter.onCompletion(() -> heartbeat.cancel(false));
+		emitter.onTimeout(() -> heartbeat.cancel(false));
+
+		log.info("[attendance-api] SSE stream opened — session={}", publicUuid);
+		return emitter;
 	}
 }
