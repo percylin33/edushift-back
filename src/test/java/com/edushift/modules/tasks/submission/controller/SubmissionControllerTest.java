@@ -23,8 +23,10 @@ import org.springframework.http.MediaType;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.context.annotation.Import;
 
 @WebMvcTest(SubmissionController.class)
+@Import(com.edushift.test.EdushiftWebMvcTestConfig.class)
 class SubmissionControllerTest {
     @Autowired MockMvc mockMvc;
     @MockitoBean SubmissionService submissionService;
@@ -49,7 +51,7 @@ class SubmissionControllerTest {
 
     @Test
     void submitHappyPath() throws Exception {
-        mockMvc.perform(post("/tasks/{tid}/submissions", UUID.randomUUID())
+        mockMvc.perform(post("/v1/tasks/{tid}/submissions", UUID.randomUUID())
                         .with(csrf()).with(authentication(submitter()))
                         .content("{\"studentPublicUuid\":\"" + UUID.randomUUID() + "\"}")
                         .contentType(MediaType.APPLICATION_JSON))
@@ -58,21 +60,21 @@ class SubmissionControllerTest {
 
     @Test
     void listByTask() throws Exception {
-        mockMvc.perform(get("/tasks/{tid}/submissions", UUID.randomUUID())
+        mockMvc.perform(get("/v1/tasks/{tid}/submissions", UUID.randomUUID())
                         .with(authentication(grader())))
                 .andExpect(status().isOk());
     }
 
     @Test
     void getMine() throws Exception {
-        mockMvc.perform(get("/tasks/{tid}/submissions/me", UUID.randomUUID())
+        mockMvc.perform(get("/v1/tasks/{tid}/submissions/me", UUID.randomUUID())
                         .with(authentication(submitter())))
                 .andExpect(status().isOk());
     }
 
     @Test
     void gradeHappyPath() throws Exception {
-        mockMvc.perform(patch("/submissions/{id}/grade", UUID.randomUUID())
+        mockMvc.perform(patch("/v1/submissions/{id}/grade", UUID.randomUUID())
                         .with(csrf()).with(authentication(grader()))
                         .content("{\"grade\":90,\"feedback\":\"ok\"}")
                         .contentType(MediaType.APPLICATION_JSON))
@@ -81,7 +83,7 @@ class SubmissionControllerTest {
 
     @Test
     void submitMissingRoleForbidden() throws Exception {
-        mockMvc.perform(post("/tasks/{tid}/submissions", UUID.randomUUID())
+        mockMvc.perform(post("/v1/tasks/{tid}/submissions", UUID.randomUUID())
                         .with(csrf())
                         .with(authentication(new JwtAuthenticationToken(
                                 new JwtAuthenticatedPrincipal(
@@ -94,7 +96,7 @@ class SubmissionControllerTest {
 
     @Test
     void gradeMissingRoleForbidden() throws Exception {
-        mockMvc.perform(patch("/submissions/{id}/grade", UUID.randomUUID())
+        mockMvc.perform(patch("/v1/submissions/{id}/grade", UUID.randomUUID())
                         .with(csrf())
                         .with(authentication(new JwtAuthenticationToken(
                                 new JwtAuthenticatedPrincipal(

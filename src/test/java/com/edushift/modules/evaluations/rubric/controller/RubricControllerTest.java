@@ -44,7 +44,8 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 @WebMvcTest(RubricController.class)
-@Import(GlobalExceptionHandler.class)
+@Import({GlobalExceptionHandler.class, com.edushift.test.EdushiftWebMvcTestConfig.class})
+
 class RubricControllerTest {
 
     @Autowired private MockMvc mockMvc;
@@ -96,7 +97,7 @@ class RubricControllerTest {
             given(service.listRubrics(any())).willReturn(List.of(
                     stubListItem(UUID.randomUUID(), "My Rubric", false)));
 
-            mockMvc.perform(get("/academic/rubrics"))
+            mockMvc.perform(get("/v1/academic/rubrics"))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$[0].name").value("My Rubric"))
                     .andExpect(jsonPath("$[0].isSystem").value(false));
@@ -108,7 +109,7 @@ class RubricControllerTest {
         void teacherAllowed() throws Exception {
             given(service.listRubrics(any())).willReturn(List.of());
 
-            mockMvc.perform(get("/academic/rubrics"))
+            mockMvc.perform(get("/v1/academic/rubrics"))
                     .andExpect(status().isOk());
         }
 
@@ -116,14 +117,14 @@ class RubricControllerTest {
         @WithMockUser(roles = "STUDENT")
         @DisplayName("STUDENT role forbidden")
         void studentForbidden() throws Exception {
-            mockMvc.perform(get("/academic/rubrics"))
+            mockMvc.perform(get("/v1/academic/rubrics"))
                     .andExpect(status().isForbidden());
         }
 
         @Test
         @DisplayName("anonymous → 401")
         void anonymous() throws Exception {
-            mockMvc.perform(get("/academic/rubrics"))
+            mockMvc.perform(get("/v1/academic/rubrics"))
                     .andExpect(status().isUnauthorized());
         }
 
@@ -133,7 +134,7 @@ class RubricControllerTest {
         void filtersPassthrough() throws Exception {
             given(service.listRubrics(any())).willReturn(List.of());
 
-            mockMvc.perform(get("/academic/rubrics?systemOnly=true&q=math"))
+            mockMvc.perform(get("/v1/academic/rubrics?systemOnly=true&q=math"))
                     .andExpect(status().isOk());
         }
     }
@@ -149,7 +150,7 @@ class RubricControllerTest {
             given(service.listSystemRubrics()).willReturn(List.of(
                     stubListItem(UUID.randomUUID(), "Ensayo argumentativo", true)));
 
-            mockMvc.perform(get("/academic/rubrics/system"))
+            mockMvc.perform(get("/v1/academic/rubrics/system"))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$[0].isSystem").value(true));
         }
@@ -166,7 +167,7 @@ class RubricControllerTest {
             UUID id = UUID.randomUUID();
             given(service.getRubric(id)).willReturn(stubResponse(id, false));
 
-            mockMvc.perform(get("/academic/rubrics/{u}", id))
+            mockMvc.perform(get("/v1/academic/rubrics/{u}", id))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.data.publicUuid").value(id.toString()));
         }
@@ -179,7 +180,7 @@ class RubricControllerTest {
             given(service.getRubric(id))
                     .willThrow(new ResourceNotFoundException("Rubric", id));
 
-            mockMvc.perform(get("/academic/rubrics/{u}", id))
+            mockMvc.perform(get("/v1/academic/rubrics/{u}", id))
                     .andExpect(status().isNotFound());
         }
     }
@@ -195,7 +196,7 @@ class RubricControllerTest {
             UUID id = UUID.randomUUID();
             given(service.createRubric(any())).willReturn(stubResponse(id, false));
 
-            mockMvc.perform(post("/academic/rubrics")
+            mockMvc.perform(post("/v1/academic/rubrics")
                             .contentType(MediaType.APPLICATION_JSON)
                             .content(objectMapper.writeValueAsString(validCreateRequest())))
                     .andExpect(status().isCreated())
@@ -214,7 +215,7 @@ class RubricControllerTest {
                     List.of(new LevelInput("A", "A", 1),
                             new LevelInput("B", "B", 2)));
 
-            mockMvc.perform(post("/academic/rubrics")
+            mockMvc.perform(post("/v1/academic/rubrics")
                             .contentType(MediaType.APPLICATION_JSON)
                             .content(objectMapper.writeValueAsString(bad)))
                     .andExpect(status().isBadRequest());
@@ -229,7 +230,7 @@ class RubricControllerTest {
             given(service.createRubric(any()))
                     .willThrow(new ConflictException("RUB_NAME_EXISTS", "dup"));
 
-            mockMvc.perform(post("/academic/rubrics")
+            mockMvc.perform(post("/v1/academic/rubrics")
                             .contentType(MediaType.APPLICATION_JSON)
                             .content(objectMapper.writeValueAsString(validCreateRequest())))
                     .andExpect(status().isConflict())
@@ -249,7 +250,7 @@ class RubricControllerTest {
             UUID fork = UUID.randomUUID();
             given(service.forkRubric(eq(source), any())).willReturn(stubResponse(fork, false));
 
-            mockMvc.perform(post("/academic/rubrics/{u}/fork", source)
+            mockMvc.perform(post("/v1/academic/rubrics/{u}/fork", source)
                             .contentType(MediaType.APPLICATION_JSON)
                             .content("{}"))
                     .andExpect(status().isCreated());
@@ -263,7 +264,7 @@ class RubricControllerTest {
             given(service.forkRubric(eq(source), any()))
                     .willThrow(new ConflictException("RUB_CANNOT_FORK_NON_SYSTEM", "no fork"));
 
-            mockMvc.perform(post("/academic/rubrics/{u}/fork", source)
+            mockMvc.perform(post("/v1/academic/rubrics/{u}/fork", source)
                             .contentType(MediaType.APPLICATION_JSON)
                             .content("{}"))
                     .andExpect(status().isBadRequest());
@@ -282,7 +283,7 @@ class RubricControllerTest {
             given(service.updateRubric(eq(id), any())).willReturn(stubResponse(id, false));
 
             var patch = new UpdateRubricRequest("Renamed", null, null, null);
-            mockMvc.perform(patch("/academic/rubrics/{u}", id)
+            mockMvc.perform(patch("/v1/academic/rubrics/{u}", id)
                             .contentType(MediaType.APPLICATION_JSON)
                             .content(objectMapper.writeValueAsString(patch)))
                     .andExpect(status().isOk());
@@ -297,7 +298,7 @@ class RubricControllerTest {
                     .willThrow(new ForbiddenException("RUB_SYSTEM_READ_ONLY", "fork instead"));
 
             var patch = new UpdateRubricRequest("Renamed", null, null, null);
-            mockMvc.perform(patch("/academic/rubrics/{u}", id)
+            mockMvc.perform(patch("/v1/academic/rubrics/{u}", id)
                             .contentType(MediaType.APPLICATION_JSON)
                             .content(objectMapper.writeValueAsString(patch)))
                     .andExpect(status().isForbidden())
@@ -316,7 +317,7 @@ class RubricControllerTest {
             UUID id = UUID.randomUUID();
             willDoNothing().given(service).deleteRubric(id);
 
-            mockMvc.perform(delete("/academic/rubrics/{u}", id))
+            mockMvc.perform(delete("/v1/academic/rubrics/{u}", id))
                     .andExpect(status().isNoContent());
 
             then(service).should(times(1)).deleteRubric(id);
@@ -330,7 +331,7 @@ class RubricControllerTest {
             willThrow(new ForbiddenException("RUB_SYSTEM_READ_ONLY", "fork"))
                     .given(service).deleteRubric(id);
 
-            mockMvc.perform(delete("/academic/rubrics/{u}", id))
+            mockMvc.perform(delete("/v1/academic/rubrics/{u}", id))
                     .andExpect(status().isForbidden());
         }
     }

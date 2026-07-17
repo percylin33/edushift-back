@@ -48,6 +48,7 @@ public class LoginAttemptService {
 
 	private final FailedLoginAttemptRepository attemptRepository;
 	private final UserRepository userRepository;
+	private final com.edushift.modules.tenants.repository.TenantRepository tenantRepository;
 
 	/**
 	 * Throws {@link UserLockedException} if the user is currently locked.
@@ -111,6 +112,15 @@ public class LoginAttemptService {
 					fresh.setLastAttemptAt(Instant.now());
 					fresh.setAttemptCount(0);
 					fresh.setStatus(FailedLoginAttempt.Status.ACTIVE);
+					// tenantSlug is NOT NULL on the table; copy from the current
+					// tenant so the INSERT doesn't violate the 23502 constraint
+					// on first-ever failures (the entity's @TenantId field is
+					// auto-populated, but tenant_slug is the legacy column that
+					// the schema still requires).
+					String tenantSlug = tenantRepository.findById(tenantId)
+							.map(com.edushift.modules.tenants.entity.Tenant::getSlug)
+							.orElse(null);
+					fresh.setTenantSlug(tenantSlug);
 					return fresh;
 				});
 

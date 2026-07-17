@@ -1,8 +1,10 @@
 package com.edushift.shared.security;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
 
 import com.edushift.modules.auth.entity.UserRole;
+import com.edushift.modules.tenants.service.PermissionOverrideService;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.Set;
@@ -19,7 +21,8 @@ import org.junit.jupiter.api.Test;
  */
 class LmsRoleAuthorityMapperTest {
 
-	private final LmsRoleAuthorityMapper mapper = new LmsRoleAuthorityMapper();
+	private final LmsRoleAuthorityMapper mapper =
+			new LmsRoleAuthorityMapper(mock(PermissionOverrideService.class));
 
 	@Test
 	@DisplayName("tenant_admin gets all LMS authorities (tasks + materials + quizzes + AI + payment-admin + announcements)")

@@ -14,6 +14,7 @@ import com.edushift.modules.attendance.dto.UpdateRecordRequest;
 import com.edushift.modules.attendance.entity.AttendanceRecord;
 import com.edushift.modules.attendance.entity.AttendanceRecordStatus;
 import com.edushift.modules.attendance.entity.AttendanceSession;
+import com.edushift.modules.attendance.entity.JustificationStatus;
 import com.edushift.modules.attendance.entity.AttendanceSessionSlot;
 import com.edushift.modules.attendance.entity.AttendanceSessionStatus;
 import com.edushift.modules.attendance.entity.StudentAttendanceQr;
@@ -226,6 +227,33 @@ public class AttendanceServiceImpl implements AttendanceService {
 			return 0;
 		}
 		recordRepository.saveAll(toInsert);
+
+		// Sprint 9 / BE-9.3 — fire STUDENT_ABSENT for each materialized
+		// absent record (the parent should know).
+		String sectionName = session.getSection() == null ? "" : session.getSection().getName();
+		for (AttendanceRecord rec : toInsert) {
+			Student student = rec.getStudent();
+			UUID studentUserId = student == null ? null : student.getUserId();
+			String studentName = student == null ? "" : student.fullName();
+			if (studentUserId != null) {
+				eventPublisher.publishEvent(
+						com.edushift.modules.notifications.event.NotificationEvent.builder()
+								.templateKey("STUDENT_ABSENT")
+								.category(com.edushift.modules.notifications.entity.Notification.Category.ABSENCE)
+								.sourceId(rec.getPublicUuid())
+								.recipients(java.util.List.of(
+										new com.edushift.modules.notifications.event.NotificationEvent.Recipient(
+												studentUserId, null)))
+								.payload(java.util.Map.of(
+										"studentName", studentName,
+										"date", absentAt.toString(),
+										"reason", "",
+										"courseName", sectionName,
+										"parentName", ""))
+								.build());
+			}
+		}
+
 		return toInsert.size();
 	}
 
@@ -964,6 +992,70 @@ public class AttendanceServiceImpl implements AttendanceService {
 			if (authority.equals(AUTHORITY_PREFIX + ROLE_TENANT_ADMIN)) return true;
 		}
 		return false;
+	}
+
+	// =====================================================================
+	// justify (BE-18.5)
+	// =====================================================================
+
+	@Override
+	@Transactional
+	public AttendanceRecordResponse justify(UUID recordPublicUuid, String justificationText) {
+		requireAuthenticatedUser();
+
+		AttendanceRecord record = recordRepository.findByPublicUuid(recordPublicUuid)
+				.orElseThrow(() -> new ResourceNotFoundException(
+						"AttendanceRecord", recordPublicUuid));
+
+		if (record.getJustificationStatus() != null) {
+			throw new BadRequestException(
+					AttendanceErrorCodes.RECORD_ALREADY_JUSTIFIED,
+					"Record " + recordPublicUuid + " already has a justification "
+							+ "with status " + record.getJustificationStatus());
+		}
+
+		record.setJustificationStatus(JustificationStatus.PENDING);
+		record.setJustificationText(justificationText);
+
+		AttendanceRecord saved = recordRepository.saveAndFlush(record);
+		log.info("[attendance] justification submitted -- record={} text_len={}",
+				saved.getPublicUuid(),
+				justificationText != null ? justificationText.length() : 0);
+		auditLogger.logJustificationSubmitted(saved);
+		return toRecordResponseWithUsers(saved, null);
+	}
+
+	// =====================================================================
+	// approveJustification (BE-18.5)
+	// =====================================================================
+
+	@Override
+	@Transactional
+	public AttendanceRecordResponse approveJustification(UUID recordPublicUuid, boolean approved) {
+		UUID actorPublicUuid = requireAuthenticatedUser();
+
+		AttendanceRecord record = recordRepository.findByPublicUuid(recordPublicUuid)
+				.orElseThrow(() -> new ResourceNotFoundException(
+						"AttendanceRecord", recordPublicUuid));
+
+		if (record.getJustificationStatus() != JustificationStatus.PENDING) {
+			throw new BadRequestException(
+					AttendanceErrorCodes.RECORD_NO_PENDING_JUSTIFICATION,
+					"Record " + recordPublicUuid + " has no pending justification "
+							+ "(current: " + record.getJustificationStatus() + ")");
+		}
+
+		record.setJustificationStatus(approved
+				? JustificationStatus.APPROVED : JustificationStatus.REJECTED);
+		record.setApprovedByUserId(actorPublicUuid);
+		record.setApprovedAt(Instant.now());
+
+		AttendanceRecord saved = recordRepository.saveAndFlush(record);
+		log.info("[attendance] justification {} -- record={} actor={}",
+				approved ? "APPROVED" : "REJECTED",
+				saved.getPublicUuid(), actorPublicUuid);
+		auditLogger.logJustificationResolved(saved, approved);
+		return toRecordResponseWithUsers(saved, null);
 	}
 
 	private static String blankToNull(String value) {

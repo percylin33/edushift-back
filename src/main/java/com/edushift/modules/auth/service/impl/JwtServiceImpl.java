@@ -149,6 +149,44 @@ public class JwtServiceImpl implements JwtService {
 	}
 
 	@Override
+	public String issueOnboardingToken(User user, Tenant tenant) {
+		Instant now = Instant.now();
+		Map<String, Object> claims = new LinkedHashMap<>();
+		claims.put(CLAIM_TENANT_ID, tenant.getId().toString());
+		claims.put(CLAIM_TENANT_SLUG, tenant.getSlug());
+		claims.put(CLAIM_TYPE, TokenType.ONBOARDING.name().toLowerCase());
+		claims.put(CLAIM_JWT_ID, UUID.randomUUID().toString());
+		return buildToken(user.getPublicUuid().toString(), claims, now,
+				properties.getOnboardingTokenTtl());
+	}
+
+	@Override
+	public String issueImpersonationToken(User target, Tenant targetTenant,
+			Set<String> targetRoles, UUID adminUuid) {
+		Instant now = Instant.now();
+		Map<String, Object> claims = new LinkedHashMap<>();
+		claims.put(CLAIM_TENANT_ID, targetTenant.getId().toString());
+		claims.put(CLAIM_TENANT_SLUG, targetTenant.getSlug());
+		claims.put(CLAIM_ROLES, targetRoles == null ? List.of() : List.copyOf(targetRoles));
+		claims.put(CLAIM_EMAIL, target.getEmail());
+		claims.put(CLAIM_TYPE, TokenType.IMPERSONATION.name().toLowerCase());
+		claims.put(CLAIM_JWT_ID, UUID.randomUUID().toString());
+		claims.put("impersonatedBy", adminUuid.toString());
+		return buildToken(target.getPublicUuid().toString(), claims, now,
+				properties.getImpersonationTokenTtl());
+	}
+
+	@Override
+	public long onboardingTokenTtlSeconds() {
+		return properties.getOnboardingTokenTtl().toSeconds();
+	}
+
+	@Override
+	public long impersonationTokenTtlSeconds() {
+		return properties.getImpersonationTokenTtl().toSeconds();
+	}
+
+	@Override
 	public JwtClaims parseAndValidate(String token) {
 		if (token == null || token.isBlank()) {
 			throw new UnauthorizedException("INVALID_TOKEN", "Token is missing");

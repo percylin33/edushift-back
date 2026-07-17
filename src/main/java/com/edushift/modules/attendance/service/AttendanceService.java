@@ -172,6 +172,25 @@ public interface AttendanceService {
 			ListSessionsFilter filter, Pageable pageable);
 
 	/**
+	 * Submit a justification for an attendance record (Sprint 18 / BE-18.5).
+	 * Sets {@code justificationStatus=PENDING} and stores the text.
+	 * Only the student's linked user or a parent can justify.
+	 *
+	 * @throws ResourceNotFoundException record not found or not in tenant
+	 * @throws BadRequestException record already has a non-null justification_status
+	 */
+	AttendanceRecordResponse justify(UUID recordPublicUuid, String justificationText);
+
+	/**
+	 * Approve or reject a pending justification (Sprint 18 / BE-18.5).
+	 * Only TENANT_ADMIN can perform this action.
+	 *
+	 * @throws ResourceNotFoundException record not found or not in tenant
+	 * @throws BadRequestException record has no pending justification
+	 */
+	AttendanceRecordResponse approveJustification(UUID recordPublicUuid, boolean approved);
+
+	/**
 	 * Optional filter shape for {@link #listSessions(ListSessionsFilter, Pageable)}.
 	 *
 	 * <p>All fields are nullable (skipped on null). We pass a

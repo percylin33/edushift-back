@@ -95,6 +95,16 @@ public class Tenant extends AuditableEntity {
 	@Column(name = "plan", nullable = false, length = 30)
 	private TenantPlan plan = TenantPlan.TRIAL;
 
+	/**
+	 * FK to {@code platform_plans.id} (Sprint 15 / V54_1). The DB column is
+	 * {@code NOT NULL}, so every new tenant must resolve its plan row before
+	 * the INSERT. {@link com.edushift.modules.tenants.service.impl.TenantServiceImpl}
+	 * looks up the matching {@code platform_plans} row by {@link TenantPlan#getCode()}
+	 * during self-signup and stores the UUID here.
+	 */
+	@Column(name = "plan_id", nullable = false, columnDefinition = "uuid")
+	private UUID planId;
+
 	@Column(name = "trial_ends_at")
 	private Instant trialEndsAt;
 

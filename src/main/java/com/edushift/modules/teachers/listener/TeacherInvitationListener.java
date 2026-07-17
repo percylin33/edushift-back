@@ -57,11 +57,14 @@ public class TeacherInvitationListener {
 		if (teacher.getUserId() != null) {
 			log.warn("[teachers.invitations] event {}: teacher {} already linked to user {}; not overwriting with {}",
 					event.invitationPublicUuid(), teacher.getPublicUuid(),
-					teacher.getUserId(), event.userId());
+					teacher.getUserId(), event.userPublicUuid());
 			return;
 		}
 
-		teacher.setUserId(event.userId());
+		// DEBT-FK-BUGS-3 / V77: teachers.user_id stores public_uuid now.
+		// The event carries both the internal id (event.userId()) and the
+		// publicUuid (event.userPublicUuid()) — we use the publicUuid.
+		teacher.setUserId(event.userPublicUuid());
 		teacherRepository.save(teacher);
 		log.info("[teachers.invitations] linked teacher={} to user={} via invitation={}",
 				teacher.getPublicUuid(), event.userPublicUuid(),

@@ -155,7 +155,12 @@ public class AttendanceMapper {
 				record.getNotes(),
 				wasIdempotent,
 				record.getCreatedAt(),
-				record.getUpdatedAt()
+				record.getUpdatedAt(),
+				record.getJustificationStatus(),
+				record.getJustificationText(),
+				resolveUserRef(record.getApprovedByUserId(),
+						usersByPublicUuid == null ? Map.of() : usersByPublicUuid),
+				record.getApprovedAt()
 		);
 	}
 
@@ -177,6 +182,10 @@ public class AttendanceMapper {
 				student.getPublicUuid(),
 				student.fullName(),
 				status,
+				null,
+				null,
+				null,
+				null,
 				null,
 				null,
 				null,

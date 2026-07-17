@@ -24,9 +24,11 @@ import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.context.annotation.Import;
 
 @WebMvcTest(QuizAttemptController.class)
 @DisplayName("QuizAttemptController — REST surface for taker & grading flows")
+@Import(com.edushift.test.EdushiftWebMvcTestConfig.class)
 class QuizAttemptControllerTest {
 
     @Autowired MockMvc mockMvc;
@@ -57,7 +59,7 @@ class QuizAttemptControllerTest {
     @Test
     @DisplayName("POST /quizzes/{uuid}/attempts → 201 (start)")
     void startAttempt() throws Exception {
-        mockMvc.perform(post("/quizzes/{u}/attempts", UUID.randomUUID())
+        mockMvc.perform(post("/v1/quizzes/{u}/attempts", UUID.randomUUID())
                         .with(csrf()).with(authentication(taker())))
                 .andExpect(status().isCreated());
     }
@@ -65,7 +67,7 @@ class QuizAttemptControllerTest {
     @Test
     @DisplayName("GET /attempts/{uuid} → 200 (taker)")
     void getAttemptAsTaker() throws Exception {
-        mockMvc.perform(get("/attempts/{u}", UUID.randomUUID())
+        mockMvc.perform(get("/v1/attempts/{u}", UUID.randomUUID())
                         .with(authentication(taker())))
                 .andExpect(status().isOk());
     }
@@ -73,7 +75,7 @@ class QuizAttemptControllerTest {
     @Test
     @DisplayName("GET /attempts/{uuid} → 200 (grader)")
     void getAttemptAsGrader() throws Exception {
-        mockMvc.perform(get("/attempts/{u}", UUID.randomUUID())
+        mockMvc.perform(get("/v1/attempts/{u}", UUID.randomUUID())
                         .with(authentication(grader())))
                 .andExpect(status().isOk());
     }
@@ -81,7 +83,7 @@ class QuizAttemptControllerTest {
     @Test
     @DisplayName("PATCH /attempts/{uuid} → 200 (save answers)")
     void saveAnswers() throws Exception {
-        mockMvc.perform(patch("/attempts/{u}", UUID.randomUUID())
+        mockMvc.perform(patch("/v1/attempts/{u}", UUID.randomUUID())
                         .with(csrf()).with(authentication(taker()))
                         .contentType("application/json")
                         .content("{\"answers\":[]}"))
@@ -91,7 +93,7 @@ class QuizAttemptControllerTest {
     @Test
     @DisplayName("POST /attempts/{uuid}/submit → 200")
     void submitAttempt() throws Exception {
-        mockMvc.perform(post("/attempts/{u}/submit", UUID.randomUUID())
+        mockMvc.perform(post("/v1/attempts/{u}/submit", UUID.randomUUID())
                         .with(csrf()).with(authentication(taker())))
                 .andExpect(status().isOk());
     }
@@ -99,7 +101,7 @@ class QuizAttemptControllerTest {
     @Test
     @DisplayName("GET /quizzes/{uuid}/attempts → 200")
     void listAttempts() throws Exception {
-        mockMvc.perform(get("/quizzes/{u}/attempts", UUID.randomUUID())
+        mockMvc.perform(get("/v1/quizzes/{u}/attempts", UUID.randomUUID())
                         .with(authentication(grader())))
                 .andExpect(status().isOk());
     }
@@ -107,7 +109,7 @@ class QuizAttemptControllerTest {
     @Test
     @DisplayName("GET /quizzes/{uuid}/grading-queue → 200")
     void gradingQueue() throws Exception {
-        mockMvc.perform(get("/quizzes/{u}/grading-queue", UUID.randomUUID())
+        mockMvc.perform(get("/v1/quizzes/{u}/grading-queue", UUID.randomUUID())
                         .with(authentication(grader())))
                 .andExpect(status().isOk());
     }
@@ -115,7 +117,7 @@ class QuizAttemptControllerTest {
     @Test
     @DisplayName("POST /attempts/{uuid}/grade → 200")
     void gradeAttempt() throws Exception {
-        mockMvc.perform(post("/attempts/{u}/grade", UUID.randomUUID())
+        mockMvc.perform(post("/v1/attempts/{u}/grade", UUID.randomUUID())
                         .with(csrf()).with(authentication(grader()))
                         .contentType("application/json")
                         .content("{}"))
@@ -125,7 +127,7 @@ class QuizAttemptControllerTest {
     @Test
     @DisplayName("POST /attempts/{uuid}/grade-with-rubric → 200")
     void gradeWithRubric() throws Exception {
-        mockMvc.perform(post("/attempts/{u}/grade-with-rubric", UUID.randomUUID())
+        mockMvc.perform(post("/v1/attempts/{u}/grade-with-rubric", UUID.randomUUID())
                         .with(csrf()).with(authentication(grader()))
                         .contentType("application/json")
                         .content("{\"picks\":[{\"criterionKey\":\"c1\",\"levelCode\":\"A\"}]}"))

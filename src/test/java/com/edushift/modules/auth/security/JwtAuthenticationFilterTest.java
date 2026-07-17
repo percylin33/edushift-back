@@ -2,6 +2,7 @@ package com.edushift.modules.auth.security;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -60,6 +61,9 @@ class JwtAuthenticationFilterTest {
 
 	@Mock
 	private com.edushift.shared.security.LmsRoleAuthorityMapper authorityMapper;
+
+	@Mock
+	private com.edushift.modules.tenants.repository.TenantRepository tenantRepository;
 
 	@InjectMocks
 	private JwtAuthenticationFilter filter;
@@ -300,9 +304,10 @@ class JwtAuthenticationFilterTest {
 			// Use the real mapper (not a mock) so the test catches regressions in the
 			// role→authority matrix itself, not just the wiring of the filter.
 			com.edushift.shared.security.LmsRoleAuthorityMapper realMapper =
-					new com.edushift.shared.security.LmsRoleAuthorityMapper();
+					new com.edushift.shared.security.LmsRoleAuthorityMapper(
+							mock(com.edushift.modules.tenants.service.PermissionOverrideService.class));
 			JwtAuthenticationFilter realFilter =
-					new JwtAuthenticationFilter(jwtService, realMapper);
+					new JwtAuthenticationFilter(jwtService, realMapper, mock(com.edushift.modules.tenants.repository.TenantRepository.class));
 
 			UUID publicUuid = UUID.randomUUID();
 			UUID tenantId = UUID.randomUUID();

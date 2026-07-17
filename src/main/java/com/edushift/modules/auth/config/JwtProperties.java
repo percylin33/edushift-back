@@ -46,6 +46,23 @@ public class JwtProperties {
 	 */
 	private Duration mfaTokenTtl = Duration.ofMinutes(5);
 
+	/**
+	 * Onboarding token time-to-live for the SUPER_ADMIN first-login MFA
+	 * enrolment flow (Sprint 15 / F-02 / H-02). Default 10 minutes —
+	 * long enough to scan the QR, type the first TOTP code and recover
+	 * from a mis-typed secret, short enough that a leaked token has a
+	 * narrow window.
+	 */
+	private Duration onboardingTokenTtl = Duration.ofMinutes(10);
+
+	/**
+	 * Impersonation token time-to-live (Sprint 15 / F-03 / H-05).
+	 * Default 15 minutes — short enough to limit the blast radius of a
+	 * leaked token, long enough for a SUPER_ADMIN to perform a support
+	 * task without re-impersonating mid-flow.
+	 */
+	private Duration impersonationTokenTtl = Duration.ofMinutes(15);
+
 	/** HTTP header used to carry the access token. */
 	private String header = "Authorization";
 

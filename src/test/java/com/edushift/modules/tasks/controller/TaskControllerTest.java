@@ -23,8 +23,10 @@ import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.context.annotation.Import;
 
 @WebMvcTest(TaskController.class)
+@Import(com.edushift.test.EdushiftWebMvcTestConfig.class)
 class TaskControllerTest {
     @Autowired MockMvc mockMvc;
     @MockitoBean TaskService taskService;
@@ -50,7 +52,7 @@ class TaskControllerTest {
 
     @Test
     void createHappyPath() throws Exception {
-        mockMvc.perform(post("/sections/{sid}/tasks", UUID.randomUUID())
+        mockMvc.perform(post("/v1/sections/{sid}/tasks", UUID.randomUUID())
                         .with(csrf()).with(authentication(teacher())).content("{}")
                         .contentType(org.springframework.http.MediaType.APPLICATION_JSON))
                 .andExpect(status().isCreated());
@@ -58,21 +60,21 @@ class TaskControllerTest {
 
     @Test
     void listTasksOfSection() throws Exception {
-        mockMvc.perform(get("/sections/{sid}/tasks", UUID.randomUUID())
+        mockMvc.perform(get("/v1/sections/{sid}/tasks", UUID.randomUUID())
                         .with(authentication(reader())))
                 .andExpect(status().isOk());
     }
 
     @Test
     void getTask() throws Exception {
-        mockMvc.perform(get("/tasks/{id}", UUID.randomUUID())
+        mockMvc.perform(get("/v1/tasks/{id}", UUID.randomUUID())
                         .with(authentication(reader())))
                 .andExpect(status().isOk());
     }
 
     @Test
     void patchHappyPath() throws Exception {
-        mockMvc.perform(patch("/tasks/{id}", UUID.randomUUID())
+        mockMvc.perform(patch("/v1/tasks/{id}", UUID.randomUUID())
                         .with(csrf()).with(authentication(teacher()))
                         .content("{\"title\":\"X\"}")
                         .contentType(org.springframework.http.MediaType.APPLICATION_JSON))
@@ -81,14 +83,14 @@ class TaskControllerTest {
 
     @Test
     void deleteTask() throws Exception {
-        mockMvc.perform(delete("/tasks/{id}", UUID.randomUUID())
+        mockMvc.perform(delete("/v1/tasks/{id}", UUID.randomUUID())
                         .with(csrf()).with(authentication(teacher())))
                 .andExpect(status().isNoContent());
     }
 
     @Test
     void createMissingRoleForbidden() throws Exception {
-        mockMvc.perform(post("/sections/{sid}/tasks", UUID.randomUUID())
+        mockMvc.perform(post("/v1/sections/{sid}/tasks", UUID.randomUUID())
                         .with(csrf())
                         .with(authentication(new JwtAuthenticationToken(
                                 new JwtAuthenticatedPrincipal(
@@ -101,7 +103,7 @@ class TaskControllerTest {
 
     @Test
     void createAnonymousUnauthorized() throws Exception {
-        mockMvc.perform(post("/sections/{sid}/tasks", UUID.randomUUID())
+        mockMvc.perform(post("/v1/sections/{sid}/tasks", UUID.randomUUID())
                         .with(csrf())
                         .content("{}")
                         .contentType(org.springframework.http.MediaType.APPLICATION_JSON))

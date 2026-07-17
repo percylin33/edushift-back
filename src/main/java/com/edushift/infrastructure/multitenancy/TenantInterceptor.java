@@ -9,6 +9,7 @@ import java.util.Optional;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.MDC;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Component;
 import org.springframework.web.servlet.HandlerInterceptor;
 
@@ -36,6 +37,15 @@ public class TenantInterceptor implements HandlerInterceptor {
 
 	@Override
 	public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) {
+		// Sprint 15 / BE-15.1: SUPER_ADMIN bypasses tenant filtering entirely.
+		// The SUPER_ADMIN can access all tenants; TenantContext is left unset
+		// so no automatic Hibernate @TenantId filter is applied.
+		var authentication = SecurityContextHolder.getContext().getAuthentication();
+		if (authentication != null && authentication.getAuthorities().stream()
+				.anyMatch(a -> "ROLE_SUPER_ADMIN".equals(a.getAuthority()))) {
+			return true;
+		}
+
 		Optional<UUID> fromPrincipal = currentUserProvider.currentTenantId();
 		if (fromPrincipal.isEmpty()) {
 			return true;

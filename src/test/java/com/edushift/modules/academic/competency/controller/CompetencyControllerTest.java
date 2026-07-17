@@ -56,7 +56,8 @@ import org.springframework.test.web.servlet.MockMvc;
 @Import({
     GlobalExceptionHandler.class,
     com.edushift.config.SecurityConfig.class,
-    com.edushift.config.WebConfiguration.class
+    com.edushift.config.WebConfiguration.class,
+		com.edushift.test.EdushiftWebMvcTestConfig.class,
 })
 class CompetencyControllerTest {
 
@@ -68,8 +69,8 @@ class CompetencyControllerTest {
     @MockitoBean private JwtService jwtService;
     @MockitoBean private com.edushift.shared.security.LmsRoleAuthorityMapper roleAuthorityMapper;
 
-    private static final String COURSE_BASE = "/academic/courses/{courseUuid}/competencies";
-    private static final String FLAT_BASE = "/academic/competencies";
+    private static final String COURSE_BASE = "/v1/academic/courses/{courseUuid}/competencies";
+    private static final String FLAT_BASE = "/v1/academic/competencies";
 
     private static JwtAuthenticationToken adminAuth() {
         var principal = new JwtAuthenticatedPrincipal(

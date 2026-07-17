@@ -209,7 +209,7 @@ class AiTenantIsolationIT extends IntegrationTest {
 				     response_tokens, model_used, status, latency_ms,
 				     created_at, updated_at, deleted)
 				VALUES
-				    (?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?, ?, ?, ?, false)
+				    (?, ?, ?, ?, ?, ?, ?, CAST(? AS jsonb), ?, ?, ?, ?, ?, ?, false)
 				""",
 				rowId, publicUuid, tenant.getId(),
 				"QUIZ_QUESTION_SUGGEST", prompt,

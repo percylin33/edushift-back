@@ -18,12 +18,14 @@ import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.context.annotation.Import;
 @WebMvcTest(AttendanceQrController.class)
+@Import(com.edushift.test.EdushiftWebMvcTestConfig.class)
 class AttendanceQrControllerTest {
     @Autowired MockMvc mockMvc;
     @MockitoBean AttendanceQrService qrService; @MockitoBean QrRenderer qrRenderer;
     @MockitoBean CurrentUserProvider currentUserProvider; @MockitoBean TenantResolver tenantResolver;
     @MockitoBean JwtService jwtService; @MockitoBean LmsRoleAuthorityMapper roleAuthorityMapper;
     private static JwtAuthenticationToken auth() { return new JwtAuthenticationToken(new JwtAuthenticatedPrincipal(UUID.randomUUID(), UUID.randomUUID(), "a", "a@t"), "t", List.of(new SimpleGrantedAuthority("ROLE_STUDENT"))); }
-    @Test void getQr() throws Exception { mockMvc.perform(get("/students/{id}/attendance-qr", UUID.randomUUID()).with(authentication(auth()))).andExpect(status().isOk()); }
+    @Test void getQr() throws Exception { mockMvc.perform(get("/v1/students/{id}/attendance-qr", UUID.randomUUID()).with(authentication(auth()))).andExpect(status().isOk()); }
 }

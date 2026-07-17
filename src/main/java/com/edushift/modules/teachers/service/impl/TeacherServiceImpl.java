@@ -182,12 +182,15 @@ public class TeacherServiceImpl implements TeacherService {
 							+ "': missing TEACHER role");
 		}
 
-		teacherRepository.findByUserId(user.getId()).ifPresent(other -> {
+		teacherRepository.findByUserId(user.getPublicUuid()).ifPresent(other -> {
 			throw new ConflictException("USER_ALREADY_LINKED_TO_TEACHER",
 					"User '" + user.getEmail() + "' is already linked to another teacher");
 		});
 
-		teacher.setUserId(user.getId());
+		// DEBT-FK-BUGS-3 / V77: teachers.user_id FK now points at
+		// users.public_uuid (not users.id). The repo lookup above and
+		// the write below both use publicUuid.
+		teacher.setUserId(user.getPublicUuid());
 		try {
 			Teacher saved = teacherRepository.saveAndFlush(teacher);
 			log.info("[teachers] link-user -- teacher={} user={}",

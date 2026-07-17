@@ -22,7 +22,9 @@ import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.context.annotation.Import;
 @WebMvcTest(UnsubscribeController.class)
+@Import(com.edushift.test.EdushiftWebMvcTestConfig.class)
 class UnsubscribeControllerTest {
     @Autowired MockMvc mockMvc;
     @MockitoBean UnsubscribeTokenSigner signer;

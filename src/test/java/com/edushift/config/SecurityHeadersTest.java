@@ -61,7 +61,7 @@ import org.springframework.web.bind.annotation.RestController;
 		excludeFilters = @ComponentScan.Filter(
 				type = FilterType.ASSIGNABLE_TYPE,
 				classes = {MultiTenancyConfiguration.class, TenantInterceptor.class}))
-@Import({SecurityConfig.class, GlobalExceptionHandler.class})
+@Import({SecurityConfig.class, GlobalExceptionHandler.class, com.edushift.test.EdushiftWebMvcTestConfig.class})
 class SecurityHeadersTest {
 
 	@RestController

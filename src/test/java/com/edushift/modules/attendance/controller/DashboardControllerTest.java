@@ -17,12 +17,14 @@ import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.context.annotation.Import;
 @WebMvcTest(DashboardController.class)
+@Import(com.edushift.test.EdushiftWebMvcTestConfig.class)
 class DashboardControllerTest {
     @Autowired MockMvc mockMvc;
     @MockitoBean DashboardService dashboardService;
     @MockitoBean CurrentUserProvider currentUserProvider; @MockitoBean TenantResolver tenantResolver;
     @MockitoBean JwtService jwtService; @MockitoBean LmsRoleAuthorityMapper roleAuthorityMapper;
     private static JwtAuthenticationToken admin() { return new JwtAuthenticationToken(new JwtAuthenticatedPrincipal(UUID.randomUUID(), UUID.randomUUID(), "a", "a@t"), "t", List.of(new SimpleGrantedAuthority("ROLE_TENANT_ADMIN"))); }
-    @Test void overview() throws Exception { mockMvc.perform(get("/attendance/dashboard/overview").with(authentication(admin()))).andExpect(status().isOk()); }
+    @Test void overview() throws Exception { mockMvc.perform(get("/v1/attendance/dashboard/overview").with(authentication(admin()))).andExpect(status().isOk()); }
 }

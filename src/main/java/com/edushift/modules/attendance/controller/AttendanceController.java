@@ -348,6 +348,46 @@ public class AttendanceController {
 	}
 
 	// =====================================================================
+	// Justifications (Sprint 18 / BE-18.5)
+	// =====================================================================
+
+	@PostMapping(value = "/attendance/records/{publicUuid}/justify",
+			consumes = MediaType.APPLICATION_JSON_VALUE,
+			produces = MediaType.APPLICATION_JSON_VALUE)
+	@ResponseStatus(HttpStatus.OK)
+	@SecurityRequirement(name = "bearerAuth")
+	@PreAuthorize("hasAnyRole('TENANT_ADMIN','TEACHER','STUDENT','PARENT')")
+	@Operation(summary = "Submit a justification for an attendance record",
+			description = "Sets justificationStatus=PENDING. The "
+					+ "requesting user must be the student, a parent, "
+					+ "a teacher, or an admin.")
+	public ResponseEntity<ApiResponse<AttendanceRecordResponse>> justify(
+			@PathVariable UUID publicUuid,
+			@Valid @RequestBody com.edushift.modules.attendance.dto.JustifyRequest request) {
+		AttendanceRecordResponse response = attendanceService.justify(
+				publicUuid, request.justificationText());
+		return ResponseEntity.ok(ApiResponse.ok(response));
+	}
+
+	@PostMapping(value = "/attendance/records/{publicUuid}/approve-justification",
+			consumes = MediaType.APPLICATION_JSON_VALUE,
+			produces = MediaType.APPLICATION_JSON_VALUE)
+	@ResponseStatus(HttpStatus.OK)
+	@SecurityRequirement(name = "bearerAuth")
+	@PreAuthorize("hasAnyRole('TENANT_ADMIN')")
+	@Operation(summary = "Approve or reject a pending justification",
+			description = "Only TENANT_ADMIN can approve/reject. "
+					+ "Sets justificationStatus to APPROVED or REJECTED "
+					+ "and records who performed the action.")
+	public ResponseEntity<ApiResponse<AttendanceRecordResponse>> approveJustification(
+			@PathVariable UUID publicUuid,
+			@Valid @RequestBody com.edushift.modules.attendance.dto.ApproveJustificationRequest request) {
+		AttendanceRecordResponse response = attendanceService.approveJustification(
+				publicUuid, request.approved());
+		return ResponseEntity.ok(ApiResponse.ok(response));
+	}
+
+	// =====================================================================
 	// Live events (Sprint 18 / BE-18.6)
 	// =====================================================================
 	//

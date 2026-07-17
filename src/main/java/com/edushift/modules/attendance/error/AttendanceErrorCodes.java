@@ -81,6 +81,12 @@ public final class AttendanceErrorCodes {
 	/** 400 — manual transition not in {@code legalManualTransitions()}. */
 	public static final String RECORD_ILLEGAL_TRANSITION = "RECORD_ILLEGAL_TRANSITION";
 
+	/** 400 — record already has a justification submitted (BE-18.5). */
+	public static final String RECORD_ALREADY_JUSTIFIED = "RECORD_ALREADY_JUSTIFIED";
+
+	/** 400 — record has no pending justification to approve/reject (BE-18.5). */
+	public static final String RECORD_NO_PENDING_JUSTIFICATION = "RECORD_NO_PENDING_JUSTIFICATION";
+
 	private AttendanceErrorCodes() {
 	}
 }

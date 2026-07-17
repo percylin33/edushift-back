@@ -1,6 +1,7 @@
 package com.edushift.modules.attendance.dto;
 
 import com.edushift.modules.attendance.entity.AttendanceRecordStatus;
+import com.edushift.modules.attendance.entity.JustificationStatus;
 import java.time.Instant;
 import java.util.UUID;
 
@@ -40,6 +41,10 @@ public record AttendanceRecordResponse(
 		String notes,
 		Boolean wasIdempotent,
 		Instant createdAt,
-		Instant updatedAt
+		Instant updatedAt,
+		JustificationStatus justificationStatus,
+		String justificationText,
+		UserRef approvedBy,
+		Instant approvedAt
 ) {
 }

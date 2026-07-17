@@ -1,5 +1,6 @@
 package com.edushift.modules.evaluations.service.impl;
 
+import com.edushift.modules.academic.section.entity.Section;
 import com.edushift.modules.academic.unit.entity.Unit;
 import com.edushift.modules.academic.unit.repository.UnitRepository;
 import com.edushift.modules.evaluations.dto.CreateEvaluationRequest;
@@ -20,6 +21,8 @@ import com.edushift.modules.sessions.learning.entity.LearningSession;
 import com.edushift.modules.sessions.learning.repository.LearningSessionRepository;
 import com.edushift.modules.teachers.assignments.entity.TeacherAssignment;
 import com.edushift.modules.teachers.assignments.repository.TeacherAssignmentRepository;
+import com.edushift.modules.students.enrollments.entity.StudentEnrollment;
+import com.edushift.modules.students.enrollments.repository.StudentEnrollmentRepository;
 import com.edushift.shared.exception.BadRequestException;
 import com.edushift.shared.exception.ConflictException;
 import com.edushift.shared.exception.ResourceNotFoundException;
@@ -31,6 +34,7 @@ import java.util.Set;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -70,6 +74,8 @@ public class EvaluationServiceImpl implements EvaluationService {
 	private final LearningSessionRepository sessionRepository;
 	private final GradeRecordRepository gradeRecordRepository;
 	private final EvaluationMapper mapper;
+	private final ApplicationEventPublisher eventPublisher; // Sprint 9 / BE-9.3
+	private final StudentEnrollmentRepository studentEnrollmentRepository; // Sprint 9 / BE-9.3
 
 	// =========================================================================
 	// Reads
@@ -272,6 +278,32 @@ public class EvaluationServiceImpl implements EvaluationService {
 		Evaluation saved = evaluationRepository.saveAndFlush(evaluation);
 		log.info("[evaluations] published -- publicUuid={} at={}",
 				saved.getPublicUuid(), saved.getPublishedAt());
+
+		// Sprint 9 / BE-9.3 — fire GRADE_PUBLISHED to all enrolled students.
+		Section section = saved.getTeacherAssignment().getSection();
+		List<StudentEnrollment> enrolled = studentEnrollmentRepository.findActiveBySection(section);
+		if (!enrolled.isEmpty()) {
+			List<com.edushift.modules.notifications.event.NotificationEvent.Recipient> recipients = enrolled.stream()
+					.map(e -> e.getStudent().getUserId())
+					.filter(Objects::nonNull)
+					.map(uid -> new com.edushift.modules.notifications.event.NotificationEvent.Recipient(uid, null))
+					.toList();
+			String courseName = saved.getTeacherAssignment().getCourse().getName();
+			String evalTitle = saved.getName();
+			recipients.forEach(r -> eventPublisher.publishEvent(
+					com.edushift.modules.notifications.event.NotificationEvent.builder()
+							.templateKey("GRADE_PUBLISHED")
+							.category(com.edushift.modules.notifications.entity.Notification.Category.GRADE)
+							.sourceId(saved.getPublicUuid())
+							.recipients(java.util.List.of(r))
+							.payload(java.util.Map.of(
+									"studentName", "",
+									"evaluationTitle", evalTitle,
+									"courseName", courseName,
+									"grade", "",
+									"maxGrade", ""))
+							.build()));
+		}
 
 		return mapper.toResponse(saved,
 				gradeRecordRepository.countByEvaluation(saved));

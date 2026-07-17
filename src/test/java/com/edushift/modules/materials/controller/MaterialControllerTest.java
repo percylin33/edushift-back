@@ -25,7 +25,9 @@ import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.context.annotation.Import;
 @WebMvcTest(MaterialController.class)
+@Import(com.edushift.test.EdushiftWebMvcTestConfig.class)
 class MaterialControllerTest {
     @Autowired MockMvc mockMvc;
     @MockitoBean MaterialService materialService; @MockitoBean CurrentUserProvider currentUserProvider;
@@ -33,9 +35,9 @@ class MaterialControllerTest {
     @MockitoBean JwtService jwtService; @MockitoBean LmsRoleAuthorityMapper roleAuthorityMapper;
     private static JwtAuthenticationToken write() { return new JwtAuthenticationToken(new JwtAuthenticatedPrincipal(UUID.randomUUID(), UUID.randomUUID(), "a", "a@t"), "t", List.of(new SimpleGrantedAuthority("LMS_MATERIAL_WRITE"))); }
     private static JwtAuthenticationToken read() { return new JwtAuthenticationToken(new JwtAuthenticatedPrincipal(UUID.randomUUID(), UUID.randomUUID(), "a", "a@t"), "t", List.of(new SimpleGrantedAuthority("LMS_MATERIAL_READ"))); }
-    @Test void testCreateUpload() throws Exception { var mf = new MockMultipartFile("file", "a.txt", "text/plain", "data".getBytes()); var meta = new MockMultipartFile("metadata", "", "application/json", "{\"title\":\"T\"}".getBytes()); mockMvc.perform(multipart("/sections/{sid}/materials", UUID.randomUUID()).file(mf).file(meta).with(csrf()).with(authentication(write()))).andExpect(status().isCreated()); }
-    @Test void testList() throws Exception { mockMvc.perform(get("/sections/{sid}/materials", UUID.randomUUID()).with(authentication(read()))).andExpect(status().isOk()); }
-    @Test void testGet() throws Exception { mockMvc.perform(get("/materials/{id}", UUID.randomUUID()).with(authentication(read()))).andExpect(status().isOk()); }
-    @Test void testPatch() throws Exception { mockMvc.perform(patch("/materials/{id}", UUID.randomUUID()).with(csrf()).with(authentication(write())).content("{\"title\":\"T\"}").contentType(MediaType.APPLICATION_JSON)).andExpect(status().isOk()); }
-    @Test void testDelete() throws Exception { mockMvc.perform(delete("/materials/{id}", UUID.randomUUID()).with(csrf()).with(authentication(write()))).andExpect(status().isNoContent()); }
+    @Test void testCreateUpload() throws Exception { var mf = new MockMultipartFile("file", "a.txt", "text/plain", "data".getBytes()); var meta = new MockMultipartFile("metadata", "", "application/json", "{\"title\":\"T\"}".getBytes()); mockMvc.perform(multipart("/v1/sections/{sid}/materials", UUID.randomUUID()).file(mf).file(meta).with(csrf()).with(authentication(write()))).andExpect(status().isCreated()); }
+    @Test void testList() throws Exception { mockMvc.perform(get("/v1/sections/{sid}/materials", UUID.randomUUID()).with(authentication(read()))).andExpect(status().isOk()); }
+    @Test void testGet() throws Exception { mockMvc.perform(get("/v1/materials/{id}", UUID.randomUUID()).with(authentication(read()))).andExpect(status().isOk()); }
+    @Test void testPatch() throws Exception { mockMvc.perform(patch("/v1/materials/{id}", UUID.randomUUID()).with(csrf()).with(authentication(write())).content("{\"title\":\"T\"}").contentType(MediaType.APPLICATION_JSON)).andExpect(status().isOk()); }
+    @Test void testDelete() throws Exception { mockMvc.perform(delete("/v1/materials/{id}", UUID.randomUUID()).with(csrf()).with(authentication(write()))).andExpect(status().isNoContent()); }
 }

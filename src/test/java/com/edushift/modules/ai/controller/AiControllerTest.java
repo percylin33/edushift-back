@@ -59,7 +59,7 @@ import org.springframework.test.web.servlet.MockMvc;
         excludeFilters = @ComponentScan.Filter(
                 type = FilterType.ASSIGNABLE_TYPE,
                 classes = {MultiTenancyConfiguration.class, TenantInterceptor.class}))
-@Import({GlobalExceptionHandler.class, SecurityConfig.class, WebConfiguration.class})
+@Import({GlobalExceptionHandler.class, SecurityConfig.class, WebConfiguration.class, com.edushift.test.EdushiftWebMvcTestConfig.class})
 class AiControllerTest {
 
     @Autowired

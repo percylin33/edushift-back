@@ -63,6 +63,8 @@ class EvaluationServiceImplTest {
 	// EVAL_HAS_GRADES (409). Default Mockito returns 'false' for boolean
 	// methods, so existing tests that don't care keep working unchanged.
 	@Mock private com.edushift.modules.evaluations.graderecord.repository.GradeRecordRepository gradeRecordRepository;
+	@Mock private com.edushift.modules.students.enrollments.repository.StudentEnrollmentRepository studentEnrollmentRepository;
+	@Mock private org.springframework.context.ApplicationEventPublisher eventPublisher;
 	@Spy private EvaluationMapper mapper = new EvaluationMapper();
 
 	@InjectMocks private EvaluationServiceImpl service;

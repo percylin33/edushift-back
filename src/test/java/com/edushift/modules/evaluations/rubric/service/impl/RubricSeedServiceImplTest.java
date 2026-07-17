@@ -47,7 +47,12 @@ class RubricSeedServiceImplTest {
         @Test
         @DisplayName("empty tenant → inserts all seed rows")
         void firstRun() {
-            when(repository.findFiltered(eq(true), eq(true), any())).thenReturn(List.of());
+            // The production code calls findFiltered twice:
+            //   - 1st to get the "existing" rows (empty for first run)
+            //   - 2nd after inserts to get the refreshed list
+            // Mockito strict mode flags a chained .thenReturn() with
+            // more entries than actual calls as UnnecessaryStubbing —
+            // we only need 2 returns.
             when(repository.findFiltered(eq(true), eq(true), any()))
                     .thenReturn(List.of())
                     .thenReturn(seedRowsForAll());
@@ -196,8 +201,20 @@ class RubricSeedServiceImplTest {
     }
 
     private static void setField(Object target, String name, Object value) throws Exception {
-        Field f = target.getClass().getSuperclass().getSuperclass().getDeclaredField(name);
-        f.setAccessible(true);
-        f.set(target, value);
+        // `id` lives on BaseEntity (3 levels up from Rubric);
+        // `publicUuid` lives directly on Rubric. Walk up the hierarchy
+        // and try each level — the first match wins.
+        Class<?> c = target.getClass();
+        while (c != null && c != Object.class) {
+            try {
+                Field f = c.getDeclaredField(name);
+                f.setAccessible(true);
+                f.set(target, value);
+                return;
+            } catch (NoSuchFieldException ignored) {
+                c = c.getSuperclass();
+            }
+        }
+        throw new NoSuchFieldException(name + " not found on " + target.getClass());
     }
 }

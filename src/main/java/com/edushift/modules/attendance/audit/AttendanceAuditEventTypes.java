@@ -40,6 +40,8 @@ public final class AttendanceAuditEventTypes {
 	public static final String QR_ISSUED       = "AttendanceQrIssued";
 	public static final String QR_ROTATED      = "AttendanceQrRotated";
 	public static final String QR_REJECTED     = "AttendanceQrRejected";
+	public static final String JUSTIFICATION_SUBMITTED = "AttendanceJustificationSubmitted";
+	public static final String JUSTIFICATION_RESOLVED = "AttendanceJustificationResolved";
 
 	/** Resource type strings used by callers. */
 	public static final String RESOURCE_SESSION = "AttendanceSession";

@@ -11,8 +11,6 @@ import static org.mockito.Mockito.when;
 
 import com.edushift.modules.academic.section.entity.Section;
 import com.edushift.modules.academic.section.repository.SectionRepository;
-import com.edushift.modules.auth.entity.User;
-import com.edushift.modules.auth.repository.UserRepository;
 import com.edushift.modules.quizzes.dto.AnswerInput;
 import com.edushift.modules.quizzes.dto.AttemptResponse;
 import com.edushift.modules.quizzes.dto.ManualGradeAnswerRequest;
@@ -48,6 +46,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
+import org.springframework.context.ApplicationEventPublisher;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -69,9 +68,9 @@ class QuizAttemptServiceImplTest {
     @Mock SectionRepository sectionRepository;
     @Mock StudentRepository studentRepository;
     @Mock StudentEnrollmentRepository enrollmentRepository;
-    @Mock UserRepository userRepository;
     @Mock QuizAttemptMapper attemptMapper;
     @Mock CurrentUserProvider currentUserProvider;
+    @Mock ApplicationEventPublisher eventPublisher;
 
     @InjectMocks QuizAttemptServiceImpl service;
 
@@ -79,7 +78,6 @@ class QuizAttemptServiceImplTest {
     private Section section;
     private QuizAttempt attempt;
     private final UUID studentUuid = UUID.randomUUID();
-    private final UUID userInternalId = UUID.randomUUID();
 
     @BeforeEach
     void setUp() {
@@ -89,6 +87,7 @@ class QuizAttemptServiceImplTest {
         publishedQuiz = new Quiz();
         publishedQuiz.setPublicUuid(UUID.randomUUID());
         publishedQuiz.setSection(section);
+        publishedQuiz.setTitle("Test Quiz — " + UUID.randomUUID().toString().substring(0, 8));
         publishedQuiz.setStatus(QuizStatus.PUBLISHED);
         publishedQuiz.setAttemptsAllowed((short) 3);
 
@@ -127,7 +126,9 @@ class QuizAttemptServiceImplTest {
     @DisplayName("startAttempt — user has no User row → StudentNotEnrolledException")
     void start_unknownUser() {
         when(quizRepository.findByPublicUuid(any())).thenReturn(Optional.of(publishedQuiz));
-        when(userRepository.findByPublicUuid(studentUuid)).thenReturn(Optional.empty());
+        // DEBT-FK-BUGS-3 / V76: students.user_id stores publicUuid now,
+        // so the service goes straight to findByUserId(publicUuid).
+        when(studentRepository.findByUserId(studentUuid)).thenReturn(Optional.empty());
         assertThatThrownBy(() -> service.startAttempt(UUID.randomUUID(), studentUuid, studentUuid))
                 .isInstanceOf(StudentNotEnrolledException.class);
     }
@@ -136,10 +137,8 @@ class QuizAttemptServiceImplTest {
     @DisplayName("startAttempt — user has no Student row → StudentNotEnrolledException")
     void start_unknownStudent() {
         when(quizRepository.findByPublicUuid(any())).thenReturn(Optional.of(publishedQuiz));
-        var user = new User();
-        user.setId(userInternalId);
-        when(userRepository.findByPublicUuid(studentUuid)).thenReturn(Optional.of(user));
-        when(studentRepository.findByUserId(userInternalId)).thenReturn(Optional.empty());
+        var student = new Student();
+        when(studentRepository.findByUserId(studentUuid)).thenReturn(Optional.empty());
         assertThatThrownBy(() -> service.startAttempt(UUID.randomUUID(), studentUuid, studentUuid))
                 .isInstanceOf(StudentNotEnrolledException.class);
     }
@@ -148,11 +147,8 @@ class QuizAttemptServiceImplTest {
     @DisplayName("startAttempt — student not ACTIVE-enrolled → StudentNotEnrolledException")
     void start_notEnrolled() {
         when(quizRepository.findByPublicUuid(any())).thenReturn(Optional.of(publishedQuiz));
-        var user = new User();
-        user.setId(userInternalId);
-        when(userRepository.findByPublicUuid(studentUuid)).thenReturn(Optional.of(user));
         var student = new Student();
-        when(studentRepository.findByUserId(userInternalId)).thenReturn(Optional.of(student));
+        when(studentRepository.findByUserId(studentUuid)).thenReturn(Optional.of(student));
         when(enrollmentRepository.existsActiveAt(student, section, java.time.LocalDate.now()))
                 .thenReturn(false);
         assertThatThrownBy(() -> service.startAttempt(UUID.randomUUID(), studentUuid, studentUuid))
@@ -163,11 +159,8 @@ class QuizAttemptServiceImplTest {
     @DisplayName("startAttempt — exhausted attempts → AttemptsExhaustedException")
     void start_exhausted() {
         when(quizRepository.findByPublicUuid(any())).thenReturn(Optional.of(publishedQuiz));
-        var user = new User();
-        user.setId(userInternalId);
-        when(userRepository.findByPublicUuid(studentUuid)).thenReturn(Optional.of(user));
         var student = new Student();
-        when(studentRepository.findByUserId(userInternalId)).thenReturn(Optional.of(student));
+        when(studentRepository.findByUserId(studentUuid)).thenReturn(Optional.of(student));
         when(enrollmentRepository.existsActiveAt(any(), any(), any())).thenReturn(true);
         when(attemptRepository.countByQuizAndStudentUserId(publishedQuiz, studentUuid)).thenReturn(3L);
         assertThatThrownBy(() -> service.startAttempt(UUID.randomUUID(), studentUuid, studentUuid))
@@ -178,11 +171,8 @@ class QuizAttemptServiceImplTest {
     @DisplayName("startAttempt — happy path persists IN_PROGRESS attempt")
     void start_happyPath() {
         when(quizRepository.findByPublicUuid(any())).thenReturn(Optional.of(publishedQuiz));
-        var user = new User();
-        user.setId(userInternalId);
-        when(userRepository.findByPublicUuid(studentUuid)).thenReturn(Optional.of(user));
         var student = new Student();
-        when(studentRepository.findByUserId(userInternalId)).thenReturn(Optional.of(student));
+        when(studentRepository.findByUserId(studentUuid)).thenReturn(Optional.of(student));
         when(enrollmentRepository.existsActiveAt(any(), any(), any())).thenReturn(true);
         when(attemptRepository.countByQuizAndStudentUserId(any(), any())).thenReturn(0L);
         when(attemptRepository.save(any(QuizAttempt.class))).thenAnswer(inv -> inv.getArgument(0));
@@ -378,8 +368,8 @@ class QuizAttemptServiceImplTest {
         var req = new ManualGradeAttemptRequest(
                 List.of(new ManualGradeAnswerRequest(ans.getPublicUuid(), 99)), null);
         assertThatThrownBy(() -> service.gradeAttempt(UUID.randomUUID(), req, UUID.randomUUID()))
-                .isInstanceOf(com.edushift.shared.exception.BadRequestException.class)
-                .hasMessageContaining("GRADE_OUT_OF_RANGE");
+                .isInstanceOfSatisfying(com.edushift.shared.exception.BadRequestException.class,
+                        ex -> assertThat(ex.getCode()).isEqualTo("GRADE_OUT_OF_RANGE"));
     }
 
     @Test

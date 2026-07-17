@@ -1,6 +1,8 @@
 package com.edushift.modules.tenants.service.impl;
 
 import com.edushift.modules.academic.levelgrade.service.AcademicSeedService;
+import com.edushift.modules.admin.plans.PlatformPlan;
+import com.edushift.modules.admin.plans.PlatformPlanRepository;
 import com.edushift.modules.auth.dto.AuthResponse;
 import com.edushift.modules.auth.entity.User;
 import com.edushift.modules.auth.entity.UserRole;
@@ -94,6 +96,14 @@ public class TenantServiceImpl implements TenantService {
 	 */
 	private final AcademicSeedService academicSeedService;
 
+	/**
+	 * Sprint 15 / V54_1 — {@code tenants.plan_id} is {@code NOT NULL} with a
+	 * FK to {@code platform_plans}. Self-signup resolves the matching plan row
+	 * by {@link TenantPlan#getCode()} before the INSERT (TRIAL → TRIAL row,
+	 * falling back to BASIC if the catalog has no TRIAL row).
+	 */
+	private final PlatformPlanRepository platformPlanRepository;
+
 	public TenantServiceImpl(
 			TenantRepository tenantRepository,
 			TenantMapper tenantMapper,
@@ -101,6 +111,7 @@ public class TenantServiceImpl implements TenantService {
 			PasswordEncoder passwordEncoder,
 			AuthService authService,
 			AcademicSeedService academicSeedService,
+			PlatformPlanRepository platformPlanRepository,
 			PlatformTransactionManager transactionManager) {
 		this.tenantRepository = tenantRepository;
 		this.tenantMapper = tenantMapper;
@@ -108,6 +119,7 @@ public class TenantServiceImpl implements TenantService {
 		this.passwordEncoder = passwordEncoder;
 		this.authService = authService;
 		this.academicSeedService = academicSeedService;
+		this.platformPlanRepository = platformPlanRepository;
 		this.txTemplate = new TransactionTemplate(transactionManager);
 	}
 
@@ -255,6 +267,10 @@ public class TenantServiceImpl implements TenantService {
 	}
 
 	private Tenant persistTenant(RegisterTenantRequest request, String slug) {
+		// V54_1: tenants.plan_id is NOT NULL with FK to platform_plans.
+		// Resolve the plan row by code before opening the insert transaction
+		// so the NOT NULL constraint always has a valid FK value.
+		UUID planId = resolvePlanIdFor(TenantPlan.TRIAL);
 		try {
 			return txTemplate.execute(status -> {
 				Tenant tenant = new Tenant();
@@ -262,16 +278,56 @@ public class TenantServiceImpl implements TenantService {
 				tenant.setSlug(slug);
 				tenant.setStatus(TenantStatus.PENDING);
 				tenant.setPlan(TenantPlan.TRIAL);
+				tenant.setPlanId(planId);
 				tenant.setTrialEndsAt(Instant.now().plus(TRIAL_DURATION));
 				return tenantRepository.saveAndFlush(tenant);
 			});
 		} catch (DataIntegrityViolationException dup) {
 			// Race condition: a concurrent registration claimed the slug
-			// between our pre-check and this insert. Surface the same
-			// error code as the pre-check so the front handles it identically.
-			throw new ConflictException("TENANT_SLUG_TAKEN",
-					"Tenant slug '" + slug + "' is already taken", dup);
+			// between our pre-check and this insert. We only translate to
+			// TENANT_SLUG_TAKEN when the failure is actually a unique-index
+			// collision (SQLState 23505). Other integrity failures
+			// (NOT NULL = 23502, CHECK = 23514, FK = 23503) bubble up as
+			// 500 with their original message so misconfigurations are
+			// diagnosable instead of being misreported as slug collisions.
+			String sqlState = extractSqlState(dup);
+			if ("23505".equals(sqlState)) {
+				throw new ConflictException("TENANT_SLUG_TAKEN",
+						"Tenant slug '" + slug + "' is already taken", dup);
+			}
+			log.error("[tenants] register -- integrity violation sqlState={} slug='{}'",
+					sqlState, slug, dup);
+			throw dup;
 		}
+	}
+
+	/**
+	 * Resolves the {@code platform_plans.id} for the given {@link TenantPlan}.
+	 * Falls back to the first active plan if the catalog has no row with
+	 * the matching code (defensive — V54 seeds TRIAL/BASIC/PRO/ENTERPRISE,
+	 * but new envs may not).
+	 */
+	private UUID resolvePlanIdFor(TenantPlan plan) {
+		return platformPlanRepository.findByCode(plan.name())
+				.map(PlatformPlan::getId)
+				.orElseGet(() -> platformPlanRepository.findByIsActiveTrueOrderBySortOrder()
+						.stream()
+						.findFirst()
+						.map(PlatformPlan::getId)
+						.orElseThrow(() -> new IllegalStateException(
+								"No platform_plans rows available; cannot register tenants. "
+										+ "Did Flyway V54 run?")));
+	}
+
+	private static String extractSqlState(Throwable t) {
+		Throwable cur = t;
+		while (cur != null) {
+			if (cur instanceof java.sql.SQLException sql) {
+				return sql.getSQLState();
+			}
+			cur = cur.getCause();
+		}
+		return null;
 	}
 
 	private User persistAdminUser(RegisterTenantRequest request, String adminEmail) {

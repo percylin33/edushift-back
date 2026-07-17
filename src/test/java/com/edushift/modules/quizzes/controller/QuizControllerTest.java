@@ -25,9 +25,11 @@ import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.context.annotation.Import;
 
 @WebMvcTest(QuizController.class)
 @DisplayName("QuizController — REST surface for the quiz builder & reader")
+@Import(com.edushift.test.EdushiftWebMvcTestConfig.class)
 class QuizControllerTest {
 
     @Autowired MockMvc mockMvc;
@@ -51,7 +53,7 @@ class QuizControllerTest {
     @Test
     @DisplayName("POST /sections/{uuid}/quizzes → 201")
     void createQuiz() throws Exception {
-        mockMvc.perform(post("/sections/{u}/quizzes", UUID.randomUUID())
+        mockMvc.perform(post("/v1/sections/{u}/quizzes", UUID.randomUUID())
                         .with(csrf()).with(authentication(teacher()))
                         .contentType("application/json")
                         .content("{}"))
@@ -61,7 +63,7 @@ class QuizControllerTest {
     @Test
     @DisplayName("GET /sections/{uuid}/quizzes → 200")
     void listQuizzes() throws Exception {
-        mockMvc.perform(get("/sections/{u}/quizzes", UUID.randomUUID())
+        mockMvc.perform(get("/v1/sections/{u}/quizzes", UUID.randomUUID())
                         .with(authentication(teacher())))
                 .andExpect(status().isOk());
     }
@@ -69,7 +71,7 @@ class QuizControllerTest {
     @Test
     @DisplayName("GET /quizzes/{uuid} → 200")
     void getQuiz() throws Exception {
-        mockMvc.perform(get("/quizzes/{u}", UUID.randomUUID())
+        mockMvc.perform(get("/v1/quizzes/{u}", UUID.randomUUID())
                         .with(authentication(teacher())))
                 .andExpect(status().isOk());
     }
@@ -77,7 +79,7 @@ class QuizControllerTest {
     @Test
     @DisplayName("PATCH /quizzes/{uuid} → 200")
     void patchQuiz() throws Exception {
-        mockMvc.perform(patch("/quizzes/{u}", UUID.randomUUID())
+        mockMvc.perform(patch("/v1/quizzes/{u}", UUID.randomUUID())
                         .with(csrf()).with(authentication(teacher()))
                         .contentType("application/json")
                         .content("{\"title\":\"new\"}"))
@@ -87,7 +89,7 @@ class QuizControllerTest {
     @Test
     @DisplayName("DELETE /quizzes/{uuid} → 204")
     void deleteQuiz() throws Exception {
-        mockMvc.perform(delete("/quizzes/{u}", UUID.randomUUID())
+        mockMvc.perform(delete("/v1/quizzes/{u}", UUID.randomUUID())
                         .with(csrf()).with(authentication(teacher())))
                 .andExpect(status().isNoContent());
     }
@@ -95,7 +97,7 @@ class QuizControllerTest {
     @Test
     @DisplayName("POST /quizzes/{uuid}/questions → 201")
     void addQuestion() throws Exception {
-        mockMvc.perform(post("/quizzes/{u}/questions", UUID.randomUUID())
+        mockMvc.perform(post("/v1/quizzes/{u}/questions", UUID.randomUUID())
                         .with(csrf()).with(authentication(teacher()))
                         .contentType("application/json")
                         .content("{}"))
@@ -105,7 +107,7 @@ class QuizControllerTest {
     @Test
     @DisplayName("POST /questions/{uuid}/options → 201")
     void addOption() throws Exception {
-        mockMvc.perform(post("/questions/{u}/options", UUID.randomUUID())
+        mockMvc.perform(post("/v1/questions/{u}/options", UUID.randomUUID())
                         .with(csrf()).with(authentication(teacher()))
                         .contentType("application/json")
                         .content("{}"))
@@ -115,7 +117,7 @@ class QuizControllerTest {
     @Test
     @DisplayName("POST /quizzes/{uuid}/publish → 200")
     void publishQuiz() throws Exception {
-        mockMvc.perform(post("/quizzes/{u}/publish", UUID.randomUUID())
+        mockMvc.perform(post("/v1/quizzes/{u}/publish", UUID.randomUUID())
                         .with(csrf()).with(authentication(teacher())))
                 .andExpect(status().isOk());
     }
@@ -123,7 +125,7 @@ class QuizControllerTest {
     @Test
     @DisplayName("POST /quizzes/{uuid}/close → 200")
     void closeQuiz() throws Exception {
-        mockMvc.perform(post("/quizzes/{u}/close", UUID.randomUUID())
+        mockMvc.perform(post("/v1/quizzes/{u}/close", UUID.randomUUID())
                         .with(csrf()).with(authentication(teacher())))
                 .andExpect(status().isOk());
     }
@@ -131,7 +133,7 @@ class QuizControllerTest {
     @Test
     @DisplayName("PATCH /quizzes/{q}/attempts/{a}/answers/{ans} → 200")
     void gradeAnswer() throws Exception {
-        mockMvc.perform(patch("/quizzes/{q}/attempts/{a}/answers/{ans}",
+        mockMvc.perform(patch("/v1/quizzes/{q}/attempts/{a}/answers/{ans}",
                         UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID())
                         .with(csrf()).with(authentication(teacher()))
                         .contentType("application/json")
@@ -142,7 +144,7 @@ class QuizControllerTest {
     @Test
     @DisplayName("PATCH /quizzes/{uuid}/rubric → 200")
     void attachRubric() throws Exception {
-        mockMvc.perform(patch("/quizzes/{u}/rubric", UUID.randomUUID())
+        mockMvc.perform(patch("/v1/quizzes/{u}/rubric", UUID.randomUUID())
                         .with(csrf()).with(authentication(teacher()))
                         .contentType("application/json")
                         .content("{\"rubricPublicUuid\":\"" + UUID.randomUUID() + "\"}"))
@@ -152,7 +154,7 @@ class QuizControllerTest {
     @Test
     @DisplayName("DELETE /quizzes/{uuid}/rubric → 200")
     void detachRubric() throws Exception {
-        mockMvc.perform(delete("/quizzes/{u}/rubric", UUID.randomUUID())
+        mockMvc.perform(delete("/v1/quizzes/{u}/rubric", UUID.randomUUID())
                         .with(csrf()).with(authentication(teacher())))
                 .andExpect(status().isOk());
     }

@@ -227,7 +227,8 @@ class TeacherServiceImplTest {
 
 			when(teacherRepository.findByPublicUuid(TEACHER_PUBLIC)).thenReturn(Optional.of(t));
 			when(userRepository.findByPublicUuid(USER_PUBLIC)).thenReturn(Optional.of(u));
-			when(teacherRepository.findByUserId(USER_INTERNAL)).thenReturn(Optional.empty());
+			// DEBT-FK-BUGS-3 / V77: teachers.user_id stores publicUuid now.
+			when(teacherRepository.findByUserId(USER_PUBLIC)).thenReturn(Optional.empty());
 			when(teacherRepository.saveAndFlush(any(Teacher.class)))
 					.thenAnswer(inv -> inv.getArgument(0));
 
@@ -235,7 +236,7 @@ class TeacherServiceImplTest {
 
 			ArgumentCaptor<Teacher> captor = ArgumentCaptor.forClass(Teacher.class);
 			verify(teacherRepository).saveAndFlush(captor.capture());
-			assertThat(captor.getValue().getUserId()).isEqualTo(USER_INTERNAL);
+			assertThat(captor.getValue().getUserId()).isEqualTo(USER_PUBLIC);
 		}
 
 		@Test
@@ -286,7 +287,9 @@ class TeacherServiceImplTest {
 
 			when(teacherRepository.findByPublicUuid(TEACHER_PUBLIC)).thenReturn(Optional.of(t));
 			when(userRepository.findByPublicUuid(USER_PUBLIC)).thenReturn(Optional.of(u));
-			when(teacherRepository.findByUserId(USER_INTERNAL)).thenReturn(Optional.of(other));
+			// DEBT-FK-BUGS-3 / V77: linkUser passes publicUuid (not id) to
+			// findByUserId.
+			when(teacherRepository.findByUserId(USER_PUBLIC)).thenReturn(Optional.of(other));
 
 			assertThatThrownBy(() ->
 					service.linkUser(TEACHER_PUBLIC, new LinkTeacherUserRequest(USER_PUBLIC)))

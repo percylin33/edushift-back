@@ -64,6 +64,15 @@ public interface UserRepository extends JpaRepository<User, UUID>,
 	long countByTenantIdAndStatus(UUID tenantId, UserStatus status);
 
 	/**
+	 * Tenant-wide count of all users (any status) — used by the
+	 * SUPER_ADMIN tenants panel (Sprint 16 / hardening). Explicit
+	 * {@code tenant_id} parameter because the admin list runs under
+	 * {@code SUPER_ADMIN_SENTINEL} which bypasses Hibernate's
+	 * {@code @TenantId} auto-filter.
+	 */
+	long countByTenantId(UUID tenantId);
+
+	/**
 	 * Bulk-updates the last successful login timestamp without loading the entity.
 	 * Tenant-scoped via Hibernate's automatic {@code @TenantId} filter.
 	 */

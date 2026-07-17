@@ -33,15 +33,18 @@ class JwtServiceInterfaceTest {
     }
 
     @Test
-    @DisplayName("TokenType enum has ACCESS + REFRESH + RESET + MFA")
+    @DisplayName("TokenType enum has ACCESS + REFRESH + RESET + MFA + ONBOARDING + IMPERSONATION")
     void tokenTypeEnum() {
-        assertThat(JwtService.TokenType.values()).hasSize(4);
+        assertThat(JwtService.TokenType.values()).hasSize(6);
         assertThat(JwtService.TokenType.ACCESS).isNotEqualTo(JwtService.TokenType.REFRESH);
         assertThat(JwtService.TokenType.ACCESS).isNotEqualTo(JwtService.TokenType.RESET);
         assertThat(JwtService.TokenType.ACCESS).isNotEqualTo(JwtService.TokenType.MFA);
         assertThat(JwtService.TokenType.REFRESH).isNotEqualTo(JwtService.TokenType.RESET);
         assertThat(JwtService.TokenType.REFRESH).isNotEqualTo(JwtService.TokenType.MFA);
         assertThat(JwtService.TokenType.RESET).isNotEqualTo(JwtService.TokenType.MFA);
+        assertThat(JwtService.TokenType.ONBOARDING).isNotEqualTo(JwtService.TokenType.IMPERSONATION);
+        assertThat(JwtService.TokenType.ONBOARDING).isNotEqualTo(JwtService.TokenType.ACCESS);
+        assertThat(JwtService.TokenType.IMPERSONATION).isNotEqualTo(JwtService.TokenType.ACCESS);
     }
 
     @Test

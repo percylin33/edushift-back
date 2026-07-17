@@ -83,8 +83,56 @@ public interface JwtService {
 	/** MFA challenge token TTL in seconds. */
 	long mfaTokenTtlSeconds();
 
+	/**
+	 * Onboarding token TTL for the SUPER_ADMIN first-login MFA
+	 * enrolment handshake (Sprint 15 / F-02 / H-02).
+	 */
+	long onboardingTokenTtlSeconds();
+
+	/**
+	 * Issue an onboarding token for a freshly authenticated SUPER_ADMIN
+	 * that has not yet enrolled MFA. Carries the same tenant + subject
+	 * claims as the access token but with {@code typ=onboarding} so
+	 * {@code JwtAuthenticationFilter} refuses to upgrade it to a
+	 * regular session.
+	 */
+	String issueOnboardingToken(User user, Tenant tenant);
+
+	/**
+	 * Issue an impersonation token (Sprint 15 / F-03 / H-05) that lets a
+	 * SUPER_ADMIN act on behalf of a target user for the duration of a
+	 * support task. Carries the target user's claims ({@code sub},
+	 * {@code tenant_id}, {@code roles}) plus an {@code impersonatedBy}
+	 * claim with the admin's public UUID so the audit trail can be
+	 * reconstructed.
+	 *
+	 * <p>{@code typ=impersonation} — handled separately from regular
+	 * access tokens by the JWT auth filter so the FE can render the
+	 * impersonation banner.</p>
+	 */
+	String issueImpersonationToken(User target, Tenant targetTenant,
+			java.util.Set<String> targetRoles, java.util.UUID adminUuid);
+
+	/** Impersonation token TTL in seconds. */
+	long impersonationTokenTtlSeconds();
+
 	/** Token type discriminator carried in the {@code typ} private claim. */
-	enum TokenType { ACCESS, REFRESH, RESET, MFA }
+	enum TokenType { ACCESS, REFRESH, RESET, MFA,
+		/**
+		 * Single-use, short-lived token issued after a SUPER_ADMIN passes
+		 * the password check but has not yet enrolled MFA. Acts as a
+		 * pre-MFA-onboarding bearer for {@code POST /admin/mfa/enrol} and
+		 * {@code POST /admin/mfa/verify-enrol}. Cannot mint new sessions
+		 * on its own. Sprint 15 / F-02 / H-02.
+		 */
+		ONBOARDING,
+		/**
+		 * Short-lived token issued after a SUPER_ADMIN starts impersonating
+		 * a target user. Carries {@code impersonatedBy=<adminUuid>} so the
+		 * audit log can tie actions back to the admin. Sprint 15 / F-03 /
+		 * H-05.
+		 */
+		IMPERSONATION }
 
 	/** Strongly-typed projection of the JWT claims we care about. */
 	record JwtClaims(

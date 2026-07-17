@@ -29,7 +29,9 @@ import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.context.annotation.Import;
 @WebMvcTest(FileObjectController.class)
+@Import(com.edushift.test.EdushiftWebMvcTestConfig.class)
 class FileObjectControllerTest {
     @Autowired MockMvc mockMvc;
     @MockitoBean FileObjectService fileObjectService; @MockitoBean StorageService storageService;

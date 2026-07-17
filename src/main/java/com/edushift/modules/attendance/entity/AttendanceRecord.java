@@ -115,6 +115,19 @@ public class AttendanceRecord extends TenantAwareEntity {
 	@Column(name = "notes", length = 500)
 	private String notes;
 
+	@Enumerated(EnumType.STRING)
+	@Column(name = "justification_status", length = 16)
+	private JustificationStatus justificationStatus;
+
+	@Column(name = "justification_text", length = 2000)
+	private String justificationText;
+
+	@Column(name = "approved_by_user_id", columnDefinition = "uuid")
+	private UUID approvedByUserId;
+
+	@Column(name = "approved_at")
+	private Instant approvedAt;
+
 	@Column(name = "deleted_at")
 	private Instant deletedAt;
 

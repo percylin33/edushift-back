@@ -55,6 +55,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
@@ -91,6 +92,7 @@ class QuizAttemptServiceValidationTest {
 	private UserRepository userRepository;
 	private QuizAttemptMapper attemptMapper;
 	private CurrentUserProvider currentUserProvider;
+	private ApplicationEventPublisher eventPublisher;
 	private QuizAttemptServiceImpl service;
 
 	@BeforeEach
@@ -106,11 +108,12 @@ class QuizAttemptServiceValidationTest {
 		userRepository = mock(UserRepository.class);
 		attemptMapper = new QuizAttemptMapper(answerRepository);
 		currentUserProvider = mock(CurrentUserProvider.class);
+		eventPublisher = mock(ApplicationEventPublisher.class);
 		service = new QuizAttemptServiceImpl(
 				quizRepository, attemptRepository, answerRepository,
 				questionRepository, optionRepository, sectionRepository,
 				studentRepository, enrollmentRepository, userRepository,
-				attemptMapper, currentUserProvider);
+				attemptMapper, currentUserProvider, eventPublisher);
 	}
 
 	// ------------------------------------------------------------------

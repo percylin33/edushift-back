@@ -20,7 +20,9 @@ import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.context.annotation.Import;
 @WebMvcTest(AttendanceController.class)
+@Import(com.edushift.test.EdushiftWebMvcTestConfig.class)
 class AttendanceControllerTest {
     @Autowired MockMvc mockMvc;
     @MockitoBean AttendanceService attendanceService;
@@ -29,7 +31,7 @@ class AttendanceControllerTest {
     @MockitoBean CurrentUserProvider currentUserProvider; @MockitoBean TenantResolver tenantResolver;
     @MockitoBean JwtService jwtService; @MockitoBean LmsRoleAuthorityMapper roleAuthorityMapper;
     private static JwtAuthenticationToken admin() { return new JwtAuthenticationToken(new JwtAuthenticatedPrincipal(UUID.randomUUID(), UUID.randomUUID(), "a", "a@t"), "t", List.of(new SimpleGrantedAuthority("ROLE_TENANT_ADMIN"))); }
-    @Test void openSession() throws Exception { mockMvc.perform(post("/attendance/sessions").with(csrf()).with(authentication(admin())).content("{}")).andExpect(status().isCreated()); }
-    @Test void closeSession() throws Exception { mockMvc.perform(patch("/attendance/sessions/{id}/close", UUID.randomUUID()).with(csrf()).with(authentication(admin()))).andExpect(status().isOk()); }
-    @Test void listSessions() throws Exception { mockMvc.perform(get("/attendance/sessions").with(authentication(admin()))).andExpect(status().isOk()); }
+    @Test void openSession() throws Exception { mockMvc.perform(post("/v1/attendance/sessions").with(csrf()).with(authentication(admin())).content("{}")).andExpect(status().isCreated()); }
+    @Test void closeSession() throws Exception { mockMvc.perform(patch("/v1/attendance/sessions/{id}/close", UUID.randomUUID()).with(csrf()).with(authentication(admin()))).andExpect(status().isOk()); }
+    @Test void listSessions() throws Exception { mockMvc.perform(get("/v1/attendance/sessions").with(authentication(admin()))).andExpect(status().isOk()); }
 }

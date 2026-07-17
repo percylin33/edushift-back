@@ -40,6 +40,23 @@ public class TenantIdResolver implements CurrentTenantIdentifierResolver<UUID> {
 	 */
 	public static final UUID ROOT_TENANT = new UUID(0L, 0L);
 
+	/**
+	 * Sentinel tenant UUID for the {@code edushift-system} tenant that the
+	 * {@link com.edushift.modules.auth.entity.UserRole#SUPER_ADMIN} role is
+	 * bound to. Sprint 15 / BE-15.1.
+	 *
+	 * <p>This UUID differs from {@link #ROOT_TENANT} by one unit so that:
+	 * <ul>
+	 *   <li>{@code ROOT_TENANT} (nil UUID) continues to serve as the
+	 *       Hibernate bootstrap sentinel — never matches a real row.</li>
+	 *   <li>The actual {@code tenants} row for {@code edushift-system} lives
+	 *       at {@code 00000000-0000-0000-0000-000000000001} and is a real
+	 *       tenant with {@code slug = 'edushift-system'}.</li>
+	 * </ul>
+	 */
+	public static final UUID SUPER_ADMIN_SENTINEL =
+			UUID.fromString("00000000-0000-0000-0000-000000000001");
+
 	@Override
 	public UUID resolveCurrentTenantIdentifier() {
 		return TenantContext.current().orElse(ROOT_TENANT);
@@ -52,7 +69,9 @@ public class TenantIdResolver implements CurrentTenantIdentifierResolver<UUID> {
 
 	@Override
 	public boolean isRoot(UUID tenantIdentifier) {
-		return tenantIdentifier == null || ROOT_TENANT.equals(tenantIdentifier);
+		return tenantIdentifier == null
+				|| ROOT_TENANT.equals(tenantIdentifier)
+				|| SUPER_ADMIN_SENTINEL.equals(tenantIdentifier);
 	}
 
 }

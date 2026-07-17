@@ -59,4 +59,14 @@ public interface StudentRepository extends JpaRepository<Student, UUID>,
 	 */
 	Optional<Student> findByUserId(UUID userId);
 
+	/**
+	 * Tenant-wide count used by the SUPER_ADMIN tenants panel
+	 * (Sprint 16 / hardening). Spring Data JPA derives the query from
+	 * the method name; the {@code tenant_id} filter is explicit so the
+	 * call works regardless of the current {@link com.edushift.shared.multitenancy.TenantContext}
+	 * binding — required because the admin list runs under
+	 * {@code SUPER_ADMIN_SENTINEL} which bypasses Hibernate's auto-filter.
+	 */
+	long countByTenantId(UUID tenantId);
+
 }

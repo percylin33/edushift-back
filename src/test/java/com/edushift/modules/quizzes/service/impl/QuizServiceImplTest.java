@@ -31,6 +31,7 @@ import com.edushift.modules.quizzes.repository.QuizOptionRepository;
 import com.edushift.modules.quizzes.repository.QuizQuestionRepository;
 import com.edushift.modules.quizzes.repository.QuizRepository;
 import com.edushift.modules.quizzes.service.QuizAttemptService;
+import com.edushift.modules.students.enrollments.repository.StudentEnrollmentRepository;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
@@ -42,6 +43,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.context.ApplicationEventPublisher;
 
 @ExtendWith(MockitoExtension.class)
 @DisplayName("QuizServiceImpl — builder, reader & grading orchestration")
@@ -53,6 +55,8 @@ class QuizServiceImplTest {
     @Mock SectionRepository sectionRepository;
     @Mock QuizMapper quizMapper;
     @Mock QuizAttemptService attemptService;
+    @Mock StudentEnrollmentRepository studentEnrollmentRepository;
+    @Mock ApplicationEventPublisher eventPublisher;
 
     @InjectMocks QuizServiceImpl service;
 
@@ -62,6 +66,21 @@ class QuizServiceImplTest {
     void setUp() {
         section = new Section();
         section.setPublicUuid(UUID.randomUUID());
+        // Default mapper returns so that the happy-path tests can
+        // assert `resp.isNotNull()`. lenients to avoid Mockito
+        // strict-mode complaints in tests that never call the mapper.
+        var defaultQuizResp = new com.edushift.modules.quizzes.dto.QuizResponse(
+                UUID.randomUUID(), UUID.randomUUID(), "T", null,
+                QuizStatus.DRAFT, null, null, null, null,
+                UUID.randomUUID(), null, null,
+                null, null, 0, 0, true, List.of(), Instant.now(), Instant.now());
+        lenient().when(quizMapper.toResponse(any(Quiz.class), org.mockito.ArgumentMatchers.anyBoolean()))
+                .thenReturn(defaultQuizResp);
+        var defaultQuestionResp = new com.edushift.modules.quizzes.dto.QuestionResponse(
+                UUID.randomUUID(), QuestionType.MC, "Q", 5, 1,
+                null, null, null, List.of());
+        lenient().when(quizMapper.toQuestionResponse(any(QuizQuestion.class)))
+                .thenReturn(defaultQuestionResp);
     }
 
     // ------------------------------------------------------------------
@@ -76,8 +95,6 @@ class QuizServiceImplTest {
         when(sectionRepository.findByPublicUuid(section.getPublicUuid()))
                 .thenReturn(Optional.of(section));
         when(quizRepository.save(any(Quiz.class))).thenAnswer(inv -> inv.getArgument(0));
-        when(questionRepository.findAllByQuizOrderByPositionAsc(any()))
-                .thenReturn(List.of());
 
         var resp = service.create(section.getPublicUuid(), req, UUID.randomUUID());
 
@@ -88,6 +105,11 @@ class QuizServiceImplTest {
     @Test
     @DisplayName("create — past dueAt → BadRequestException")
     void create_pastDueAt() {
+        // Mock the sectionRepository so requireSection() succeeds;
+        // the test then exercises validateDueAt() which throws on
+        // a past timestamp. Without the mock, SectionNotFoundException
+        // would be thrown first.
+        when(sectionRepository.findByPublicUuid(any())).thenReturn(Optional.of(section));
         var req = new CreateQuizRequest("T", null, Instant.now().minusSeconds(60),
                 30, 2, 100, null);
         assertThatThrownBy(() -> service.create(section.getPublicUuid(), req, UUID.randomUUID()))
@@ -113,7 +135,6 @@ class QuizServiceImplTest {
         when(quizRepository.save(any(Quiz.class))).thenAnswer(inv -> inv.getArgument(0));
         when(questionRepository.save(any(QuizQuestion.class)))
                 .thenAnswer(inv -> inv.getArgument(0));
-        when(questionRepository.findAllByQuizOrderByPositionAsc(any())).thenReturn(List.of());
 
         service.create(section.getPublicUuid(), req, UUID.randomUUID());
 
@@ -202,8 +223,6 @@ class QuizServiceImplTest {
         when(questionRepository.countByQuiz(q)).thenReturn(0L);
         when(questionRepository.save(any(QuizQuestion.class)))
                 .thenAnswer(inv -> inv.getArgument(0));
-        when(optionRepository.findAllByQuestionOrderByPositionAsc(any()))
-                .thenReturn(List.of());
 
         var resp = service.addQuestion(UUID.randomUUID(), mcQuestion(2, 1));
         assertThat(resp).isNotNull();
@@ -286,6 +305,11 @@ class QuizServiceImplTest {
     void addOption_nonMcQuestion() {
         var qq = new QuizQuestion();
         qq.setQuestionType(QuestionType.TF);
+        // requireDraft reads question.getQuiz().getStatus() — wire a
+        // DRAFT quiz so the check passes and we reach the type guard.
+        var q = new Quiz();
+        q.setStatus(QuizStatus.DRAFT);
+        qq.setQuiz(q);
         when(questionRepository.findByPublicUuid(any())).thenReturn(Optional.of(qq));
         var req = new AddOptionRequest(new CreateOptionRequest("A", true, null));
         assertThatThrownBy(() -> service.addOption(UUID.randomUUID(), req))

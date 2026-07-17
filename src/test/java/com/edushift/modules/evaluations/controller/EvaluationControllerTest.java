@@ -47,7 +47,8 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 @WebMvcTest(EvaluationController.class)
-@Import(GlobalExceptionHandler.class)
+@Import({GlobalExceptionHandler.class, com.edushift.test.EdushiftWebMvcTestConfig.class})
+
 class EvaluationControllerTest {
 
     @Autowired private MockMvc mockMvc;
@@ -102,7 +103,7 @@ class EvaluationControllerTest {
                             5L, Boolean.TRUE,
                             Instant.now(), Instant.now())));
 
-            mockMvc.perform(get("/academic/assignments/{u}/evaluations", assignmentUuid))
+            mockMvc.perform(get("/v1/academic/assignments/{u}/evaluations", assignmentUuid))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$[0].publicUuid").value(evalUuid.toString()))
                     .andExpect(jsonPath("$[0].status").value("DRAFT"))
@@ -116,7 +117,7 @@ class EvaluationControllerTest {
             UUID assignmentUuid = UUID.randomUUID();
             given(service.listEvaluations(eq(assignmentUuid), any())).willReturn(List.of());
 
-            mockMvc.perform(get("/academic/assignments/{u}/evaluations", assignmentUuid))
+            mockMvc.perform(get("/v1/academic/assignments/{u}/evaluations", assignmentUuid))
                     .andExpect(status().isOk());
         }
 
@@ -125,7 +126,7 @@ class EvaluationControllerTest {
         @DisplayName("STUDENT role is forbidden (403)")
         void studentForbidden() throws Exception {
             UUID assignmentUuid = UUID.randomUUID();
-            mockMvc.perform(get("/academic/assignments/{u}/evaluations", assignmentUuid))
+            mockMvc.perform(get("/v1/academic/assignments/{u}/evaluations", assignmentUuid))
                     .andExpect(status().isForbidden());
             then(service).should(never()).listEvaluations(any(), any());
         }
@@ -134,7 +135,7 @@ class EvaluationControllerTest {
         @DisplayName("anonymous → 401")
         void anonymous() throws Exception {
             UUID assignmentUuid = UUID.randomUUID();
-            mockMvc.perform(get("/academic/assignments/{u}/evaluations", assignmentUuid))
+            mockMvc.perform(get("/v1/academic/assignments/{u}/evaluations", assignmentUuid))
                     .andExpect(status().isUnauthorized());
         }
 
@@ -145,7 +146,7 @@ class EvaluationControllerTest {
             UUID assignmentUuid = UUID.randomUUID();
             given(service.listEvaluations(eq(assignmentUuid), any())).willReturn(List.of());
 
-            mockMvc.perform(get("/academic/assignments/{u}/evaluations?status=PUBLISHED", assignmentUuid))
+            mockMvc.perform(get("/v1/academic/assignments/{u}/evaluations?status=PUBLISHED", assignmentUuid))
                     .andExpect(status().isOk());
         }
 
@@ -157,7 +158,7 @@ class EvaluationControllerTest {
             given(service.listEvaluations(eq(assignmentUuid), any()))
                     .willThrow(new ResourceNotFoundException("TeacherAssignment", assignmentUuid));
 
-            mockMvc.perform(get("/academic/assignments/{u}/evaluations", assignmentUuid))
+            mockMvc.perform(get("/v1/academic/assignments/{u}/evaluations", assignmentUuid))
                     .andExpect(status().isNotFound())
                     .andExpect(jsonPath("$.errors[0].code").value("RESOURCE_NOT_FOUND"));
         }
@@ -186,7 +187,7 @@ class EvaluationControllerTest {
                     LocalDate.of(2026, 5, 1), LocalDate.of(2026, 5, 8),
                     EvaluationScale.SCORE_0_20, null, null, null);
 
-            mockMvc.perform(post("/academic/assignments/{u}/evaluations", assignmentUuid)
+            mockMvc.perform(post("/v1/academic/assignments/{u}/evaluations", assignmentUuid)
                             .contentType(MediaType.APPLICATION_JSON)
                             .content(objectMapper.writeValueAsString(req)))
                     .andExpect(status().isCreated())
@@ -202,7 +203,7 @@ class EvaluationControllerTest {
             var req = new CreateEvaluationRequest(null, null, null,
                     null, null, null, null, null, null, null);
 
-            mockMvc.perform(post("/academic/assignments/{u}/evaluations", assignmentUuid)
+            mockMvc.perform(post("/v1/academic/assignments/{u}/evaluations", assignmentUuid)
                             .contentType(MediaType.APPLICATION_JSON)
                             .content(objectMapper.writeValueAsString(req)))
                     .andExpect(status().isBadRequest());
@@ -224,7 +225,7 @@ class EvaluationControllerTest {
                     LocalDate.of(2026, 5, 1), null,
                     EvaluationScale.SCORE_0_20, null, null, null);
 
-            mockMvc.perform(post("/academic/assignments/{u}/evaluations", assignmentUuid)
+            mockMvc.perform(post("/v1/academic/assignments/{u}/evaluations", assignmentUuid)
                             .contentType(MediaType.APPLICATION_JSON)
                             .content(objectMapper.writeValueAsString(req)))
                     .andExpect(status().isConflict())
@@ -247,7 +248,7 @@ class EvaluationControllerTest {
             UUID evalUuid = UUID.randomUUID();
             given(service.getEvaluation(evalUuid)).willReturn(stubResponse(evalUuid, EvaluationStatus.DRAFT));
 
-            mockMvc.perform(get("/academic/evaluations/{u}", evalUuid))
+            mockMvc.perform(get("/v1/academic/evaluations/{u}", evalUuid))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.data.publicUuid").value(evalUuid.toString()))
                     .andExpect(jsonPath("$.data.status").value("DRAFT"));
@@ -261,7 +262,7 @@ class EvaluationControllerTest {
             given(service.getEvaluation(evalUuid))
                     .willThrow(new ResourceNotFoundException("Evaluation", evalUuid));
 
-            mockMvc.perform(get("/academic/evaluations/{u}", evalUuid))
+            mockMvc.perform(get("/v1/academic/evaluations/{u}", evalUuid))
                     .andExpect(status().isNotFound());
         }
     }
@@ -286,7 +287,7 @@ class EvaluationControllerTest {
                     null, "Renamed", null, null, null, null,
                     null, null, null, null);
 
-            mockMvc.perform(put("/academic/evaluations/{u}", evalUuid)
+            mockMvc.perform(put("/v1/academic/evaluations/{u}", evalUuid)
                             .contentType(MediaType.APPLICATION_JSON)
                             .content(objectMapper.writeValueAsString(patch)))
                     .andExpect(status().isOk())
@@ -305,7 +306,7 @@ class EvaluationControllerTest {
                     null, "Renamed", null, null, null, null,
                     null, null, null, null);
 
-            mockMvc.perform(put("/academic/evaluations/{u}", evalUuid)
+            mockMvc.perform(put("/v1/academic/evaluations/{u}", evalUuid)
                             .contentType(MediaType.APPLICATION_JSON)
                             .content(objectMapper.writeValueAsString(patch)))
                     .andExpect(status().isConflict())
@@ -329,7 +330,7 @@ class EvaluationControllerTest {
             given(service.publishEvaluation(evalUuid))
                     .willReturn(stubResponse(evalUuid, EvaluationStatus.PUBLISHED));
 
-            mockMvc.perform(post("/academic/evaluations/{u}/publish", evalUuid))
+            mockMvc.perform(post("/v1/academic/evaluations/{u}/publish", evalUuid))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.data.status").value("PUBLISHED"));
         }
@@ -342,7 +343,7 @@ class EvaluationControllerTest {
             given(service.publishEvaluation(evalUuid))
                     .willThrow(new ConflictException("EVAL_ILLEGAL_TRANSITION", "already"));
 
-            mockMvc.perform(post("/academic/evaluations/{u}/publish", evalUuid))
+            mockMvc.perform(post("/v1/academic/evaluations/{u}/publish", evalUuid))
                     .andExpect(status().isConflict())
                     .andExpect(jsonPath("$.errors[0].code").value("EVAL_ILLEGAL_TRANSITION"));
         }
@@ -360,7 +361,7 @@ class EvaluationControllerTest {
             given(service.closeEvaluation(evalUuid))
                     .willReturn(stubResponse(evalUuid, EvaluationStatus.CLOSED));
 
-            mockMvc.perform(post("/academic/evaluations/{u}/close", evalUuid))
+            mockMvc.perform(post("/v1/academic/evaluations/{u}/close", evalUuid))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.data.status").value("CLOSED"));
         }
@@ -373,7 +374,7 @@ class EvaluationControllerTest {
             given(service.closeEvaluation(evalUuid))
                     .willThrow(new ConflictException("EVAL_ILLEGAL_TRANSITION", "draft"));
 
-            mockMvc.perform(post("/academic/evaluations/{u}/close", evalUuid))
+            mockMvc.perform(post("/v1/academic/evaluations/{u}/close", evalUuid))
                     .andExpect(status().isConflict())
                     .andExpect(jsonPath("$.errors[0].code").value("EVAL_ILLEGAL_TRANSITION"));
         }
@@ -394,7 +395,7 @@ class EvaluationControllerTest {
             UUID evalUuid = UUID.randomUUID();
             willDoNothing().given(service).deleteEvaluation(evalUuid);
 
-            mockMvc.perform(delete("/academic/evaluations/{u}", evalUuid))
+            mockMvc.perform(delete("/v1/academic/evaluations/{u}", evalUuid))
                     .andExpect(status().isNoContent());
 
             then(service).should(times(1)).deleteEvaluation(evalUuid);
@@ -408,7 +409,7 @@ class EvaluationControllerTest {
             willThrow(new ConflictException("EVAL_HAS_GRADES", "grades"))
                     .given(service).deleteEvaluation(evalUuid);
 
-            mockMvc.perform(delete("/academic/evaluations/{u}", evalUuid))
+            mockMvc.perform(delete("/v1/academic/evaluations/{u}", evalUuid))
                     .andExpect(status().isConflict())
                     .andExpect(jsonPath("$.errors[0].code").value("EVAL_HAS_GRADES"));
         }
@@ -434,7 +435,7 @@ class EvaluationControllerTest {
                             Instant.now(), Instant.now()));
 
             var req = new AttachRubricRequest(rubricUuid.toString());
-            mockMvc.perform(post("/academic/evaluations/{u}/rubric", evalUuid)
+            mockMvc.perform(post("/v1/academic/evaluations/{u}/rubric", evalUuid)
                             .contentType(MediaType.APPLICATION_JSON)
                             .content(objectMapper.writeValueAsString(req)))
                     .andExpect(status().isOk())
@@ -457,7 +458,7 @@ class EvaluationControllerTest {
                             List.of(), List.of(), Boolean.FALSE, null, Boolean.TRUE,
                             Instant.now(), Instant.now()));
 
-            mockMvc.perform(get("/academic/evaluations/{u}/rubric", evalUuid))
+            mockMvc.perform(get("/v1/academic/evaluations/{u}/rubric", evalUuid))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.data.name").value("My Rubric"));
         }
@@ -474,7 +475,7 @@ class EvaluationControllerTest {
             UUID evalUuid = UUID.randomUUID();
             willDoNothing().given(rubricLinkService).detachRubric(evalUuid);
 
-            mockMvc.perform(delete("/academic/evaluations/{u}/rubric", evalUuid))
+            mockMvc.perform(delete("/v1/academic/evaluations/{u}/rubric", evalUuid))
                     .andExpect(status().isNoContent());
 
             then(rubricLinkService).should(times(1)).detachRubric(evalUuid);

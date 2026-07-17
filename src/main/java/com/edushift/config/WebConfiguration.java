@@ -9,8 +9,12 @@ public class WebConfiguration implements WebMvcConfigurer {
 
 	@Override
 	public void configurePathMatch(PathMatchConfigurer configurer) {
-		configurer.addPathPrefix("/v1", c -> c.getPackageName().startsWith("com.edushift.modules")
-				&& c.getPackageName().contains(".controller"));
+		configurer.addPathPrefix("/v1", c -> {
+			String pkg = c.getPackageName();
+			return pkg.startsWith("com.edushift.modules")
+					&& (pkg.contains(".controller")
+					|| pkg.startsWith("com.edushift.modules.admin"));
+		});
 	}
 
 }

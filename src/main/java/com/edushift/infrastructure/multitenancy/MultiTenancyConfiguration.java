@@ -14,14 +14,18 @@ import org.springframework.web.servlet.config.annotation.InterceptorRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
 /**
- * Wires the tenant context, Hibernate multi-tenancy and the MVC interceptor.
- * <p>
- * Filter runs near the end of the filter chain (after Spring Security has
+ * Wires the tenant context, Hibernate multi-tenancy and the MVC interceptors.
+ *
+ * <p>Filter runs near the end of the filter chain (after Spring Security has
  * had a chance to populate the principal); the interceptor then validates
- * the binding against the authenticated principal.
+ * the binding against the authenticated principal.</p>
  *
  * <p>Also registers the {@link RateLimitInterceptor} for the
- * {@code POST /v1/tenants/register} public endpoint — closes DEBT-TEN-6.
+ * {@link com.edushift.infrastructure.ratelimit.RateLimitProperties.Rule}
+ * paths declared in {@code edushift.ratelimit.rules}. The interceptor
+ * matches each request against the rules list and short-circuits to 429
+ * on breach. Adding/removing a rule does not require touching this class —
+ * just edit {@code application*.properties}.</p>
  */
 @Configuration
 @RequiredArgsConstructor
@@ -57,11 +61,11 @@ public class MultiTenancyConfiguration implements WebMvcConfigurer {
 				.addPathPatterns("/**")
 				.excludePathPatterns("/actuator/**");
 
-		// DEBT-TEN-6: rate-limit the public self-signup endpoint to
-		// 5 requests per hour per source IP. Mitigation against scripted
-		// tenant creation and DB-bombing via slug enumeration.
+		// Rate-limit coverage is path-driven by
+		// edushift.ratelimit.rules. Registering on /** here is a
+		// catch-all; RateLimitInterceptor itself does the per-rule
+		// matching and skips paths without a configured rule.
 		registry.addInterceptor(rateLimitInterceptor)
-				.addPathPatterns("/v1/tenants/register");
+				.addPathPatterns("/v1/**");
 	}
-
 }

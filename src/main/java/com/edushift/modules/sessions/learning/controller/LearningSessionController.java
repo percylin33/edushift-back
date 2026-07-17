@@ -8,6 +8,7 @@ import com.edushift.modules.sessions.learning.dto.LifecycleRequest;
 import com.edushift.modules.sessions.learning.dto.UpdateLearningSessionRequest;
 import com.edushift.modules.sessions.learning.entity.SessionStatus;
 import com.edushift.modules.sessions.learning.service.LearningSessionService;
+import com.edushift.modules.sessions.learning.service.SessionsPdfExportService;
 import com.edushift.shared.api.ApiResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -19,7 +20,9 @@ import java.util.List;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import org.springframework.format.annotation.DateTimeFormat;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.validation.annotation.Validated;
@@ -62,6 +65,7 @@ import org.springframework.web.bind.annotation.RestController;
 public class LearningSessionController {
 
 	private final LearningSessionService service;
+	private final SessionsPdfExportService pdfExportService;
 
 	// =========================================================================
 	// CRUD
@@ -127,6 +131,29 @@ public class LearningSessionController {
 			@PathVariable UUID publicUuid
 	) {
 		return ResponseEntity.ok(ApiResponse.ok(service.get(publicUuid)));
+	}
+
+	@GetMapping("/learning-sessions/{publicUuid}/export")
+	@SecurityRequirement(name = "bearerAuth")
+	@PreAuthorize("hasRole('TENANT_ADMIN')")
+	@Operation(
+			summary = "Export a learning session as PDF (BE-18.2)",
+			description = "Generates a PDF with the session title, objective, content "
+					+ "(activities / materials / observations), competencies, capacities "
+					+ "and school header. Returns application/pdf with Content-Disposition."
+	)
+	public ResponseEntity<byte[]> exportPdf(
+			@PathVariable UUID publicUuid,
+			@RequestParam(defaultValue = "pdf") String format
+	) {
+		byte[] pdfBytes = pdfExportService.exportPdf(publicUuid);
+		HttpHeaders headers = new HttpHeaders();
+		headers.setContentType(MediaType.APPLICATION_PDF);
+		headers.setContentDispositionFormData("attachment",
+				"sesion-" + publicUuid + ".pdf");
+		return ResponseEntity.ok()
+				.headers(headers)
+				.body(pdfBytes);
 	}
 
 	@PutMapping("/learning-sessions/{publicUuid}")

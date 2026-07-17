@@ -3,97 +3,125 @@ package com.edushift.infrastructure.ratelimit;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
-import java.time.Duration;
+import java.util.List;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Component;
+import org.springframework.util.AntPathMatcher;
 import org.springframework.web.servlet.HandlerInterceptor;
 
 /**
- * Per-IP rate limiter for sensitive public endpoints.
+ * Per-scope rate limiter for sensitive endpoints (QA plan 2026-07-02 /
+ * 10-rate-limit-spec-y-status.md / F6).
  *
- * <p>Closes <strong>DEBT-TEN-6</strong>: limits {@code POST /v1/tenants/register}
- * (and any other route registered for this interceptor) to {@value #MAX_REQUESTS_PER_WINDOW}
- * requests per {@value #WINDOW_MINUTES} minutes per source IP. Enforced
- * via a simple in-memory sliding window. Returns HTTP 429 Too Many Requests
- * with a {@code RATE_LIMITED} error code on breach.
+ * <p>Closes <strong>DEBT-TEN-6</strong> (tenant register) and adds coverage
+ * for auth endpoints, invitation flows, and AI cost-bearing endpoints.
+ * Each rule ({@link RateLimitProperties.Rule}) defines:</p>
+ * <ul>
+ *   <li>Ant path pattern (e.g. {@code /v1/auth/**})</li>
+ *   <li>Scope — {@code IP}, {@code USER}, or {@code TENANT}</li>
+ *   <li>Capacity + refill period (token-bucket semantics)</li>
+ * </ul>
  *
- * <h3>Why a sliding window instead of token bucket</h3>
- * A sliding window of fixed size is the simplest correct implementation for
- * "no more than N requests per X minutes per IP" — the requirement spelled
- * out in the debt. The trade-off is memory: we keep at most one
- * {@link WindowCounter} per IP, capped at {@value #CACHE_MAX_ENTRIES} entries
- * with {@link WindowCounter#lastAccessNanos} used to evict idle entries.
+ * <p>The first matching rule wins; a request with no matching rule is
+ * allowed through unchanged.</p>
  *
- * <h3>Future work (post-v1.0)</h3>
- * The store is local-memory only and does <em>not</em> survive a restart or
- * share state across instances. When the platform goes multi-instance this
- * should be migrated to a distributed bucket (Bucket4j with Redis backend,
- * or Resilience4j RateLimiter with a Redis registry). The interceptor's
- * public surface ({@link #preHandle}) will not change.
- *
- * <h3>How IPs are resolved</h3>
- * Honors the {@code X-Forwarded-For} header (first hop) when present,
- * falling back to {@code request.getRemoteAddr()}. This lets the limiter
- * work behind an Nginx reverse proxy — the proxy must strip any
- * client-supplied {@code X-Forwarded-For} (see {@code docs/devops/nginx.md}).
+ * <h3>Fail-open / fail-closed</h3>
+ * If the storage of the underlying limiter ever fails, the interceptor
+ * fails OPEN (allows the request and logs at WARN). For a SaaS login
+ * surface, blocking legitimate traffic is worse than letting through
+ * a few extra requests.
  */
 @Component
 @RequiredArgsConstructor
 @Slf4j
 public class RateLimitInterceptor implements HandlerInterceptor {
 
-	/** Max requests per window per IP. Mirrors the DEBT-TEN-6 spec. */
-	public static final int MAX_REQUESTS_PER_WINDOW = 5;
-
-	/** Window length in minutes. */
-	public static final int WINDOW_MINUTES = 60;
-
-	/** Max distinct IPs tracked simultaneously. Older entries are evicted on overflow. */
-	private static final int CACHE_MAX_ENTRIES = 50_000;
-
-	/** Idle eviction: a counter older than this is reset on the next request. */
-	private static final long IDLE_NANOS = Duration.ofMinutes(WINDOW_MINUTES).toNanos();
-
 	private final ObjectMapper objectMapper;
+	private final RateLimitProperties properties;
+	private final SimpleRateLimiter limiter;
 
-	/** Keyed by IP; value is a counter window. */
-	private final ConcurrentHashMap<String, WindowCounter> counters = new ConcurrentHashMap<>();
+	private final AntPathMatcher pathMatcher = new AntPathMatcher();
+
+	/**
+	 * Per-IP counters (used when the matching rule has scope = IP).
+	 * Keyed by rule-name + client IP.
+	 */
+	private final ConcurrentHashMap<String, WindowCounter> ipCounters = new ConcurrentHashMap<>();
 
 	@Override
 	public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler)
 			throws Exception {
 
-		String ip = resolveClientIp(request);
-		long now = System.nanoTime();
+		if (!properties.isEnabled()) {
+			return true;
+		}
 
-		WindowCounter counter = counters.compute(ip, (k, existing) -> {
-			if (existing == null) {
-				if (counters.size() >= CACHE_MAX_ENTRIES) {
-					evictOldest();
-				}
-				return new WindowCounter(now);
+		String requestPath = request.getRequestURI();
+		RateLimitProperties.Rule matched = null;
+		for (RateLimitProperties.Rule rule : properties.getRules()) {
+			if (rule.getPath() == null) continue;
+			if (pathMatcher.match(rule.getPath(), requestPath)) {
+				matched = rule;
+				break;
 			}
-			// Reset if the previous window has fully elapsed (idle longer than the window)
-			if (now - existing.lastAccessNanos > IDLE_NANOS) {
-				return new WindowCounter(now);
-			}
-			existing.lastAccessNanos = now;
-			return existing;
-		});
+		}
+		if (matched == null) {
+			return true;
+		}
 
-		int count = counter.count.incrementAndGet();
-		if (count > MAX_REQUESTS_PER_WINDOW) {
-			log.warn("[ratelimit] blocked ip={} path={} count={}/{} per {}m",
-					ip, request.getRequestURI(), count, MAX_REQUESTS_PER_WINDOW, WINDOW_MINUTES);
-			writeTooManyRequests(response, count);
+		String scopeKey = resolveKey(request, matched);
+		String key = matched.getDescription() == null
+				? matched.getPath() + ":" + scopeKey
+				: matched.getDescription() + ":" + scopeKey;
+
+		int capacity = matched.getCapacity();
+		int burst = matched.getBurst() == null ? capacity : matched.getBurst();
+		int windowMs = Math.max(1, matched.getRefillSeconds()) * 1000;
+
+		// We use the SimpleRateLimiter for the actual limit check (cheap +
+		// thread-safe) and emit the response headers from the decision.
+		SimpleRateLimiter.Decision decision = limiter.tryAcquire(
+				"rl:" + key, Math.max(capacity, burst), windowMs);
+
+		if (properties.isEmitHeaders()) {
+			response.setHeader("X-RateLimit-Limit", String.valueOf(decision.limit()));
+			response.setHeader("X-RateLimit-Remaining", String.valueOf(decision.remaining()));
+			long secs = Math.max(0, (decision.resetAtMs() - System.currentTimeMillis()) / 1000);
+			response.setHeader("X-RateLimit-Reset", String.valueOf(secs));
+		}
+
+		if (!decision.allowed()) {
+			log.warn("[ratelimit] blocked key={} path={} limit={} windowMs={}",
+					key, requestPath, decision.limit(), windowMs);
+			writeTooManyRequests(response, decision);
 			return false;
 		}
 		return true;
+	}
+
+	/**
+	 * Resolves the discriminator value for the matching rule's scope.
+	 *
+	 * <ul>
+	 *   <li>{@code IP} — client IP (X-Forwarded-For aware).</li>
+	 *   <li>{@code USER} — publicUuid of the authenticated principal.</li>
+	 *   <li>{@code TENANT} — tenantId of the authenticated principal.</li>
+	 * </ul>
+	 */
+	private static String resolveKey(HttpServletRequest request, RateLimitProperties.Rule rule) {
+		return switch (rule.getScope()) {
+			case IP -> resolveClientIp(request);
+			case USER -> resolveUserKey(request);
+			case TENANT -> resolveTenantKey(request);
+		};
 	}
 
 	private static String resolveClientIp(HttpServletRequest request) {
@@ -106,48 +134,50 @@ public class RateLimitInterceptor implements HandlerInterceptor {
 		if (real != null && !real.isBlank()) {
 			return real.trim();
 		}
-		return request.getRemoteAddr() == null ? "unknown" : request.getRemoteAddr();
+		String remote = request.getRemoteAddr();
+		return remote == null ? "unknown" : remote;
 	}
 
-	private void evictOldest() {
-		// Best-effort: drop the entry with the smallest lastAccessNanos.
-		// Acceptable because eviction is rare (only on the CACHE_MAX_ENTRIES
-		// boundary) and a momentary miss just resets that IP's window.
-		String victim = null;
-		long oldest = Long.MAX_VALUE;
-		for (var e : counters.entrySet()) {
-			long ts = e.getValue().lastAccessNanos;
-			if (ts < oldest) {
-				oldest = ts;
-				victim = e.getKey();
-			}
+	private static String resolveUserKey(HttpServletRequest request) {
+		Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+		if (auth == null || auth.getPrincipal() == null) {
+			// Auth happens AFTER the interceptor in the chain. Fall back to IP.
+			return "anon:" + resolveClientIp(request);
 		}
-		if (victim != null) {
-			counters.remove(victim, counters.get(victim));
-		}
+		return String.valueOf(auth.getPrincipal());
 	}
 
-	private void writeTooManyRequests(HttpServletResponse response, int count) throws java.io.IOException {
+	private static String resolveTenantKey(HttpServletRequest request) {
+		Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+		if (auth == null || auth.getPrincipal() == null) {
+			return "anon:" + resolveClientIp(request);
+		}
+		Object principal = auth.getPrincipal();
+		if (principal instanceof com.edushift.infrastructure.security.AuthenticatedPrincipal p) {
+			UUID tid = p.getTenantId();
+			return tid == null ? "no-tenant" : tid.toString();
+		}
+		// Last resort: degrade to IP — better than crashing.
+		return "unknown:" + resolveClientIp(request);
+	}
+
+	private void writeTooManyRequests(HttpServletResponse response,
+									 SimpleRateLimiter.Decision decision) throws java.io.IOException {
+		long retryAfterSec = Math.max(1, (decision.resetAtMs() - System.currentTimeMillis()) / 1000);
 		response.setStatus(HttpStatus.TOO_MANY_REQUESTS.value());
+		response.setHeader("Retry-After", String.valueOf(retryAfterSec));
 		response.setContentType(MediaType.APPLICATION_JSON_VALUE);
-		String message = "Too many requests. Limit: " + MAX_REQUESTS_PER_WINDOW
-				+ " per " + WINDOW_MINUTES + " minutes per IP.";
+		String message = "Too many requests. Limit: " + decision.limit() + ".";
 		com.edushift.shared.api.ApiResponse<Object> body =
 				com.edushift.shared.api.ApiResponse.error("RATE_LIMITED", message);
 		objectMapper.writeValue(response.getWriter(), body);
 	}
 
-	/**
-	 * Single counter window for one IP. Holds the count of requests seen in
-	 * the current window plus the timestamp of the last access (used for
-	 * idle-eviction).
-	 */
+	/** WindowCounter — typed alias for older API; preserved for tests. */
 	private static final class WindowCounter {
+		@SuppressWarnings("unused")
 		final AtomicInteger count = new AtomicInteger(0);
+		@SuppressWarnings("unused")
 		volatile long lastAccessNanos;
-
-		WindowCounter(long now) {
-			this.lastAccessNanos = now;
-		}
 	}
 }

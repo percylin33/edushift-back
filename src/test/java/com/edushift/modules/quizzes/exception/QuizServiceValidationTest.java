@@ -27,6 +27,7 @@ import com.edushift.modules.quizzes.service.QuizAttemptService;
 import com.edushift.modules.quizzes.service.impl.QuizServiceImpl;
 import com.edushift.modules.academic.section.entity.Section;
 import com.edushift.modules.academic.section.repository.SectionRepository;
+import com.edushift.modules.students.enrollments.repository.StudentEnrollmentRepository;
 import java.lang.reflect.Field;
 import java.time.Instant;
 import java.util.List;
@@ -36,6 +37,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.springframework.context.ApplicationEventPublisher;
 
 /**
  * Unit tests for {@link QuizServiceImpl} (Sprint 7b / BE-7b.1).
@@ -60,6 +62,8 @@ class QuizServiceValidationTest {
 	private SectionRepository sectionRepository;
 	private QuizMapper quizMapper;
 	private QuizAttemptService attemptService;
+	private ApplicationEventPublisher eventPublisher;
+	private StudentEnrollmentRepository enrollmentRepository;
 	private QuizServiceImpl service;
 
 	@BeforeEach
@@ -70,9 +74,12 @@ class QuizServiceValidationTest {
 		sectionRepository = mock(SectionRepository.class);
 		quizMapper = new QuizMapper(questionRepository, optionRepository);
 		attemptService = mock(QuizAttemptService.class);
+		eventPublisher = mock(ApplicationEventPublisher.class);
+		enrollmentRepository = mock(StudentEnrollmentRepository.class);
 		service = new QuizServiceImpl(
 				quizRepository, questionRepository, optionRepository,
-				sectionRepository, quizMapper, attemptService);
+				sectionRepository, quizMapper, attemptService,
+				eventPublisher, enrollmentRepository);
 	}
 
 	// ------------------------------------------------------------------

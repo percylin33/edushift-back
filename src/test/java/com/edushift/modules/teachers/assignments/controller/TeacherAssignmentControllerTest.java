@@ -51,7 +51,8 @@ import org.springframework.test.web.servlet.MockMvc;
 @Import({
 		GlobalExceptionHandler.class,
 		com.edushift.config.SecurityConfig.class,
-		com.edushift.config.WebConfiguration.class
+		com.edushift.config.WebConfiguration.class,
+		com.edushift.test.EdushiftWebMvcTestConfig.class,
 })
 class TeacherAssignmentControllerTest {
 

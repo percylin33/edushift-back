@@ -41,7 +41,16 @@ public enum UserRole {
 	PARENT,
 
 	/** Non-teaching staff (admin assistant, finance, IT). Granular perms TBD. */
-	STAFF;
+	STAFF,
+
+	/**
+	 * Platform super-administrator. Cross-tenant role that owns the EduShift
+	 * deployment: manages all tenants, plans, subscriptions, billing, and
+	 * can impersonate any user for support. Bound to the sentinel tenant
+	 * {@code edushift-system} (UUID {@code 00000000-0000-0000-0000-000000000001}).
+	 * Sprint 15 / BE-15.1.
+	 */
+	SUPER_ADMIN;
 
 	/** Convenience: parse a string back to the enum, returning null on miss. */
 	public static UserRole fromName(String name) {

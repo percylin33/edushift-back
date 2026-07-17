@@ -28,12 +28,16 @@ import com.edushift.modules.quizzes.repository.QuizQuestionRepository;
 import com.edushift.modules.quizzes.repository.QuizRepository;
 import com.edushift.modules.quizzes.service.QuizAttemptService;
 import com.edushift.modules.quizzes.service.QuizService;
+import com.edushift.modules.students.enrollments.entity.StudentEnrollment;
+import com.edushift.modules.students.enrollments.repository.StudentEnrollmentRepository;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
@@ -76,6 +80,8 @@ public class QuizServiceImpl implements QuizService {
 	private final SectionRepository sectionRepository;
 	private final QuizMapper quizMapper;
 	private final QuizAttemptService attemptService;
+	private final ApplicationEventPublisher eventPublisher; // Sprint 9 / BE-9.3
+	private final StudentEnrollmentRepository studentEnrollmentRepository; // Sprint 9 / BE-9.3
 
 	// ------------------------------------------------------------------
 	// Builder
@@ -215,6 +221,31 @@ public class QuizServiceImpl implements QuizService {
 		entity.setPublishedAt(Instant.now());
 		Quiz saved = quizRepository.save(entity);
 		log.info("Quiz published publicUuid={}", quizPublicUuid);
+
+		// Sprint 9 / BE-9.3 — fire QUIZ_PUBLISHED to all enrolled students.
+		Section section = saved.getSection();
+		List<StudentEnrollment> enrolled = studentEnrollmentRepository.findActiveBySection(section);
+		if (!enrolled.isEmpty()) {
+			String dueDate = saved.getDueAt() == null ? "" : saved.getDueAt().toString();
+			List<com.edushift.modules.notifications.event.NotificationEvent.Recipient> recipients = enrolled.stream()
+					.map(e -> e.getStudent().getUserId())
+					.filter(Objects::nonNull)
+					.map(uid -> new com.edushift.modules.notifications.event.NotificationEvent.Recipient(uid, null))
+					.toList();
+			recipients.forEach(r -> eventPublisher.publishEvent(
+					com.edushift.modules.notifications.event.NotificationEvent.builder()
+							.templateKey("QUIZ_PUBLISHED")
+							.category(com.edushift.modules.notifications.entity.Notification.Category.QUIZ)
+							.sourceId(saved.getPublicUuid())
+							.recipients(java.util.List.of(r))
+							.payload(java.util.Map.of(
+									"studentName", "",
+									"quizTitle", saved.getTitle(),
+									"courseName", section.getName(),
+									"dueDate", dueDate))
+							.build()));
+		}
+
 		return quizMapper.toResponse(saved, true);
 	}
 

@@ -172,19 +172,12 @@ public class QuizRubricServiceImpl implements QuizRubricService {
 					"Derived rubric evaluation is CLOSED — cannot accept new grades.");
 		}
 
-		// Resolve the student entity. Note that
-		// {@code attempt.studentUserId} carries the
-		// {@code users.public_uuid} (the JWT-bearer id, see
-		// BE-5B.3 / V29 hotfix), but {@code students.user_id}
-		// FK-references {@code users.id} (the internal PK, see
-		// V10). The service therefore dereferences
-		// {@code public_uuid → id → user_id} in two steps.
-		UUID ownerInternalId = userRepository.findByPublicUuid(attempt.getStudentUserId())
-				.map(User::getId)
-				.orElseThrow(() -> new NotFoundException("STUDENT_NOT_FOUND",
-						"User " + attempt.getStudentUserId() + " not found "
-								+ "for attempt " + attemptPublicUuid));
-		Student student = studentRepository.findByUserId(ownerInternalId)
+		// Resolve the student entity. DEBT-FK-BUGS-3 / V76: students.user_id
+		// FK now points at users.public_uuid (the same value that
+		// {@code attempt.studentUserId} carries). The two-step dance
+		// (publicUuid → users.id → students.user_id) collapses to a
+		// single repository lookup.
+		Student student = studentRepository.findByUserId(attempt.getStudentUserId())
 				.orElseThrow(() -> new NotFoundException("STUDENT_NOT_FOUND",
 						"Student for attempt " + attemptPublicUuid
 								+ " not found (userId=" + attempt.getStudentUserId() + ")"));
@@ -245,25 +238,20 @@ public class QuizRubricServiceImpl implements QuizRubricService {
 	 * {@code quiz.ownerUserId} carries the owner's
 	 * {@code users.public_uuid} (as set by
 	 * {@code currentUserProvider.currentUserId()}, which returns the
-	 * JWT-public UUID, see BE-5B.3 / V29 hotfix). The
-	 * {@code teachers.user_id} column, however, FK-references
-	 * {@code users.id} (the internal UUIDv7 PK, see V18). The
-	 * service therefore performs a two-step lookup:
-	 * {@code users.public_uuid → users.id → teachers.user_id}.
+	 * JWT-public UUID, see BE-5B.3 / V29 hotfix).
+	 *
+	 * <p>DEBT-FK-BUGS-3 / V77: {@code teachers.user_id} FK now points
+	 * at {@code users.public_uuid} (matching {@code quiz.ownerUserId}
+	 * directly). The two-step lookup collapses to one repository
+	 * call.</p>
 	 */
 	private Evaluation createDerivedEvaluation(Quiz quiz) {
 		Section section = quiz.getSection();
 
-		// Step 1 — find the user by public UUID.
-		UUID ownerInternalId = userRepository.findByPublicUuid(quiz.getOwnerUserId())
-				.map(User::getId)
-				.orElseThrow(() -> new com.edushift.shared.exception.BadRequestException(
-						"TEACHER_NOT_ASSIGNED_TO_SECTION",
-						"Quiz owner " + quiz.getOwnerUserId() + " does not exist; "
-								+ "cannot derive a rubric evaluation."));
-
-		// Step 2 — find the teacher linked to that user.
-		Teacher teacher = teacherRepository.findByUserId(ownerInternalId)
+		// Find the teacher linked to the quiz owner. The ownerUserId
+		// is the publicUuid; teachers.user_id stores publicUuid too
+		// (post-V77), so this is a direct lookup.
+		Teacher teacher = teacherRepository.findByUserId(quiz.getOwnerUserId())
 				.orElseThrow(() -> new com.edushift.shared.exception.BadRequestException(
 						"TEACHER_NOT_ASSIGNED_TO_SECTION",
 						"Quiz owner " + quiz.getOwnerUserId() + " is not a teacher; "

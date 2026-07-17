@@ -1,10 +1,12 @@
 package com.edushift.infrastructure.seed;
 
 import com.edushift.modules.auth.entity.User;
+import com.edushift.modules.auth.entity.UserRole;
 import com.edushift.modules.auth.entity.UserStatus;
 import com.edushift.modules.auth.repository.UserRepository;
 import com.edushift.modules.tenants.repository.TenantRepository;
 import com.edushift.shared.multitenancy.TenantContext;
+import java.security.SecureRandom;
 import java.util.List;
 import java.util.UUID;
 import lombok.extern.slf4j.Slf4j;
@@ -18,37 +20,9 @@ import org.springframework.stereotype.Component;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
-/**
- * Seeds a deterministic admin account for the {@code demo} tenant on
- * application startup, but only when the {@code dev} profile is active.
- *
- * <h3>Why a {@link CommandLineRunner} and not a Flyway seed migration?</h3>
- * <ul>
- *   <li>The password is hashed with the production {@link PasswordEncoder}
- *       (BCrypt, configurable cost) — guaranteeing 1:1 fidelity with the real
- *       login flow. A hand-crafted hash in SQL is brittle: a typo silently
- *       breaks login.</li>
- *   <li>The runner is naturally idempotent: it checks for existence before
- *       inserting and re-runs are no-ops.</li>
- *   <li>The credentials can be overridden via environment variables without
- *       editing source.</li>
- * </ul>
- *
- * <h3>Configuration</h3>
- * <ul>
- *   <li>{@code DEV_ADMIN_EMAIL}    (default: {@code admin@demo.edushift.pe})</li>
- *   <li>{@code DEV_ADMIN_PASSWORD} (default: {@code Edushift123!})</li>
- *   <li>{@code DEV_ADMIN_FIRST_NAME} (default: {@code Admin})</li>
- *   <li>{@code DEV_ADMIN_LAST_NAME}  (default: {@code Demo})</li>
- *   <li>{@code DEV_ADMIN_TENANT_SLUG} (default: {@code demo})</li>
- * </ul>
- *
- * <p><strong>Safety:</strong> the bean is annotated with {@code @Profile("dev")}.
- * Production deployments use {@code prod} and never instantiate this class.
- */
 @Slf4j
 @Component
-@Profile("dev")
+@Profile({"dev", "local"})
 public class DevDataInitializer implements CommandLineRunner {
 
 	private static final String FIND_TENANT_SQL = """
@@ -62,6 +36,7 @@ public class DevDataInitializer implements CommandLineRunner {
 	private final TenantRepository tenantRepository;
 	private final PasswordEncoder passwordEncoder;
 	private final TransactionTemplate txTemplate;
+	private final SecureRandom secureRandom = new SecureRandom();
 
 	private final String adminEmail;
 	private final String adminPassword;
@@ -77,6 +52,38 @@ public class DevDataInitializer implements CommandLineRunner {
 			WHERE deleted = false
 			""";
 
+	/**
+	 * Sentinel password hash stamped onto a SUPER_ADMIN that was created
+	 * with auto-generated credentials. The hash is detected at login time
+	 * by {@code AdminAuthService} which rejects it with
+	 * {@code PASSWORD_RESET_REQUIRED} so the operator must run the
+	 * break-glass recovery flow before any other action.
+	 *
+	 * <p>This is intentionally NOT a bcrypt hash — the constant-time
+	 * decoder in {@link #isSeedPasswordResetSentinel(String)} matches by
+	 * prefix so any attempt to treat it as a real hash fails fast.</p>
+	 */
+	private static final String SUPER_ADMIN_RESET_SENTINEL_HASH = "SUPER_ADMIN_RESET_REQUIRED_v1";
+
+	// --- SUPER_ADMIN seed configuration (Sprint 15 / F-01 / H-01) ----
+	/**
+	 * Set {@code EDUSHIFT_SEED_SUPER_ADMIN=true} (or
+	 * {@code dev.seed.super-admin.enabled=true}) to seed a SUPER_ADMIN
+	 * on startup. Defaults to {@code false} — the profile gate
+	 * ({@code dev,local}) is no longer sufficient on its own to create a
+	 * platform-tier account.
+	 */
+	private final boolean superAdminSeedEnabled;
+	private final String superAdminEmail;
+	private final String superAdminPasswordRaw;
+	private final boolean superAdminPasswordAuto;
+
+	// =====================================================================
+	// Sprint 15 / BE-15.1: SUPER_ADMIN seed constants
+	// =====================================================================
+	private static final UUID SUPER_ADMIN_SENTINEL_TENANT =
+			UUID.fromString("00000000-0000-0000-0000-000000000001");
+
 	public DevDataInitializer(
 			JdbcTemplate jdbcTemplate,
 			UserRepository userRepository,
@@ -88,7 +95,13 @@ public class DevDataInitializer implements CommandLineRunner {
 			@Value("${dev.seed.admin.first-name:Admin}") String adminFirstName,
 			@Value("${dev.seed.admin.last-name:Demo}") String adminLastName,
 			@Value("${dev.seed.admin.tenant-slug:demo}") String tenantSlug,
-			@Value("${dev.seed.password:EduShift2026!}") String seedPassword) {
+			@Value("${dev.seed.password:EduShift2026!}") String seedPassword,
+			@Value("${dev.seed.super-admin.enabled:${edushift.seed.super-admin.enabled:false}}")
+					boolean superAdminSeedEnabled,
+			@Value("${dev.seed.super-admin.email:${edushift.seed.super-admin.email:super@edushift.pe}}")
+					String superAdminEmail,
+			@Value("${dev.seed.super-admin.password:${edushift.seed.super-admin.password:}}")
+					String superAdminPasswordRaw) {
 		this.jdbcTemplate = jdbcTemplate;
 		this.userRepository = userRepository;
 		this.tenantRepository = tenantRepository;
@@ -100,50 +113,143 @@ public class DevDataInitializer implements CommandLineRunner {
 		this.adminLastName = adminLastName;
 		this.tenantSlug = tenantSlug;
 		this.seedPassword = seedPassword;
+		this.superAdminSeedEnabled = superAdminSeedEnabled;
+		this.superAdminEmail = superAdminEmail;
+		this.superAdminPasswordRaw = superAdminPasswordRaw;
+		// If a password was supplied, use it verbatim; otherwise generate a
+		// strong random one at runtime and print it once. The random path is
+		// the recommended default — it never puts a publicly-known password
+		// into source control.
+		this.superAdminPasswordAuto = (superAdminPasswordRaw == null || superAdminPasswordRaw.isBlank());
 	}
 
 	@Override
 	public void run(String... args) {
-		// 1) Reset V38-seeded user password hashes (sentinel → real BCrypt of seedPassword)
 		resetSeededUserPasswords();
 
-		// 2) Tenant lookup runs WITHOUT tenant context — tenants is the global catalog
-		// and JdbcTemplate manages its own connection / transaction.
 		UUID tenantId = findDemoTenantId();
 		if (tenantId == null) {
 			log.warn("[dev-seed] tenant '{}' not found — skipping admin seed. "
 					+ "Did Flyway V5 run?", tenantSlug);
-			return;
+		}
+		else {
+			TenantContext.runAs(tenantId, () -> {
+				txTemplate.executeWithoutResult(status -> {
+					if (userRepository.existsByEmail(adminEmail.toLowerCase())) {
+						log.info("[dev-seed] admin '{}' already exists for tenant '{}' — no-op",
+								adminEmail, tenantSlug);
+						return;
+					}
+
+					User admin = buildAdmin(adminEmail, adminPassword, adminFirstName, adminLastName);
+					userRepository.save(admin);
+
+					log.info("[dev-seed] created dev admin: email='{}', tenant='{}', publicUuid='{}'. "
+							+ "Default password: '{}' (override with DEV_SEED_ADMIN_PASSWORD).",
+							admin.getEmail(), tenantSlug, admin.getPublicUuid(), adminPassword);
+				});
+				return null;
+			});
 		}
 
-		// Same multi-tenancy ordering bug as AuthServiceImpl had: if we annotated
-		// run() with @Transactional, Hibernate would open the session BEFORE we
-		// got a chance to call TenantContext.runAs, so the @TenantId resolver
-		// would return ROOT_TENANT and the admin row would be persisted with
-		// tenant_id = 00000000-0000-0000-0000-000000000000 — silently breaking
-		// every subsequent multi-tenant query against that user. Order is:
-		//
-		//   1. runAs(...) sets the thread-local context
-		//   2. txTemplate.execute(...) opens a NEW session, resolver fires NOW
-		//      and sees the real tenant id
-		//   3. existsByEmail / save run inside the bound session
-		TenantContext.runAs(tenantId, () -> {
+		// ===================================================================
+		// Sprint 15 / BE-15.1 / F-01 / H-01: SUPER_ADMIN seed is opt-in.
+		// The @Profile gate alone is not sufficient — operators running a
+		// dev pod by accident must not auto-create a SUPER_ADMIN with a
+		// publicly-known password. We require an explicit env var.
+		// ===================================================================
+		if (!superAdminSeedEnabled) {
+			log.info("[dev-seed] SUPER_ADMIN seed skipped (set EDUSHIFT_SEED_SUPER_ADMIN=true "
+					+ "or dev.seed.super-admin.enabled=true to enable).");
+		}
+		else {
+			seedSuperAdmin();
+		}
+	}
+
+	/**
+	 * Seed the SUPER_ADMIN account for the {@code edushift-system} sentinel
+	 * tenant. Behavior:
+	 * <ul>
+	 *   <li>If {@code dev.seed.super-admin.password} is set, it is hashed
+	 *       and persisted directly (logged at INFO; never written to
+	 *       source).</li>
+	 *   <li>If no password is supplied, a strong random 24-char password
+	 *       is generated at startup and logged once at INFO. The DB row is
+	 *       stamped with a sentinel hash so {@code AdminAuthService} rejects
+	 *       the seed credential and forces the operator through the
+	 *       break-glass recovery flow before any privileged action.</li>
+	 *   <li>MFA is intentionally NOT enabled: the seeded operator must
+	 *       complete TOTP enrolment on first login (H-02 enforces this).</li>
+	 * </ul>
+	 */
+	private void seedSuperAdmin() {
+		TenantContext.runAs(SUPER_ADMIN_SENTINEL_TENANT, () -> {
 			txTemplate.executeWithoutResult(status -> {
-				if (userRepository.existsByEmail(adminEmail.toLowerCase())) {
-					log.info("[dev-seed] admin '{}' already exists for tenant '{}' — no-op",
-							adminEmail, tenantSlug);
+				if (userRepository.existsByEmail(superAdminEmail.toLowerCase())) {
+					log.info("[dev-seed] SUPER_ADMIN '{}' already exists — no-op",
+							superAdminEmail);
 					return;
 				}
 
-				User admin = buildAdmin(adminEmail, adminPassword, adminFirstName, adminLastName);
-				userRepository.save(admin);
+				String dbPasswordHash;
+				String passwordForLog;
+				if (superAdminPasswordAuto) {
+					dbPasswordHash = SUPER_ADMIN_RESET_SENTINEL_HASH;
+					passwordForLog = generateRandomPassword();
+					log.warn("====================================================================");
+					log.warn("[dev-seed] NEW SUPER_ADMIN SEEDED — break-glass credentials "
+							+ "(shown once, NOT recoverable):");
+					log.warn("[dev-seed]   email:    {}", superAdminEmail);
+					log.warn("[dev-seed]   password: {}", passwordForLog);
+					log.warn("[dev-seed] On first login the seed credential will be rejected "
+							+ "with PASSWORD_RESET_REQUIRED. Use POST /admin/recover to bootstrap.");
+					log.warn("====================================================================");
+				}
+				else {
+					dbPasswordHash = passwordEncoder.encode(superAdminPasswordRaw);
+					passwordForLog = "[from env var dev.seed.super-admin.password]";
+					log.warn("[dev-seed] SUPER_ADMIN seeded with password from env var. "
+							+ "First login will require MFA enrolment (H-02).");
+				}
 
-				log.info("[dev-seed] created dev admin: email='{}', tenant='{}', publicUuid='{}'. "
-						+ "Default password: '{}' (override with DEV_SEED_ADMIN_PASSWORD).",
-						admin.getEmail(), tenantSlug, admin.getPublicUuid(), adminPassword);
+				User superAdmin = new User();
+				superAdmin.setEmail(superAdminEmail);
+				superAdmin.setPasswordHash(dbPasswordHash);
+				superAdmin.setFirstName("Super");
+				superAdmin.setLastName("Admin");
+				superAdmin.setStatus(UserStatus.ACTIVE);
+				superAdmin.setEmailVerified(true);
+				superAdmin.setMfaEnabled(false);
+				superAdmin.addRole(UserRole.SUPER_ADMIN);
+				userRepository.save(superAdmin);
+
+				log.info("[dev-seed] created SUPER_ADMIN: email='{}', publicUuid='{}'. "
+						+ "Credentials: {}", superAdmin.getEmail(),
+						superAdmin.getPublicUuid(), passwordForLog);
 			});
 			return null;
 		});
+	}
+
+	/**
+	 * Returns {@code true} when the password hash stored on the user row
+	 * is one of the sentinel non-bcrypt placeholders. Public so that
+	 * {@code AdminAuthService} can use the same predicate at login time.
+	 */
+	public static boolean isSeedPasswordResetSentinel(String hash) {
+		return hash != null
+				&& (hash.startsWith("SEED_RESET_REQUIRED_v1")
+						|| hash.startsWith("SUPER_ADMIN_RESET_REQUIRED_v1"));
+	}
+
+	private String generateRandomPassword() {
+		String chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789!@#$%^&*";
+		StringBuilder sb = new StringBuilder(24);
+		for (int i = 0; i < 24; i++) {
+			sb.append(chars.charAt(secureRandom.nextInt(chars.length())));
+		}
+		return sb.toString();
 	}
 
 	private UUID findDemoTenantId() {
@@ -155,23 +261,6 @@ public class DevDataInitializer implements CommandLineRunner {
 		}
 	}
 
-	/**
-	 * V38 seeds user rows with a sentinel password hash that REJECTS login
-	 * (cannot be a real BCrypt). On dev startup we walk every tenant and
-	 * overwrite those sentinel hashes with a real BCrypt of
-	 * {@code dev.seed.password} (default {@code EduShift2026!}) so the
-	 * seeded admin / teachers / parents can log in.
-	 *
-	 * <p>Idempotent: rows whose password_hash no longer starts with
-	 * {@link #SEED_HASH_SENTINEL} are skipped, so re-runs are no-ops once
-	 * the sentinel has been replaced.</p>
-	 *
-	 * <p>Multi-tenancy note: the same dance as {@link #run} — enter
-	 * {@code runAs} per tenant, then open a new transaction inside. We use
-	 * raw SQL to find the sentinel rows because the {@code @TenantId}
-	 * filter is the last thing to apply, and we want to update them all
-	 * without writing a JPA entity for the sentinel state.</p>
-	 */
 	private void resetSeededUserPasswords() {
 		List<UUID> tenantIds = jdbcTemplate.query(FIND_TENANTS_SQL,
 				(rs, rowNum) -> (UUID) rs.getObject(1));
@@ -220,7 +309,8 @@ public class DevDataInitializer implements CommandLineRunner {
 
 		if (totalReset == 0) {
 			log.debug("[dev-seed] no seeded users with sentinel hash found — nothing to reset");
-		} else {
+		}
+		else {
 			log.info("[dev-seed] reset {} seeded user password(s) to real BCrypt of '{}'",
 					totalReset, seedPassword);
 		}
@@ -236,13 +326,7 @@ public class DevDataInitializer implements CommandLineRunner {
 		user.setStatus(UserStatus.ACTIVE);
 		user.setEmailVerified(true);
 		user.setMfaEnabled(false);
-		// Sprint 2 (BE-2.4): the seed admin needs TENANT_ADMIN so the dev
-		// environment can exercise role-gated endpoints (e.g.
-		// PATCH /tenants/me). The Flyway V8 backfill covers tenants whose
-		// seed admin already exists; this line covers fresh boots.
 		user.addRole(com.edushift.modules.auth.entity.UserRole.TENANT_ADMIN);
-		// publicUuid is generated in @PrePersist; tenant_id is auto-populated
-		// by Hibernate's @TenantId discriminator from TenantContext.
 		return user;
 	}
 

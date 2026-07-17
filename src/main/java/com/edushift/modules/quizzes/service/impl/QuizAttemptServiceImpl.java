@@ -49,6 +49,7 @@ import java.util.Set;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.security.core.Authentication;
@@ -107,6 +108,7 @@ public class QuizAttemptServiceImpl implements QuizAttemptService {
 	private final UserRepository userRepository;
 	private final QuizAttemptMapper attemptMapper;
 	private final CurrentUserProvider currentUserProvider;
+	private final ApplicationEventPublisher eventPublisher; // Sprint 9 / BE-9.3
 
 	// ------------------------------------------------------------------
 	// Taker
@@ -301,6 +303,25 @@ public class QuizAttemptServiceImpl implements QuizAttemptService {
 		log.info("Quiz attempt submitted publicUuid={} status={} autoScore={}",
 				saved.getPublicUuid(), saved.getStatus(), autoTotal);
 
+		// Sprint 9 / BE-9.3 — fire AI_FEEDBACK_READY when fully auto-graded.
+		if (saved.getStatus() == AttemptStatus.GRADED) {
+			UUID studentUserId = saved.getStudentUserId();
+			if (studentUserId != null) {
+				eventPublisher.publishEvent(
+						com.edushift.modules.notifications.event.NotificationEvent.builder()
+								.templateKey("AI_FEEDBACK_READY")
+								.category(com.edushift.modules.notifications.entity.Notification.Category.AI_FEEDBACK)
+								.sourceId(saved.getPublicUuid())
+								.recipients(java.util.List.of(
+										new com.edushift.modules.notifications.event.NotificationEvent.Recipient(
+												studentUserId, null)))
+								.payload(java.util.Map.of(
+										"studentName", "",
+										"taskTitle", saved.getQuiz().getTitle()))
+								.build());
+			}
+		}
+
 		// Caller (student) sees their own attempt; reveal only if
 		// already fully graded.
 		boolean reveal = saved.getStatus() == AttemptStatus.GRADED;
@@ -378,6 +399,24 @@ public class QuizAttemptServiceImpl implements QuizAttemptService {
 		QuizAttempt saved = attemptRepository.save(attempt);
 		log.info("Quiz attempt graded publicUuid={} status={} score={}",
 				saved.getPublicUuid(), saved.getStatus(), saved.getScore());
+
+		// Sprint 9 / BE-9.3 — fire AI_FEEDBACK_READY after manual grading.
+		UUID studentUserId = saved.getStudentUserId();
+		if (studentUserId != null) {
+			eventPublisher.publishEvent(
+					com.edushift.modules.notifications.event.NotificationEvent.builder()
+							.templateKey("AI_FEEDBACK_READY")
+							.category(com.edushift.modules.notifications.entity.Notification.Category.AI_FEEDBACK)
+							.sourceId(saved.getPublicUuid())
+							.recipients(java.util.List.of(
+									new com.edushift.modules.notifications.event.NotificationEvent.Recipient(
+											studentUserId, null)))
+							.payload(java.util.Map.of(
+									"studentName", "",
+									"taskTitle", saved.getQuiz().getTitle()))
+							.build());
+		}
+
 		return attemptMapper.toResponse(saved, attempt.getQuiz(), true,
 				pendingAnswerCount(saved));
 	}
@@ -446,22 +485,19 @@ public class QuizAttemptServiceImpl implements QuizAttemptService {
 	 *
 	 * <p><b>Identifier contract.</b> The {@code userId} argument is the
 	 * caller's {@code User.publicUuid} (carried as the JWT {@code sub} claim,
-	 * surfaced via {@link CurrentUserProvider#currentUserId()}). However,
-	 * {@code students.user_id} is a FK to {@code users.id} (internal UUIDv7,
-	 * see V10 {@code fk_students_user}), <em>not</em> to {@code public_uuid}.
-	 * We therefore dereference {@code public_uuid → id → user_id} in two
-	 * steps, matching the pattern already in use by
-	 * {@code QuizRubricServiceImpl.gradeWithRubric} (BE-7b.3).
+	 * surfaced via {@link CurrentUserProvider#currentUserId()}).
+	 *
+	 * <p>DEBT-FK-BUGS-3 / V76: {@code students.user_id} FK now points at
+	 * {@code users.public_uuid}, matching the caller id directly. The
+	 * two-step dereference ({@code public_uuid → id → user_id}) collapses
+	 * to a single repository call. This also matches the simplification
+	 * in {@code QuizRubricServiceImpl.gradeWithRubric}.</p>
 	 */
 	private void requireEnrolledStudent(Section section, UUID userPublicUuid) {
 		if (section == null || userPublicUuid == null) {
 			throw new StudentNotEnrolledException("null");
 		}
-		UUID userInternalId = userRepository.findByPublicUuid(userPublicUuid)
-				.map(User::getId)
-				.orElseThrow(() -> new StudentNotEnrolledException(
-						section.getPublicUuid().toString()));
-		Student student = studentRepository.findByUserId(userInternalId)
+		Student student = studentRepository.findByUserId(userPublicUuid)
 				.orElseThrow(() -> new StudentNotEnrolledException(
 						section.getPublicUuid().toString()));
 		boolean active = enrollmentRepository.existsActiveAt(

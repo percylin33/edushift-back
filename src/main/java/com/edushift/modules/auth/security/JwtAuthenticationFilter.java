@@ -79,6 +79,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
 	private final JwtService jwtService;
 	private final LmsRoleAuthorityMapper lmsRoleAuthorityMapper;
+	private final com.edushift.modules.tenants.repository.TenantRepository tenantRepository;
 
 	@Override
 	protected void doFilterInternal(HttpServletRequest request,
@@ -135,17 +136,46 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 		}
 
 		if (claims.tenantId() == null) {
-			log.debug("[auth] reject bearer ({}): missing tenant_id claim",
-					request.getRequestURI());
-			return;
+			// Sprint 15 / BE-15.1: SUPER_ADMIN tokens may not carry a
+			// tenant_id — they use the sentinel tenant instead.
+			Set<String> roles = claims.roles();
+			if (roles == null || !roles.contains("SUPER_ADMIN")) {
+				log.debug("[auth] reject bearer ({}): missing tenant_id claim",
+						request.getRequestURI());
+				return;
+			}
 		}
 
-		List<GrantedAuthority> authorities = mapAuthorities(claims.roles());
+		List<GrantedAuthority> authorities = mapAuthorities(
+				claims.tenantId(),
+				claims.roles());
 		JwtAuthenticatedPrincipal principal = new JwtAuthenticatedPrincipal(
 				publicUuid,
-				claims.tenantId(),
+				claims.tenantId() != null ? claims.tenantId() : com.edushift.infrastructure.multitenancy.TenantIdResolver.SUPER_ADMIN_SENTINEL,
 				claims.tenantSlug(),
 				/* email */ null);
+
+		// ====================================================================
+		// Sprint 15 / F-04 / H-06: a previously-issued access token must NOT
+		// keep working if the tenant has since been SUSPENDED. SUPER_ADMIN
+		// tokens use the sentinel tenant (no real status), so they bypass.
+		// ====================================================================
+		if (claims.tenantId() != null
+				&& !com.edushift.infrastructure.multitenancy.TenantIdResolver.SUPER_ADMIN_SENTINEL
+						.equals(claims.tenantId())) {
+			com.edushift.modules.tenants.entity.TenantStatus status =
+					com.edushift.modules.tenants.entity.TenantStatus.ACTIVE;
+			java.util.Optional<com.edushift.modules.tenants.entity.Tenant> tenant =
+					tenantRepository.findById(claims.tenantId());
+			if (tenant.isPresent()) {
+				status = tenant.get().getStatus();
+			}
+			if (status == null || !status.canAuthenticate()) {
+				log.warn("[auth] rejecting bearer for inactive tenant: tenantId={}, status={}, path={}",
+						claims.tenantId(), status, request.getRequestURI());
+				return;
+			}
+		}
 
 		JwtAuthenticationToken auth = new JwtAuthenticationToken(principal, token, authorities);
 		SecurityContextHolder.getContext().setAuthentication(auth);
@@ -170,17 +200,18 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 		}
 	}
 
-	private List<GrantedAuthority> mapAuthorities(Set<String> roles) {
+	private List<GrantedAuthority> mapAuthorities(UUID tenantId, Set<String> roles) {
 		if (roles == null || roles.isEmpty()) {
 			return List.of();
 		}
-		// (Sprint 7a / BE-7a.3) Two-tier authority shape:
+		// (Sprint 7a / BE-7a.3 / D1) Two-tier authority shape:
 		//   1. Coarse ROLE_* authorities (backward-compat for
 		//      @PreAuthorize("hasRole('TENANT_ADMIN')") and friends).
 		//   2. Granular LMS_* authorities (the new
 		//      @PreAuthorize("hasAuthority('LMS_TASK_SUBMIT')") pattern).
-		// The set is dedup'd via LinkedHashSet for stable iteration
-		// order (testability).
+		// D1: the LMS_* set is tenant-aware — it threads tenantId through
+		// the mapper so per-tenant overrides are applied at JWT minting
+		// time. Without D1, this fall back to the platform default.
 		Set<String> authorities = new LinkedHashSet<>();
 		List<UserRole> parsedRoles = new ArrayList<>();
 		for (String r : roles) {
@@ -192,9 +223,9 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 				parsedRoles.add(parsed);
 			}
 		}
-		// Add the LMS_* mapping. Unknown / future roles silently
-		// contribute no granular authority (defensive).
-		authorities.addAll(lmsRoleAuthorityMapper.mapAuthorities(parsedRoles));
+		// Tenant-aware resolution. SUPER_ADMIN bypasses overrides anyway
+		// (the mapper detects it via the role itself).
+		authorities.addAll(lmsRoleAuthorityMapper.resolveFor(tenantId, parsedRoles));
 		return authorities.stream()
 				.<GrantedAuthority>map(SimpleGrantedAuthority::new)
 				.toList();

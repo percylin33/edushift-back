@@ -50,6 +50,7 @@ class LoginAttemptServiceTest {
 
 	@Mock private FailedLoginAttemptRepository attemptRepository;
 	@Mock private UserRepository userRepository;
+	@Mock private com.edushift.modules.tenants.repository.TenantRepository tenantRepository;
 	@InjectMocks private LoginAttemptService service;
 
 	private static final UUID TENANT_ID = UUID.randomUUID();
@@ -161,11 +162,20 @@ class LoginAttemptServiceTest {
 	@DisplayName("DEBT-AUTH-7: Unknown email still counts (anti-probing) — short-circuits in repo")
 	void unknownEmailShortCircuits() {
 		when(userRepository.findByEmail("ghost@example.com")).thenReturn(Optional.empty());
+		// The production code still reads the tenant slug to satisfy the
+		// NOT NULL constraint on failed_login_attempts.tenant_slug,
+		// even when the user lookup misses. Mock it to return a real
+		// tenant so the save flow can complete.
+		var tenant = new com.edushift.modules.tenants.entity.Tenant();
+		tenant.setSlug("tecnosur");
+		when(tenantRepository.findById(TENANT_ID)).thenReturn(Optional.of(tenant));
 
-		// Should NOT throw, should NOT save anything.
+		// Should NOT throw. The attempt IS still counted (anti-probing
+		// defense — we don't want attackers to enumerate which emails
+		// are real), just without the user entity attached.
 		service.recordFailure("ghost@example.com");
 
-		verify(attemptRepository, never()).saveAndFlush(any());
+		verify(attemptRepository, times(1)).saveAndFlush(any());
 	}
 
 	@Test

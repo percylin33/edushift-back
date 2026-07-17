@@ -1,5 +1,6 @@
 package com.edushift.config;
 
+import com.edushift.modules.admin.impersonation.ImpersonationFilter;
 import com.edushift.modules.auth.security.JwtAuthenticationFilter;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -128,10 +129,28 @@ public class SecurityConfig {
 			"/v3/api-docs",
 			"/v3/api-docs/**",
 			"/actuator/health",
-			"/actuator/info"
+			"/actuator/info",
+			// Sprint 15 / BE-15.1: admin login is public (no tenant context).
+			"/v1/admin/login",
+			// Sprint 15 / F-02 follow-up: dev-only MFA enrolment bypass.
+			// The controller bean is itself @Profile({"dev","local"}) — in prod
+			// the path is unmapped and Spring returns 404. Auth here is the
+			// static X-Dev-Code header (compared in constant time) plus the
+			// ONBOARDING bearer from /admin/login.
+			"/v1/admin/dev/**",
+			// Help manuals — public so the login screen (and a future
+			// unauthenticated help page) can advertise which role-based
+			// manuals exist before the user authenticates. The `/**`
+			// matches both the index (`/v1/help/manuals`) and the
+			// per-chapter endpoints (`/v1/help/manuals/{role}/{file}`).
+			// The response is intentionally metadata + public docs only.
+			"/v1/help/manuals",
+			"/v1/help/manuals/**"
 	};
 
 	private final JwtAuthenticationFilter jwtAuthenticationFilter;
+
+	private final ImpersonationFilter impersonationFilter;
 
 	private final HandlerExceptionResolver handlerExceptionResolver;
 
@@ -153,9 +172,11 @@ public class SecurityConfig {
 	 */
 	public SecurityConfig(
 			JwtAuthenticationFilter jwtAuthenticationFilter,
+			ImpersonationFilter impersonationFilter,
 			@Qualifier("handlerExceptionResolver") HandlerExceptionResolver handlerExceptionResolver,
 			CorsConfigurationSource corsConfigurationSource) {
 		this.jwtAuthenticationFilter = jwtAuthenticationFilter;
+		this.impersonationFilter = impersonationFilter;
 		this.handlerExceptionResolver = handlerExceptionResolver;
 		this.corsConfigurationSource = corsConfigurationSource;
 	}
@@ -222,7 +243,8 @@ public class SecurityConfig {
 								org.springframework.security.web.header.writers.CrossOriginEmbedderPolicyHeaderWriter.CrossOriginEmbedderPolicy.REQUIRE_CORP))
 						.crossOriginResourcePolicy(corp -> corp.policy(
 								org.springframework.security.web.header.writers.CrossOriginResourcePolicyHeaderWriter.CrossOriginResourcePolicy.SAME_ORIGIN)))
-				.addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
+				.addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)
+				.addFilterAfter(impersonationFilter, JwtAuthenticationFilter.class);
 
 		return http.build();
 	}

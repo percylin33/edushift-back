@@ -25,6 +25,7 @@ import java.util.Optional;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
@@ -66,6 +67,7 @@ public class SubmissionServiceImpl implements SubmissionService {
 	private final SubmissionRevisionRepository revisionRepository;
 	private final FileObjectService fileObjectService;
 	private final SubmissionMapper submissionMapper;
+	private final ApplicationEventPublisher eventPublisher; // Sprint 9 / BE-9.3
 
 	@Override
 	@Transactional
@@ -161,6 +163,28 @@ public class SubmissionServiceImpl implements SubmissionService {
 		entity.setStatus(SubmissionStatus.GRADED);
 
 		Submission saved = submissionRepository.save(entity);
+
+		// Sprint 9 / BE-9.3 — fire TASK_RETURNED to the student.
+		UUID studentUserId = saved.getStudentUserId();
+		if (studentUserId != null) {
+			String taskTitle = saved.getTask() == null ? "" : saved.getTask().getTitle();
+			eventPublisher.publishEvent(
+					com.edushift.modules.notifications.event.NotificationEvent.builder()
+							.templateKey("TASK_RETURNED")
+							.category(com.edushift.modules.notifications.entity.Notification.Category.TASK)
+							.sourceId(saved.getPublicUuid())
+							.recipients(java.util.List.of(
+									new com.edushift.modules.notifications.event.NotificationEvent.Recipient(
+											studentUserId, null)))
+							.payload(java.util.Map.of(
+									"studentName", "",
+									"taskTitle", taskTitle,
+									"grade", saved.getGrade() == null ? "" : saved.getGrade().toString(),
+									"maxGrade", "100",
+									"teacherComment", saved.getFeedback() == null ? "" : saved.getFeedback()))
+							.build());
+		}
+
 		// (D-TSK-07) teacher-must-own-section check is a stub in v1
 		// (DEBT-7A-25 follow-up).
 		return submissionMapper.toResponse(saved);

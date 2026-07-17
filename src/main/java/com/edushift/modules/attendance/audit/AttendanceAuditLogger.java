@@ -235,6 +235,31 @@ public class AttendanceAuditLogger {
 	}
 
 	// =====================================================================
+	// Justifications (BE-18.5)
+	// =====================================================================
+
+	/** Audit when a justification is submitted. */
+	public void logJustificationSubmitted(AttendanceRecord record) {
+		Map<String, Object> meta = baseMeta(AttendanceAuditEventTypes.JUSTIFICATION_SUBMITTED);
+		meta.put("publicUuid", uuid(record.getPublicUuid()));
+		emit(AuditAction.UPDATE, AttendanceAuditEventTypes.RESOURCE_RECORD,
+				record.getPublicUuid(), "Justification submitted", meta);
+	}
+
+	/** Audit when a justification is approved or rejected. */
+	public void logJustificationResolved(AttendanceRecord record, boolean approved) {
+		Map<String, Object> meta = baseMeta(AttendanceAuditEventTypes.JUSTIFICATION_RESOLVED);
+		meta.put("publicUuid", uuid(record.getPublicUuid()));
+		meta.put("status", record.getJustificationStatus() != null
+				? record.getJustificationStatus().name() : null);
+		emit(approved ? AuditAction.UPDATE : AuditAction.UPDATE,
+				AttendanceAuditEventTypes.RESOURCE_RECORD,
+				record.getPublicUuid(),
+				approved ? "Justification approved" : "Justification rejected",
+				meta);
+	}
+
+	// =====================================================================
 	// Helpers
 	// =====================================================================
 

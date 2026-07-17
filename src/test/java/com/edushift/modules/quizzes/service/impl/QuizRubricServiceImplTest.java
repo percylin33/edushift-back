@@ -62,7 +62,10 @@ class QuizRubricServiceImplTest {
     @Test
     @DisplayName("gradeWithRubric — missing attempt surfaces as NotFoundException")
     void gradeWithRubric_missingAttempt() {
-        when(quizRepository.findByPublicUuid(any())).thenReturn(Optional.of(quiz()));
+        // The attemptRepository.findByPublicUuid stub below throws
+        // NotFoundException via orElseThrow BEFORE the code reaches
+        // quizRepository.findByPublicUuid — so we don't stub the latter
+        // (Mockito strict mode would flag it as UnnecessaryStubbing).
         when(attemptRepository.findByPublicUuid(any())).thenReturn(Optional.empty());
         assertThatThrownBy(() -> service.gradeWithRubric(UUID.randomUUID(),
                 new com.edushift.modules.quizzes.dto.GradeWithRubricRequest(

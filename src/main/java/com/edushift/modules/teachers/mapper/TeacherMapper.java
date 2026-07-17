@@ -116,7 +116,11 @@ public class TeacherMapper {
 
 	private java.util.UUID resolveUserPublicUuid(Teacher teacher) {
 		if (teacher.getUserId() == null) return null;
-		return userRepository.findById(teacher.getUserId())
+		// DEBT-FK-BUGS-3 / V77: teachers.user_id stores users.public_uuid
+		// (not users.id). The column is now a direct publicUuid — no
+		// translation needed, but we verify the value still resolves to
+		// a real user (defensive against stale rows from before V77).
+		return userRepository.findByPublicUuid(teacher.getUserId())
 				.map(User::getPublicUuid)
 				.orElse(null);
 	}

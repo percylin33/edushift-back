@@ -20,5 +20,14 @@ class AttendanceQrServiceImplTest {
     @Mock StudentRepository studentRepo; @Mock StudentAttendanceQrRepository qrRepo;
     @Mock QrTokenService qrTokenService; @Mock CurrentUserProvider currentUser; @Mock AttendanceAuditLogger auditLogger;
     @InjectMocks AttendanceQrServiceImpl service;
-    @Test void getOrIssueThrowsForMissingStudent() { when(studentRepo.findByPublicUuid(any())).thenReturn(Optional.empty()); assertThatThrownBy(() -> service.getOrIssueQr(UUID.randomUUID())).isInstanceOf(ResourceNotFoundException.class); }
+    @Test void getOrIssueThrowsForMissingStudent() {
+        // The production code requires an authenticated user+tenant
+        // before it reaches the student lookup; mock those first or
+        // the test would short-circuit on UnauthorizedException.
+        when(currentUser.currentUserId()).thenReturn(Optional.of(UUID.randomUUID()));
+        when(currentUser.currentTenantId()).thenReturn(Optional.of(UUID.randomUUID()));
+        when(studentRepo.findByPublicUuid(any())).thenReturn(Optional.empty());
+        assertThatThrownBy(() -> service.getOrIssueQr(UUID.randomUUID()))
+                .isInstanceOf(ResourceNotFoundException.class);
+    }
 }

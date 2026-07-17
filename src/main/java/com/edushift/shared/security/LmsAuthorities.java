@@ -65,6 +65,22 @@ public final class LmsAuthorities {
 	// @PreAuthorize can resolve it via hasAuthority(...).
 	public static final String LMS_ANNOUNCEMENTS_CREATE = "LMS_ANNOUNCEMENTS_CREATE";
 
+	// Notifications admin (Sprint 10 / BE-10.x). Gates the admin surface
+	// of /api/v1/notifications/templates and /api/v1/notifications/admin/*
+	// (create / publish / configure). Granted to TENANT_ADMIN + SUPER_ADMIN.
+	// DEBT-QA-2 (GAP-2 from QA plan 2026-07-02): this constant was missing
+	// although NotificationController.java:132,138 referenced the string
+	// literal directly, which silently always returned 403 for every role.
+	// Centralised here so @PreAuthorize resolves it via hasAuthority(...).
+	public static final String LMS_NOTIFICATIONS_MANAGE = "LMS_NOTIFICATIONS_MANAGE";
+
+	// AI usage visibility (Sprint 7c / BE-7c.2). Gates GET /api/v1/ai/usage
+	// (own-tenant AI token consumption breakdown, quotas, billing). Granted
+	// to TENANT_ADMIN + SUPER_ADMIN.
+	// DEBT-QA-2 (GAP-2 from QA plan 2026-07-02): missing — UsageController
+	// referenced the literal silently and always returned 403.
+	public static final String LMS_AI_USAGE = "LMS_AI_USAGE";
+
 	private LmsAuthorities() {
 		// utility class
 	}

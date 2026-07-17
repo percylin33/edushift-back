@@ -55,6 +55,7 @@ class SubmissionServiceImplTest {
     @Mock private SubmissionRevisionRepository revisionRepository;
     @Mock private FileObjectService fileObjectService;
     @Mock private SubmissionMapper submissionMapper;
+    @Mock private org.springframework.context.ApplicationEventPublisher eventPublisher;
 
     @InjectMocks private SubmissionServiceImpl service;
 

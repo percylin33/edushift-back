@@ -8,6 +8,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.when;
 
 import com.edushift.modules.auth.dto.AuthResponse;
@@ -30,6 +31,7 @@ import com.edushift.shared.exception.ConflictException;
 import com.edushift.shared.exception.UnauthorizedException;
 import com.edushift.shared.multitenancy.TenantContext;
 import java.lang.reflect.Field;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.AfterEach;
@@ -68,6 +70,7 @@ class TenantServiceImplTest {
 	@Mock private PasswordEncoder passwordEncoder;
 	@Mock private AuthService authService;
 	@Mock private com.edushift.modules.academic.levelgrade.service.AcademicSeedService academicSeedService;
+	@Mock private com.edushift.modules.admin.plans.PlatformPlanRepository platformPlanRepository;
 	@Mock private PlatformTransactionManager txManager;
 
 	private TenantServiceImpl service;
@@ -84,8 +87,22 @@ class TenantServiceImplTest {
 				passwordEncoder,
 				authService,
 				academicSeedService,
+				platformPlanRepository,
 				txManager
 		);
+		// Default platform-plan catalog: the production code falls back
+		// from findByCode to findByIsActiveTrueOrderBySortOrder. Provide
+		// a single entry so tests that exercise the tenant plan lookup
+		// don't trip the IllegalState "No platform_plans rows available"
+		// guard. Tests that don't exercise plan resolution ignore this
+		// stub (lenient).
+		var defaultPlan = new com.edushift.modules.admin.plans.PlatformPlan();
+		defaultPlan.setId(UUID.randomUUID());
+		defaultPlan.setCode("TRIAL");
+		lenient().when(platformPlanRepository.findByIsActiveTrueOrderBySortOrder())
+				.thenReturn(List.of(defaultPlan));
+		lenient().when(platformPlanRepository.findByCode("TRIAL"))
+				.thenReturn(Optional.of(defaultPlan));
 	}
 
 	@AfterEach
@@ -409,9 +426,16 @@ class TenantServiceImplTest {
 			RegisterTenantRequest request = sampleRequest("acme-co", "Founder", "founder@acme.test");
 
 			when(tenantRepository.findBySlugIgnoreCase("acme-co")).thenReturn(Optional.empty());
+			// The production code inspects the SQLState on the wrapped
+			// SQLException to decide whether to translate to
+			// TENANT_SLUG_TAKEN (unique-index violation, 23505) or
+			// rethrow the original error. Build the chain explicitly so
+			// the walk-up reaches 23505.
+			var sqlEx = new java.sql.SQLException(
+					"duplicate key violates uk_tenants_slug_active", "23505");
 			when(tenantRepository.saveAndFlush(any(Tenant.class)))
 					.thenThrow(new DataIntegrityViolationException(
-							"duplicate key violates uk_tenants_slug_active"));
+							"duplicate key violates uk_tenants_slug_active", sqlEx));
 
 			assertThatThrownBy(() -> service.register(request))
 					.isInstanceOfSatisfying(ConflictException.class, ex -> {

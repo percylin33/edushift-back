@@ -38,11 +38,15 @@ class RubricValidationServiceTest {
     }
 
     private static List<LevelInput> defaultLevels() {
+        // Simple codes so the {@code criterion()} helper (which creates
+        // descriptors with level="A") matches the cross-reference check.
+        // The descriptive Spanish names (En inicio / En proceso / ...) are
+        // preserved for the API response but don't affect validation.
         return List.of(
-                new LevelInput("EN_INICIO", "En inicio", 1),
-                new LevelInput("EN_PROCESO", "En proceso", 2),
-                new LevelInput("ESPERADO", "Esperado", 3),
-                new LevelInput("SOBRESALIENTE", "Sobresaliente", 4));
+                new LevelInput("A", "En inicio", 1),
+                new LevelInput("B", "En proceso", 2),
+                new LevelInput("C", "Esperado", 3),
+                new LevelInput("D", "Sobresaliente", 4));
     }
 
     private static List<CriterionInput> validCriteria() {
@@ -60,8 +64,8 @@ class RubricValidationServiceTest {
         @DisplayName("0 criteria → RUB_CRITERIA_COUNT")
         void empty() {
             assertThatThrownBy(() -> service.assertShapeValid(List.of(), defaultLevels()))
-                    .isInstanceOf(BadRequestException.class)
-                    .hasMessageContaining("RUB_CRITERIA_COUNT");
+                    .isInstanceOfSatisfying(BadRequestException.class,
+                            ex -> assertThat(ex.getCode()).isEqualTo("RUB_CRITERIA_COUNT"));
         }
 
         @Test
@@ -72,8 +76,8 @@ class RubricValidationServiceTest {
                 many.add(criterion("k" + i, "n" + i, "9.09"));
             }
             assertThatThrownBy(() -> service.assertShapeValid(many, defaultLevels()))
-                    .isInstanceOf(BadRequestException.class)
-                    .hasMessageContaining("RUB_CRITERIA_COUNT");
+                    .isInstanceOfSatisfying(BadRequestException.class,
+                            ex -> assertThat(ex.getCode()).isEqualTo("RUB_CRITERIA_COUNT"));
         }
 
         @Test
@@ -103,8 +107,8 @@ class RubricValidationServiceTest {
         void tooFew() {
             assertThatThrownBy(() -> service.assertShapeValid(
                     validCriteria(), List.of(new LevelInput("A", "A", 1))))
-                    .isInstanceOf(BadRequestException.class)
-                    .hasMessageContaining("RUB_LEVELS_COUNT");
+                    .isInstanceOfSatisfying(BadRequestException.class,
+                            ex -> assertThat(ex.getCode()).isEqualTo("RUB_LEVELS_COUNT"));
         }
 
         @Test
@@ -118,8 +122,8 @@ class RubricValidationServiceTest {
                             new LevelInput("C", "C", 3),
                             new LevelInput("D", "D", 4),
                             new LevelInput("E", "E", 5))))
-                    .isInstanceOf(BadRequestException.class)
-                    .hasMessageContaining("RUB_LEVELS_COUNT");
+                    .isInstanceOfSatisfying(BadRequestException.class,
+                            ex -> assertThat(ex.getCode()).isEqualTo("RUB_LEVELS_COUNT"));
         }
     }
 
@@ -136,8 +140,8 @@ class RubricValidationServiceTest {
                     new LevelInput("B", "B", 3),
                     new LevelInput("C", "C", 4));
             assertThatThrownBy(() -> service.assertShapeValid(validCriteria(), levels))
-                    .isInstanceOf(BadRequestException.class)
-                    .hasMessageContaining("RUB_LEVEL_CODE_DUPLICATE");
+                    .isInstanceOfSatisfying(BadRequestException.class,
+                            ex -> assertThat(ex.getCode()).isEqualTo("RUB_LEVEL_CODE_DUPLICATE"));
         }
 
         @Test
@@ -149,8 +153,8 @@ class RubricValidationServiceTest {
                     new LevelInput("B", "B", 3),
                     new LevelInput("C", "C", 4));
             assertThatThrownBy(() -> service.assertShapeValid(validCriteria(), levels))
-                    .isInstanceOf(BadRequestException.class)
-                    .hasMessageContaining("RUB_LEVEL_CODE_DUPLICATE");
+                    .isInstanceOfSatisfying(BadRequestException.class,
+                            ex -> assertThat(ex.getCode()).isEqualTo("RUB_LEVEL_CODE_DUPLICATE"));
         }
     }
 
@@ -165,8 +169,8 @@ class RubricValidationServiceTest {
                     criterion("dup", "A", "50.00"),
                     criterion("dup", "B", "50.00"));
             assertThatThrownBy(() -> service.assertShapeValid(criteria, defaultLevels()))
-                    .isInstanceOf(BadRequestException.class)
-                    .hasMessageContaining("RUB_CRITERION_KEY_DUPLICATE");
+                    .isInstanceOfSatisfying(BadRequestException.class,
+                            ex -> assertThat(ex.getCode()).isEqualTo("RUB_CRITERION_KEY_DUPLICATE"));
         }
     }
 
@@ -181,8 +185,8 @@ class RubricValidationServiceTest {
                     criterion("a", "a", "30.00"),
                     criterion("b", "b", "30.00"));
             assertThatThrownBy(() -> service.assertShapeValid(criteria, defaultLevels()))
-                    .isInstanceOf(BadRequestException.class)
-                    .hasMessageContaining("RUB_CRITERIA_WEIGHT_SUM");
+                    .isInstanceOfSatisfying(BadRequestException.class,
+                            ex -> assertThat(ex.getCode()).isEqualTo("RUB_CRITERIA_WEIGHT_SUM"));
         }
 
         @Test
@@ -190,8 +194,8 @@ class RubricValidationServiceTest {
         void weightOverHundred() {
             var criteria = List.of(criterion("a", "a", "150.00"));
             assertThatThrownBy(() -> service.assertShapeValid(criteria, defaultLevels()))
-                    .isInstanceOf(BadRequestException.class)
-                    .hasMessageContaining("RUB_CRITERIA_WEIGHT_SUM");
+                    .isInstanceOfSatisfying(BadRequestException.class,
+                            ex -> assertThat(ex.getCode()).isEqualTo("RUB_CRITERIA_WEIGHT_SUM"));
         }
 
         @Test
@@ -199,8 +203,8 @@ class RubricValidationServiceTest {
         void negativeWeight() {
             var criteria = List.of(criterion("a", "a", "-1.00"));
             assertThatThrownBy(() -> service.assertShapeValid(criteria, defaultLevels()))
-                    .isInstanceOf(BadRequestException.class)
-                    .hasMessageContaining("RUB_CRITERIA_WEIGHT_SUM");
+                    .isInstanceOfSatisfying(BadRequestException.class,
+                            ex -> assertThat(ex.getCode()).isEqualTo("RUB_CRITERIA_WEIGHT_SUM"));
         }
 
         @Test
@@ -222,8 +226,8 @@ class RubricValidationServiceTest {
         void unknownLevel() {
             var criteria = List.of(criterionWithDescriptor("a", "100.00", "GHOST"));
             assertThatThrownBy(() -> service.assertShapeValid(criteria, defaultLevels()))
-                    .isInstanceOf(BadRequestException.class)
-                    .hasMessageContaining("RUB_LEVEL_UNKNOWN");
+                    .isInstanceOfSatisfying(BadRequestException.class,
+                            ex -> assertThat(ex.getCode()).isEqualTo("RUB_LEVEL_UNKNOWN"));
         }
 
         @Test
@@ -234,8 +238,8 @@ class RubricValidationServiceTest {
                             new DescriptorInput("A", "first"),
                             new DescriptorInput("A", "second")));
             assertThatThrownBy(() -> service.assertShapeValid(List.of(c), defaultLevels()))
-                    .isInstanceOf(BadRequestException.class)
-                    .hasMessageContaining("RUB_DESCRIPTOR_DUPLICATE");
+                    .isInstanceOfSatisfying(BadRequestException.class,
+                            ex -> assertThat(ex.getCode()).isEqualTo("RUB_DESCRIPTOR_DUPLICATE"));
         }
     }
 
@@ -262,8 +266,8 @@ class RubricValidationServiceTest {
                     criterion("a", "a", "50.00"),
                     criterion("a", "b", "50.00"));
             assertThatThrownBy(() -> service.assertCriteriaShapeValid(criteria))
-                    .isInstanceOf(BadRequestException.class)
-                    .hasMessageContaining("RUB_CRITERION_KEY_DUPLICATE");
+                    .isInstanceOfSatisfying(BadRequestException.class,
+                            ex -> assertThat(ex.getCode()).isEqualTo("RUB_CRITERION_KEY_DUPLICATE"));
         }
 
         @Test
@@ -273,8 +277,8 @@ class RubricValidationServiceTest {
                     new LevelInput("A", "A", 1),
                     new LevelInput("A", "A", 2));
             assertThatThrownBy(() -> service.assertLevelsShapeValid(levels))
-                    .isInstanceOf(BadRequestException.class)
-                    .hasMessageContaining("RUB_LEVEL_CODE_DUPLICATE");
+                    .isInstanceOfSatisfying(BadRequestException.class,
+                            ex -> assertThat(ex.getCode()).isEqualTo("RUB_LEVEL_CODE_DUPLICATE"));
         }
 
         @Test

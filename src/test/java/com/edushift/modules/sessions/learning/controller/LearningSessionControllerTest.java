@@ -66,7 +66,8 @@ import org.springframework.test.web.servlet.MockMvc;
 @Import({
     GlobalExceptionHandler.class,
     SecurityConfig.class,
-    WebConfiguration.class
+    WebConfiguration.class,
+		com.edushift.test.EdushiftWebMvcTestConfig.class,
 })
 @DisplayName("LearningSessionController — REST adapter")
 class LearningSessionControllerTest {
@@ -151,7 +152,7 @@ class LearningSessionControllerTest {
             );
             given(service.list(any())).willReturn(List.of(listItem));
 
-            mockMvc.perform(get("/learning-sessions")
+            mockMvc.perform(get("/v1/learning-sessions")
                     .with(authentication(authenticatedAdmin()))
                     .param("status", "PLANNED"))
                 .andExpect(status().isOk())
@@ -175,7 +176,7 @@ class LearningSessionControllerTest {
                 List.of(), List.of()
             );
 
-            mockMvc.perform(post("/learning-sessions")
+            mockMvc.perform(post("/v1/learning-sessions")
                     .with(authentication(authenticatedAdmin()))
                     .with(csrf())
                     .contentType(MediaType.APPLICATION_JSON)
@@ -194,7 +195,7 @@ class LearningSessionControllerTest {
         void returnsSession() throws Exception {
             given(service.get(sessionUuid)).willReturn(stubResponse);
 
-            mockMvc.perform(get("/learning-sessions/{publicUuid}", sessionUuid)
+            mockMvc.perform(get("/v1/learning-sessions/{publicUuid}", sessionUuid)
                     .with(authentication(authenticatedAdmin())))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.title").value("Class 1"));
@@ -212,7 +213,7 @@ class LearningSessionControllerTest {
 
             var patch = new UpdateLearningSessionRequest(null, "Updated", null, null, null, null, null, null);
 
-            mockMvc.perform(put("/learning-sessions/{publicUuid}", sessionUuid)
+            mockMvc.perform(put("/v1/learning-sessions/{publicUuid}", sessionUuid)
                     .with(authentication(authenticatedAdmin()))
                     .with(csrf())
                     .contentType(MediaType.APPLICATION_JSON)
@@ -229,7 +230,7 @@ class LearningSessionControllerTest {
         @Test
         @DisplayName("204 — borra la session")
         void removesSession() throws Exception {
-            mockMvc.perform(delete("/learning-sessions/{publicUuid}", sessionUuid)
+            mockMvc.perform(delete("/v1/learning-sessions/{publicUuid}", sessionUuid)
                     .with(authentication(authenticatedAdmin()))
                     .with(csrf()))
                 .andExpect(status().isNoContent());
@@ -244,7 +245,7 @@ class LearningSessionControllerTest {
         @DisplayName("200 — transiciona a IN_PROGRESS")
         void start() throws Exception {
             given(service.start(eq(sessionUuid), any())).willReturn(stubResponse);
-            mockMvc.perform(post("/learning-sessions/{publicUuid}/start", sessionUuid)
+            mockMvc.perform(post("/v1/learning-sessions/{publicUuid}/start", sessionUuid)
                     .with(authentication(authenticatedAdmin()))
                     .with(csrf())
                     .contentType(MediaType.APPLICATION_JSON)
@@ -261,7 +262,7 @@ class LearningSessionControllerTest {
         @DisplayName("200 — transiciona a COMPLETED")
         void complete() throws Exception {
             given(service.complete(eq(sessionUuid), any())).willReturn(stubResponse);
-            mockMvc.perform(post("/learning-sessions/{publicUuid}/complete", sessionUuid)
+            mockMvc.perform(post("/v1/learning-sessions/{publicUuid}/complete", sessionUuid)
                     .with(authentication(authenticatedAdmin()))
                     .with(csrf())
                     .contentType(MediaType.APPLICATION_JSON)
@@ -278,7 +279,7 @@ class LearningSessionControllerTest {
         @DisplayName("200 — cancela la session")
         void cancel() throws Exception {
             given(service.cancel(eq(sessionUuid), any())).willReturn(stubResponse);
-            mockMvc.perform(post("/learning-sessions/{publicUuid}/cancel", sessionUuid)
+            mockMvc.perform(post("/v1/learning-sessions/{publicUuid}/cancel", sessionUuid)
                     .with(authentication(authenticatedAdmin()))
                     .with(csrf())
                     .contentType(MediaType.APPLICATION_JSON)
@@ -304,7 +305,7 @@ class LearningSessionControllerTest {
                 Instant.parse("2026-01-01T00:00:00Z")
             );
             given(service.listByAssignment(assignmentUuid)).willReturn(List.of(listItem));
-            mockMvc.perform(get("/teacher-assignments/{a}/sessions", assignmentUuid)
+            mockMvc.perform(get("/v1/teacher-assignments/{a}/sessions", assignmentUuid)
                     .with(authentication(authenticatedAdmin())))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].title").value("Class 1"));
@@ -328,7 +329,7 @@ class LearningSessionControllerTest {
                 Instant.parse("2026-01-01T00:00:00Z")
             );
             given(service.listByUnit(unitUuid)).willReturn(List.of(listItem));
-            mockMvc.perform(get("/academic/units/{u}/sessions", unitUuid)
+            mockMvc.perform(get("/v1/academic/units/{u}/sessions", unitUuid)
                     .with(authentication(authenticatedAdmin())))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].title").value("Class 1"));
@@ -342,14 +343,14 @@ class LearningSessionControllerTest {
         @Test
         @DisplayName("GET /learning-sessions retorna 401")
         void list() throws Exception {
-            mockMvc.perform(get("/learning-sessions"))
+            mockMvc.perform(get("/v1/learning-sessions"))
                 .andExpect(status().isUnauthorized());
         }
 
         @Test
         @DisplayName("POST /learning-sessions retorna 401")
         void create() throws Exception {
-            mockMvc.perform(post("/learning-sessions")
+            mockMvc.perform(post("/v1/learning-sessions")
                     .with(csrf())
                     .contentType(MediaType.APPLICATION_JSON)
                     .content("{}"))

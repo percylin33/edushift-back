@@ -99,4 +99,14 @@ public interface RefreshTokenRepository extends JpaRepository<RefreshToken, UUID
 		return revokeAllByUser(userId, reason.name());
 	}
 
+	/**
+	 * Returns true when {@code tokenHash} already exists for {@code userId},
+	 * regardless of {@code revoked_at} / {@code deleted} state.
+	 *
+	 * <p>Used by {@code AuthServiceImpl.persistRefreshToken} to skip duplicate
+	 * inserts that would otherwise fail with 409 DATA_INTEGRITY_VIOLATION.
+	 * Spring Data derives the query from the method name — no JPQL needed.</p>
+	 */
+	boolean existsByTokenHashAndUserId(String tokenHash, UUID userId);
+
 }

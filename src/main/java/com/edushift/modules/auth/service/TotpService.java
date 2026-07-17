@@ -81,10 +81,10 @@ public class TotpService {
 	 * @param tenantName shown in the authenticator as the issuer line
 	 */
 	public String buildOtpAuthUri(GoogleAuthenticatorKey key, String email, String tenantName) {
-		return GoogleAuthenticatorQRGenerator.getOtpAuthURL(
-				ISSUER + ":" + (tenantName == null ? email : email + " (" + tenantName + ")"),
-				email,
-				key);
+		String issuer = (tenantName == null || tenantName.isBlank())
+				? ISSUER
+				: ISSUER + " (" + tenantName + ")";
+		return GoogleAuthenticatorQRGenerator.getOtpAuthURL(issuer, email, key);
 	}
 
 	/**

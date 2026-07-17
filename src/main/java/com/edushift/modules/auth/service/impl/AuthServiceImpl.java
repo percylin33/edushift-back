@@ -547,8 +547,19 @@ public class AuthServiceImpl implements AuthService {
 	}
 
 	private void persistRefreshToken(String rawToken, User user, UUID parentTokenId) {
+		String hash = sha256Hex(rawToken);
+		// Pre-check: si este hash ya existe para este user, es una rotación
+		// idempotente (e.g. el token-refresh interceptor pudo dispararse dos
+		// veces en condiciones de carrera, o el seed inicial dejó hashes que
+		// colisionan). Saltamos el insert en lugar de dejar que saveAndFlush
+		// lance 409 DATA_INTEGRITY_VIOLATION — ver rbac-audit.md BE-BUG-1.
+		if (refreshTokenRepository.existsByTokenHashAndUserId(hash, user.getId())) {
+			log.debug("[auth] refresh token hash already persisted for user {} — skipping duplicate insert",
+					user.getId());
+			return;
+		}
 		RefreshToken token = new RefreshToken();
-		token.setTokenHash(sha256Hex(rawToken));
+		token.setTokenHash(hash);
 		token.setUserId(user.getId());
 		token.setExpiresAt(Instant.now().plus(refreshTtl()));
 		token.setParentTokenId(parentTokenId);

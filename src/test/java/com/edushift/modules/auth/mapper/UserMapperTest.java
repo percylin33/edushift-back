@@ -2,6 +2,7 @@ package com.edushift.modules.auth.mapper;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.mock;
 
 import com.edushift.modules.auth.dto.CreateUserRequest;
 import com.edushift.modules.auth.dto.UpdateUserRequest;
@@ -10,6 +11,7 @@ import com.edushift.modules.auth.dto.UserSummary;
 import com.edushift.modules.auth.entity.User;
 import com.edushift.modules.auth.entity.UserRole;
 import com.edushift.modules.auth.entity.UserStatus;
+import com.edushift.modules.tenants.service.PermissionOverrideService;
 import com.edushift.shared.security.LmsAuthorities;
 import com.edushift.shared.security.LmsRoleAuthorityMapper;
 import java.time.Instant;
@@ -27,7 +29,7 @@ class UserMapperTest {
 
     @BeforeEach
     void setUp() {
-        mapper = new UserMapper(new LmsRoleAuthorityMapper());
+        mapper = new UserMapper(new LmsRoleAuthorityMapper(mock(PermissionOverrideService.class)));
     }
 
     private User userWithDefaults() {

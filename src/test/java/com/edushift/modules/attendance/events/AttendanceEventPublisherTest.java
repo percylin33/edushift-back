@@ -54,7 +54,11 @@ class AttendanceEventPublisherTest {
 				null, // notes
 				idempotent, // wasIdempotent — drives publish vs suppress
 				Instant.now(), // createdAt
-				Instant.now()  // updatedAt
+				Instant.now(), // updatedAt
+				null, // justificationStatus
+				null, // justificationText
+				null, // approvedBy
+				null  // approvedAt
 		);
 	}
 
