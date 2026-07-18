@@ -45,13 +45,14 @@ BEGIN
 
     IF v_existing_id IS NULL THEN
         INSERT INTO edushift.tenants (
-            id, public_uuid, slug, name, status, created_at, updated_at, deleted
+            id, public_uuid, slug, name, status, plan_id, created_at, updated_at, deleted
         ) VALUES (
             '019f53dd-8772-73fa-a964-bb904ecf869e',
             gen_random_uuid(),
             'keola-networks',
             'Keola Networks',
             'ACTIVE',
+            (SELECT id FROM edushift.platform_plans WHERE code = 'ENTERPRISE' LIMIT 1),
             NOW(),
             NOW(),
             false
