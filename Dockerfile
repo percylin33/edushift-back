@@ -55,7 +55,7 @@ ENV SPRING_PROFILES_ACTIVE=prod \
     SERVER_PORT=8080 \
     TZ=UTC \
     JAVA_OPTS="" \
-    JAVA_TOOL_OPTIONS="-XX:+UseContainerSupport -XX:MaxRAMPercentage=75 -XX:InitialRAMPercentage=50 -XX:+ExitOnOutOfMemoryError -Djava.security.egd=file:/dev/./urandom"
+    JAVA_TOOL_OPTIONS="-XX:+UseContainerSupport -XX:MaxRAMPercentage=65 -XX:InitialRAMPercentage=40 -XX:+ExitOnOutOfMemoryError -XX:MetaspaceSize=128m -XX:MaxMetaspaceSize=192m -Djava.security.egd=file:/dev/./urandom"
 
 # Copiamos el jar ejecutable completo (Spring Boot fat-jar). Arrancamos con
 # `java -jar` para que BOOT-INF/classes y BOOT-INF/lib viajen juntos.
