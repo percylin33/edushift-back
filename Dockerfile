@@ -3,8 +3,19 @@
 # =============================================================================
 # EduShift backend - multi-stage Dockerfile
 # Stage 1: build con Maven (cache de dependencias)
-# Stage 2: extracción de capas (layertools)
-# Stage 3: runtime mínimo (JRE 21 Alpine, usuario no-root)
+# Stage 2: runtime mínimo (JRE 21 Alpine, usuario no-root)
+#
+# Antes se usaba `extract --layers` (Spring Boot layertools) entre stages 2 y 3
+# para separar dependencias / snapshot-dependencies / application en capas
+# independientes. Eso requería que el manifest principal del jar quedara en la
+# imagen runtime (clase `org.springframework.boot.loader.launch.JarLauncher`) y
+# el comando COPY no incluía `META-INF/`. Resultado en runtime:
+#   "Could not find or load main class org.springframework.boot.loader.launch.JarLauncher"
+#   "java.lang.ClassNotFoundException: org.springframework.boot.loader.launch.JarLauncher"
+# Spring Boot 3.3+ ya no genera una capa `META-INF` separada cuando usás
+# `--layers`, por lo que el patrón es frágil. Se reemplaza por el método
+# directo y portable: copiar el jar ejecutable y arrancarlo con `java -jar`.
+# El cache de Maven lo da BuildKit con `--mount=type=cache,target=/root/.m2`.
 # =============================================================================
 
 # -----------------------------------------------------------------------------
@@ -30,20 +41,7 @@ RUN --mount=type=cache,target=/root/.m2 \
     ./mvnw -B -ntp clean package -DskipTests=${SKIP_TESTS}
 
 # -----------------------------------------------------------------------------
-# Stage 2: extract (Spring Boot layertools - mejor cache en runtime)
-#
-# El jar fuente se aloja en /jar y la extracción va a /extracted (limpio).
-# Spring Boot >=3.3 exige que `--destination` esté vacío o no exista; tener
-# el jar en el mismo directorio destino dispara
-# "destination already exists and is not empty".
-# -----------------------------------------------------------------------------
-FROM eclipse-temurin:21-jre-alpine AS extractor
-WORKDIR /jar
-COPY --from=builder /workspace/target/*.jar app.jar
-RUN java -Djarmode=tools -jar app.jar extract --layers --destination /extracted
-
-# -----------------------------------------------------------------------------
-# Stage 3: runtime
+# Stage 2: runtime
 # -----------------------------------------------------------------------------
 FROM eclipse-temurin:21-jre-alpine AS runtime
 
@@ -59,14 +57,9 @@ ENV SPRING_PROFILES_ACTIVE=prod \
     JAVA_OPTS="" \
     JAVA_TOOL_OPTIONS="-XX:+UseContainerSupport -XX:MaxRAMPercentage=75 -XX:InitialRAMPercentage=50 -XX:+ExitOnOutOfMemoryError -Djava.security.egd=file:/dev/./urandom"
 
-# Orden: capas más estables primero (mejor cache).
-# `java -Djarmode=tools ... extract --layers --destination /extracted`
-# (Spring Boot 3.3+) deja las capas planas en /extracted/<layer>/, sin
-# un subdirectorio `app/` intermedio (eso era del viejo jarmode=layertools).
-COPY --from=extractor --chown=edushift:edushift /extracted/dependencies/ ./
-COPY --from=extractor --chown=edushift:edushift /extracted/spring-boot-loader/ ./
-COPY --from=extractor --chown=edushift:edushift /extracted/snapshot-dependencies/ ./
-COPY --from=extractor --chown=edushift:edushift /extracted/application/ ./
+# Copiamos el jar ejecutable completo (Spring Boot fat-jar). Arrancamos con
+# `java -jar` para que BOOT-INF/classes y BOOT-INF/lib viajen juntos.
+COPY --from=builder --chown=edushift:edushift /workspace/target/edushift-back-*.jar /app/app.jar
 
 USER edushift
 
@@ -75,4 +68,6 @@ EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
   CMD curl -fsS "http://localhost:${SERVER_PORT}/api/actuator/health" || exit 1
 
-ENTRYPOINT ["sh", "-c", "exec java $JAVA_OPTS org.springframework.boot.loader.launch.JarLauncher"]
+ENTRYPOINT ["sh", "-c", "exec java $JAVA_OPTS -jar /app/app.jar"]
+
+
