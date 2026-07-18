@@ -13,7 +13,7 @@
 --   can correlate prompt versions with output quality.
 -- * `system_prompt` and `user_prompt_template` are CLOB. The user
 --   template is rendered with named placeholders
---   (`${courseName}`, `${durationMinutes}`, etc.).
+--   (e.g. courseName, durationMinutes).
 -- * `is_active` (boolean) is the source of truth at runtime. Older
 --   versions of the same template_key stay in the table for audit
 --   (and so the FE can show "you are running prompt v3, current is v4").
@@ -64,8 +64,8 @@ CREATE INDEX IF NOT EXISTS ix_ai_prompts_key_active
 -- source of truth — if the seed below drifts, regenerate it.
 --
 -- NOTE: User-prompt templates embed runtime placeholders that look
--- like Flyway placeholders (e.g. ${topic}). Flyway's parser scans
--- every SQL statement for ${...} patterns and fails when it cannot
+-- like Flyway placeholders (e.g. "topic"). Flyway's parser scans
+-- every SQL statement for placeholder patterns and fails when it cannot
 -- resolve them. To avoid the false positive we use PostgreSQL
 -- dollar-quoted strings ($$ ... $$), which Flyway treats as opaque
 -- blobs and skips scanning.
