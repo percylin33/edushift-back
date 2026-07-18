@@ -17,6 +17,8 @@ WORKDIR /workspace
 COPY pom.xml ./
 COPY .mvn .mvn
 COPY mvnw mvnw
+# Git en Windows no conserva el bit +x; chmod explícito antes de ejecutar.
+RUN chmod +x ./mvnw
 RUN --mount=type=cache,target=/root/.m2 \
     ./mvnw -B -ntp dependency:go-offline
 

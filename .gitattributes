@@ -1,11 +1,12 @@
-/mvnw text eol=lf
-*.cmd text eol=crlf
+# =============================================================================
+# EduShift - git attributes
+# Garantiza que scripts del proyecto (mvnw, shell, etc.) salen del repo con
+# el bit de ejecución +x en checkout, evitando "Permission denied" en Docker.
+# =============================================================================
 
-# Forzar UTF-8 sin BOM y LF en archivos fuente Java/recursos
-*.java       text eol=lf working-tree-encoding=UTF-8
-*.xml        text eol=lf working-tree-encoding=UTF-8
-*.yml        text eol=lf working-tree-encoding=UTF-8
-*.yaml       text eol=lf working-tree-encoding=UTF-8
-*.properties text eol=lf working-tree-encoding=UTF-8
-*.sql        text eol=lf working-tree-encoding=UTF-8
-*.json       text eol=lf working-tree-encoding=UTF-8
+# Maven Wrapper (Maven los requiere ejecutables)
+mvnw        text eol=lf executable
+mvnw.cmd    text eol=crlf
+
+# Otros scripts shell futuros
+*.sh        text eol=lf executable
