@@ -130,11 +130,56 @@ public class TenantServiceImpl implements TenantService {
 		if (normalized.isEmpty()) {
 			throw TenantNotFoundException.forSlug(slug);
 		}
+		if (!isPlausibleTenantSlug(normalized)) {
+			// Slug is structurally invalid (matches a deploy-platform URL
+			// fragment). Reject with the same 404 the repository would
+			// return, but log it as a warn so operators can spot a stuck
+			// stale-tunnel cache on the client.
+			log.warn("[tenants] rejected implausible slug '{}' (likely deploy-platform URL fragment)", normalized);
+			throw TenantNotFoundException.forSlug(normalized);
+		}
 
 		Tenant tenant = tenantRepository.findBySlugIgnoreCase(normalized)
 				.orElseThrow(() -> TenantNotFoundException.forSlug(normalized));
 
 		return tenantMapper.toSummary(tenant);
+	}
+
+	/**
+	 * Structural check that a candidate slug is actually shaped like a
+	 * EduShift tenant identifier. Catches the common case where the
+	 * frontend persisted a Vercel preview label (e.g.
+	 * {@code edushift-front-rad5rs5ax-percylin33s-projects}) or a tunnel
+	 * id (e.g. {@code 3vmchk6t-8081}) and tries to use it as a tenant
+	 * slug. The repository call alone would also reject these, but
+	 * logging the rejection at warn level makes a stuck client cache
+	 * much easier to diagnose.
+	 */
+	static boolean isPlausibleTenantSlug(String slug) {
+		if (slug == null) return false;
+		String lower = slug.trim().toLowerCase();
+		if (lower.isEmpty() || lower.length() > 24) return false;
+		if (lower.contains("--") || lower.startsWith("-") || lower.endsWith("-")) return false;
+		if (!lower.matches("[a-z][a-z0-9-]*")) return false;
+		String[] parts = lower.split("-");
+		// Reject any slug where the last segment is purely digits and the
+		// total length is < 12. Tenant slugs in EduShift are names, not
+		// tunnel-id-plus-port labels like "3vmchk6t-8081" or "lima-8080".
+		// Allowing long slugs ending in digits (e.g. "tenant-2026-batch")
+		// but rejecting the short-id-plus-port shape avoids most false
+		// positives without losing legitimate names.
+		if (parts.length >= 2 && parts[parts.length - 1].matches("\\d{2,}")
+				&& lower.length() < 14) {
+			return false;
+		}
+		// Vercel preview URLs: <8-hex>-<owner>-<repo>(-<branch>)?
+		// Detect by requiring the first segment to be at least 8 lowercase
+		// alphanumeric chars (matches the Vercel/Render hash pattern) AND
+		// having >= 3 hyphen-separated segments (URL-like).
+		if (parts.length >= 3 && parts[0].matches("[a-z0-9]{8,}")) {
+			return false;
+		}
+		return true;
 	}
 
 	@Override
