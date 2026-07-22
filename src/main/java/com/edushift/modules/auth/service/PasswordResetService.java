@@ -138,56 +138,58 @@ public class PasswordResetService {
 
 		// Run the rest inside the tenant's context so @TenantId binds correctly.
 		TenantContext.runAs(tenant.getId(), () -> {
-			Optional<User> userOpt = userRepository.findByEmailAndTenantId(email, tenant.getId());
-			if (userOpt.isEmpty()) {
-				// Anti-enumeration: do not leak existence.
-				log.info("[auth] password reset for unknown email '{}' in tenant '{}'", email, tenantSlug);
-				return null;
-			}
-			User user = userOpt.get();
+			transactionTemplate.executeWithoutResult(status -> {
+				Optional<User> userOpt = userRepository.findByEmailAndTenantId(email, tenant.getId());
+				if (userOpt.isEmpty()) {
+					// Anti-enumeration: do not leak existence.
+					log.info("[auth] password reset for unknown email '{}' in tenant '{}'", email, tenantSlug);
+					return;
+				}
+				User user = userOpt.get();
 
-			// Per ADR-17.3, treat locked / suspended / disabled as "skip email
-			// but respond 200". The user can still recover once an admin
-			// re-activates the account.
-			if (user.getStatus() != UserStatus.ACTIVE) {
-				log.info("[auth] password reset skipped for non-active userId={}, status={}",
-						user.getId(), user.getStatus());
-				return null;
-			}
+				// Per ADR-17.3, treat locked / suspended / disabled as "skip email
+				// but respond 200". The user can still recover once an admin
+				// re-activates the account.
+				if (user.getStatus() != UserStatus.ACTIVE) {
+					log.info("[auth] password reset skipped for non-active userId={}, status={}",
+							user.getId(), user.getStatus());
+					return;
+				}
 
-			Instant now = Instant.now();
-			UUID jti = UUID.randomUUID();
+				Instant now = Instant.now();
+				UUID jti = UUID.randomUUID();
 
-			// Supersede any pending tokens for the same user first so a stale
-			// link cannot be replayed once the user requests a new one.
-			resetTokenRepository.supersedeAllPendingForUser(user.getId(), now);
+				// Supersede any pending tokens for the same user first so a stale
+				// link cannot be replayed once the user requests a new one.
+				resetTokenRepository.supersedeAllPendingForUser(user.getId(), now);
 
-			// Issue the JWT (signed) and persist a sibling row.
-			String token = jwtService.issueResetToken(user, tenant, jti);
-			PasswordResetToken row = new PasswordResetToken();
-			row.setJti(jti);
-			row.setUserId(user.getId());
-			row.setExpiresAt(now.plus(jwtService.resetTokenTtl()));
-			row.setRequestIp(requestIp);
-			resetTokenRepository.save(row);
+				// Issue the JWT (signed) and persist a sibling row.
+				String token = jwtService.issueResetToken(user, tenant, jti);
+				PasswordResetToken row = new PasswordResetToken();
+				row.setJti(jti);
+				row.setUserId(user.getId());
+				row.setExpiresAt(now.plus(jwtService.resetTokenTtl()));
+				row.setRequestIp(requestIp);
+				resetTokenRepository.save(row);
 
-			// Queue the email via the existing NotificationService template
-			// engine (PASSWORD_RESET template, payload includes the link).
-			notificationService.notify(
-					NotificationService.NotifyCommand.builder()
-							.recipient(user.getId())
-							.email(user.getEmail())
-							.template(TEMPLATE_KEY_PASSWORD_RESET)
-							.category(Notification.Category.SYSTEM)
-							.payload(java.util.Map.of(
-									"resetToken", token,
-									"ttlMinutes", jwtService.resetTokenTtl().toMinutes(),
-									"tenantName", tenant.getName(),
-									"userFirstName", user.getFirstName() == null ? "" : user.getFirstName()))
-							.channel(Notification.Channel.EMAIL)
-							.build());
+				// Queue the email via the existing NotificationService template
+				// engine (PASSWORD_RESET template, payload includes the link).
+				notificationService.notify(
+						NotificationService.NotifyCommand.builder()
+								.recipient(user.getId())
+								.email(user.getEmail())
+								.template(TEMPLATE_KEY_PASSWORD_RESET)
+								.category(Notification.Category.SYSTEM)
+								.payload(java.util.Map.of(
+										"resetToken", token,
+										"ttlMinutes", jwtService.resetTokenTtl().toMinutes(),
+										"tenantName", tenant.getName(),
+										"userFirstName", user.getFirstName() == null ? "" : user.getFirstName()))
+								.channel(Notification.Channel.EMAIL)
+								.build());
 
-			log.info("[auth] password reset email queued -- userId={}, jti={}", user.getId(), jti);
+				log.info("[auth] password reset email queued -- userId={}, jti={}", user.getId(), jti);
+			});
 			return null;
 		});
 	}

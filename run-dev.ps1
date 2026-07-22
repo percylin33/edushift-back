@@ -52,10 +52,10 @@ if ($env:MINIMAX_ENABLED -eq "true") {
     Write-Host "[run-dev] MiniMax: DISABLED (MockLlmClient activo)" -ForegroundColor Yellow
 }
 
-if ($env:OPENROUTER_ENABLED -eq "true") {
-    Write-Host "[run-dev] OpenRouter: ENABLED" -ForegroundColor Green
+if ($env:MINIMAX_ENABLED -eq "true") {
+    Write-Host "[run-dev] MiniMax: ENABLED" -ForegroundColor Green
 } else {
-    Write-Host "[run-dev] OpenRouter: DISABLED" -ForegroundColor Yellow
+    Write-Host "[run-dev] MiniMax: DISABLED (MockLlmClient activo)" -ForegroundColor Yellow
 }
 
 # ---------------------------------------------------------------------------

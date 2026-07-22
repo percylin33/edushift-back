@@ -3,6 +3,7 @@ package com.edushift.modules.teachers.assignments.service.impl;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -19,16 +20,23 @@ import com.edushift.modules.academic.period.repository.AcademicPeriodRepository;
 import com.edushift.modules.academic.section.entity.Section;
 import com.edushift.modules.academic.section.repository.SectionRepository;
 import com.edushift.modules.academic.year.entity.AcademicYear;
+import com.edushift.modules.audit.events.AuditAction;
+import com.edushift.modules.audit.service.AuditLogger;
 import com.edushift.modules.teachers.assignments.dto.AssignmentResponse;
 import com.edushift.modules.teachers.assignments.dto.CreateAssignmentRequest;
 import com.edushift.modules.teachers.assignments.entity.TeacherAssignment;
+import com.edushift.modules.teachers.assignments.event.TeacherAssignmentCreatedEvent;
+import com.edushift.modules.teachers.assignments.event.TeacherAssignmentUnassignedEvent;
 import com.edushift.modules.teachers.assignments.mapper.TeacherAssignmentMapper;
 import com.edushift.modules.teachers.assignments.repository.TeacherAssignmentRepository;
 import com.edushift.modules.teachers.entity.EmploymentStatus;
 import com.edushift.modules.teachers.entity.Teacher;
 import com.edushift.modules.teachers.repository.TeacherRepository;
+import com.edushift.shared.constants.ModuleNames;
 import com.edushift.shared.exception.ConflictException;
 import com.edushift.shared.exception.ResourceNotFoundException;
+import com.edushift.shared.multitenancy.TenantContext;
+import com.edushift.shared.security.CurrentUserProvider;
 import java.lang.reflect.Field;
 import java.time.Instant;
 import java.util.Optional;
@@ -43,7 +51,11 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.security.core.context.SecurityContextHolder;
 
 @ExtendWith(MockitoExtension.class)
 @DisplayName("TeacherAssignmentService — create + listing + soft-end")
@@ -55,6 +67,9 @@ class TeacherAssignmentServiceImplTest {
 	@Mock private CourseRepository courseRepository;
 	@Mock private AcademicPeriodRepository periodRepository;
 	@Mock private CourseLevelRepository courseLevelRepository;
+	@Mock private ApplicationEventPublisher eventPublisher;
+	@Mock private AuditLogger auditLogger;
+	@Mock private CurrentUserProvider currentUserProvider;
 	@Spy private TeacherAssignmentMapper mapper = new TeacherAssignmentMapper();
 
 	@InjectMocks private TeacherAssignmentServiceImpl service;
@@ -68,6 +83,17 @@ class TeacherAssignmentServiceImplTest {
 
 	@BeforeEach
 	void setUp() {
+		// Sprint 5 / DEBT-TEA-1: listForTeacher + listForSection now have
+		// guardrails. Every test that exercises the legacy happy path
+		// runs as TENANT_ADMIN (the legacy behaviour); the new SelfOnly
+		// nested class covers the TEACHER branches. setUp also installs
+		// the SecurityContext holder so the static isCurrentUserAdmin()
+		// helper sees the admin role.
+		SecurityContextHolder.getContext().setAuthentication(
+				new UsernamePasswordAuthenticationToken(
+						"admin-user",
+						"n/a",
+						java.util.List.of(new SimpleGrantedAuthority("ROLE_TENANT_ADMIN"))));
 		primariaLevel = newLevel("PRIMARIA", "Primaria");
 		Grade grade2 = newGrade("2do Primaria", primariaLevel);
 		year = newYear("2026");
@@ -75,6 +101,11 @@ class TeacherAssignmentServiceImplTest {
 		course = newCourse("MAT", "Matematica");
 		period = newPeriod(PeriodType.BIMESTRE, 1, "I Bimestre", year);
 		teacher = newTeacher("Ada", "Lovelace", EmploymentStatus.ACTIVE);
+	}
+
+	@org.junit.jupiter.api.AfterEach
+	void clearSecurity() {
+		SecurityContextHolder.clearContext();
 	}
 
 	// =========================================================================
@@ -88,6 +119,7 @@ class TeacherAssignmentServiceImplTest {
 		@Test
 		@DisplayName("happy path — saves and returns persisted projection")
 		void happyPath() {
+			TenantContext.set(UUID.randomUUID());
 			stubAllLookups();
 			when(courseLevelRepository.existsByCourseAndLevel(course, primariaLevel)).thenReturn(true);
 			when(assignmentRepository.findActiveTuple(teacher, section, course, period))
@@ -120,6 +152,40 @@ class TeacherAssignmentServiceImplTest {
 			assertThat(saved.getAcademicPeriod()).isSameAs(period);
 			assertThat(saved.getAssignedAt()).isNotNull();
 			assertThat(saved.getUnassignedAt()).isNull();
+
+			// Sprint 5 / DEBT-TEA-1 cascade: the service must publish the
+			// domain event so listeners (workload + notifications) run.
+			ArgumentCaptor<TeacherAssignmentCreatedEvent> evtCaptor =
+					ArgumentCaptor.forClass(TeacherAssignmentCreatedEvent.class);
+			verify(eventPublisher).publishEvent(evtCaptor.capture());
+			TeacherAssignmentCreatedEvent published = evtCaptor.getValue();
+			assertThat(published.assignmentPublicUuid()).isEqualTo(saved.getPublicUuid());
+			assertThat(published.teacherPublicUuid()).isEqualTo(teacher.getPublicUuid());
+			assertThat(published.sectionPublicUuid()).isEqualTo(section.getPublicUuid());
+			assertThat(published.coursePublicUuid()).isEqualTo(course.getPublicUuid());
+			assertThat(published.academicPeriodPublicUuid()).isEqualTo(period.getPublicUuid());
+			assertThat(published.tenantId()).isNotNull();
+			assertThat(published.occurredAt()).isNotNull();
+
+			// Sprint 5 cascade: audit log MUST be written exactly once with
+			// resourceType="TeacherAssignment" + action=CREATE + the canonical
+			// metadata.teachers.event tag. We capture and assert so future
+			// refactors cannot silently drop the audit row.
+			ArgumentCaptor<AuditAction> actionCap = ArgumentCaptor.forClass(AuditAction.class);
+			ArgumentCaptor<String> resTypeCap = ArgumentCaptor.forClass(String.class);
+			ArgumentCaptor<UUID> resIdCap = ArgumentCaptor.forClass(UUID.class);
+			@SuppressWarnings("unchecked")
+			ArgumentCaptor<java.util.Map<String, Object>> metaCap =
+					ArgumentCaptor.forClass(java.util.Map.class);
+			ArgumentCaptor<String> srcCap = ArgumentCaptor.forClass(String.class);
+			verify(auditLogger).log(actionCap.capture(), resTypeCap.capture(),
+					resIdCap.capture(), any(), metaCap.capture(), srcCap.capture());
+			assertThat(actionCap.getValue()).isEqualTo(AuditAction.CREATE);
+			assertThat(resTypeCap.getValue()).isEqualTo("TeacherAssignment");
+			assertThat(resIdCap.getValue()).isEqualTo(saved.getPublicUuid());
+			assertThat(metaCap.getValue()).containsEntry(
+					"teachers.event", "TeacherAssignmentCreated");
+			assertThat(srcCap.getValue()).isEqualTo(ModuleNames.TEACHERS);
 		}
 
 		@Test
@@ -233,6 +299,12 @@ class TeacherAssignmentServiceImplTest {
 							period.getPublicUuid(), null)))
 					.isInstanceOfSatisfying(ConflictException.class,
 							ex -> assertThat(ex.getCode()).isEqualTo("ASSIGNMENT_ALREADY_ACTIVE"));
+
+			verify(eventPublisher, never()).publishEvent(any(TeacherAssignmentCreatedEvent.class));
+			// Audit log MUST NOT be written on a rolled-back create:
+			// the source tx failed, so no row in audit_logs either.
+			verify(auditLogger, never()).log(
+					any(AuditAction.class), any(), any(), any(), any(), any());
 		}
 	}
 
@@ -245,8 +317,9 @@ class TeacherAssignmentServiceImplTest {
 	class SoftEnd {
 
 		@Test
-		@DisplayName("happy path — sets unassignedAt and saves")
+		@DisplayName("happy path — sets unassignedAt, saves, writes audit log, fires cascade event")
 		void happyPath() {
+			TenantContext.set(UUID.randomUUID());
 			TeacherAssignment a = newAssignment();
 			when(assignmentRepository.findByPublicUuid(a.getPublicUuid()))
 					.thenReturn(Optional.of(a));
@@ -256,10 +329,38 @@ class TeacherAssignmentServiceImplTest {
 
 			assertThat(a.getUnassignedAt()).isNotNull();
 			verify(assignmentRepository).saveAndFlush(a);
+
+			// Sprint 5 / DEBT-TEA-3: audit log entry with action=UPDATE
+			// (mirrors AttendanceAuditLogger.logSessionClosed convention)
+			// + canonical metadata.teachers.event tag.
+			ArgumentCaptor<AuditAction> actionCap = ArgumentCaptor.forClass(AuditAction.class);
+			ArgumentCaptor<String> resTypeCap = ArgumentCaptor.forClass(String.class);
+			@SuppressWarnings("unchecked")
+			ArgumentCaptor<java.util.Map<String, Object>> metaCap =
+					ArgumentCaptor.forClass(java.util.Map.class);
+			ArgumentCaptor<String> srcCap = ArgumentCaptor.forClass(String.class);
+			verify(auditLogger).log(actionCap.capture(), resTypeCap.capture(),
+					any(), any(), metaCap.capture(), srcCap.capture());
+			assertThat(actionCap.getValue()).isEqualTo(AuditAction.UPDATE);
+			assertThat(resTypeCap.getValue()).isEqualTo("TeacherAssignment");
+			assertThat(metaCap.getValue()).containsEntry(
+					"teachers.event", "TeacherAssignmentUnassigned");
+			assertThat(srcCap.getValue()).isEqualTo(ModuleNames.TEACHERS);
+
+			// Sprint 5 / DEBT-TEA-3: domain event published so the
+			// unassigned workload listener can decrement assignments_count.
+			ArgumentCaptor<TeacherAssignmentUnassignedEvent> evtCap =
+					ArgumentCaptor.forClass(TeacherAssignmentUnassignedEvent.class);
+			verify(eventPublisher).publishEvent(evtCap.capture());
+			TeacherAssignmentUnassignedEvent published = evtCap.getValue();
+			assertThat(published.assignmentPublicUuid()).isEqualTo(a.getPublicUuid());
+			assertThat(published.teacherPublicUuid()).isEqualTo(
+					a.getTeacher().getPublicUuid());
+			assertThat(published.unassignedAt()).isEqualTo(a.getUnassignedAt());
 		}
 
 		@Test
-		@DisplayName("already-ended is idempotent (no save)")
+		@DisplayName("already-ended is idempotent (no save, no audit, no event)")
 		void idempotent() {
 			TeacherAssignment a = newAssignment();
 			a.setUnassignedAt(Instant.now().minusSeconds(60));
@@ -269,6 +370,10 @@ class TeacherAssignmentServiceImplTest {
 			service.softEnd(a.getPublicUuid());
 
 			verify(assignmentRepository, never()).saveAndFlush(any());
+			verify(auditLogger, never()).log(
+					any(AuditAction.class), any(), any(), any(), any(), any());
+			verify(eventPublisher, never())
+					.publishEvent(any(TeacherAssignmentUnassignedEvent.class));
 		}
 
 		@Test
@@ -280,6 +385,10 @@ class TeacherAssignmentServiceImplTest {
 
 			assertThatThrownBy(() -> service.softEnd(unknown))
 					.isInstanceOf(ResourceNotFoundException.class);
+			verify(auditLogger, never()).log(
+					any(AuditAction.class), any(), any(), any(), any(), any());
+			verify(eventPublisher, never())
+					.publishEvent(any(TeacherAssignmentUnassignedEvent.class));
 		}
 	}
 
@@ -311,6 +420,113 @@ class TeacherAssignmentServiceImplTest {
 
 		assertThat(service.listForSection(section.getPublicUuid(), period.getPublicUuid()))
 				.hasSize(1);
+	}
+
+	// =========================================================================
+	// Sprint 5 / DEBT-TEA-1 — self-only guardrails
+	// =========================================================================
+
+	@Nested
+	@DisplayName("listForTeacher self-only (DEBT-TEA-1)")
+	class ListForTeacherSelfOnly {
+
+		@Test
+		@DisplayName("SPRINT5-CASCADE: TEACHER asking for own assignments → 200")
+		void teacherAskingOwn() {
+			UUID callerUserPublicUuid = UUID.randomUUID();
+			teacher.setUserId(callerUserPublicUuid);
+			switchToTeacherRole();
+			when(currentUserProvider.currentUserId())
+					.thenReturn(Optional.of(callerUserPublicUuid));
+			when(teacherRepository.findByPublicUuid(teacher.getPublicUuid()))
+					.thenReturn(Optional.of(teacher));
+			when(teacherRepository.findByUserId(callerUserPublicUuid))
+					.thenReturn(Optional.of(teacher));
+			when(assignmentRepository.findAllByTeacher(teacher, null, true))
+					.thenReturn(java.util.List.of());
+
+			assertThat(service.listForTeacher(
+					teacher.getPublicUuid(), null, true)).isEmpty();
+		}
+
+		@Test
+		@DisplayName("SPRINT5-CASCADE: TEACHER asking for another teacher's assignments → 404 "
+				+ "(anti-enumeration)")
+		void teacherAskingAnother() {
+			Teacher otherTeacher = newTeacher("Other", "Teacher", EmploymentStatus.ACTIVE);
+			UUID callerUserPublicUuid = UUID.randomUUID();
+			teacher.setUserId(callerUserPublicUuid);
+			switchToTeacherRole();
+			when(currentUserProvider.currentUserId())
+					.thenReturn(Optional.of(callerUserPublicUuid));
+			// Teacher load of the OTHER teacher is needed so the
+			// guardrail's UUID comparison is well-defined; the guardrail
+			// runs BEFORE findAllByTeacher (which is what we assert below).
+			when(teacherRepository.findByPublicUuid(otherTeacher.getPublicUuid()))
+					.thenReturn(Optional.of(otherTeacher));
+			when(teacherRepository.findByUserId(callerUserPublicUuid))
+					.thenReturn(Optional.of(teacher));
+
+			assertThatThrownBy(() -> service.listForTeacher(
+					otherTeacher.getPublicUuid(), null, true))
+					.isInstanceOf(ResourceNotFoundException.class);
+			// The guardrail kicks in BEFORE the assignment fetch:
+			verify(assignmentRepository, never()).findAllByTeacher(
+					any(), any(), anyBoolean());
+		}
+	}
+
+	@Nested
+	@DisplayName("listForSection teacher-of-section (DEBT-TEA-1)")
+	class ListForSectionTeacherOfSection {
+
+		@Test
+		@DisplayName("SPRINT5-CASCADE: TEACHER with active assignment in section → 200")
+		void teacherInSection() {
+			switchToTeacherRole();
+			UUID callerUserPublicUuid = UUID.randomUUID();
+			when(currentUserProvider.currentUserId())
+					.thenReturn(Optional.of(callerUserPublicUuid));
+			when(sectionRepository.findByPublicUuid(section.getPublicUuid()))
+					.thenReturn(Optional.of(section));
+			when(assignmentRepository.existsActiveBySectionAndTeacherUserId(
+					section, callerUserPublicUuid))
+					.thenReturn(true);
+			when(assignmentRepository.findAllBySectionActive(section, null))
+					.thenReturn(java.util.List.of(newAssignment()));
+
+			assertThat(service.listForSection(section.getPublicUuid(), null))
+					.hasSize(1);
+		}
+
+		@Test
+		@DisplayName("SPRINT5-CASCADE: TEACHER with NO active assignment in section → 404 "
+				+ "(anti-enumeration, same code as unknown section)")
+		void teacherNotInSection() {
+			switchToTeacherRole();
+			UUID callerUserPublicUuid = UUID.randomUUID();
+			when(currentUserProvider.currentUserId())
+					.thenReturn(Optional.of(callerUserPublicUuid));
+			when(sectionRepository.findByPublicUuid(section.getPublicUuid()))
+					.thenReturn(Optional.of(section));
+			when(assignmentRepository.existsActiveBySectionAndTeacherUserId(
+					section, callerUserPublicUuid))
+					.thenReturn(false);
+
+			assertThatThrownBy(() -> service.listForSection(
+					section.getPublicUuid(), null))
+					.isInstanceOf(ResourceNotFoundException.class);
+			verify(assignmentRepository, never()).findAllBySectionActive(
+					any(), any());
+		}
+	}
+
+	private void switchToTeacherRole() {
+		SecurityContextHolder.getContext().setAuthentication(
+				new UsernamePasswordAuthenticationToken(
+						"teacher-user",
+						"n/a",
+						java.util.List.of(new SimpleGrantedAuthority("ROLE_TEACHER"))));
 	}
 
 	// =========================================================================

@@ -36,9 +36,8 @@ import org.springframework.transaction.support.TransactionTemplate;
  *
  * <h3>LLM client</h3>
  * No real provider is enabled in the {@code test} profile (see
- * {@code application-test.properties} — the
- * {@code app.llm.openrouter.enabled} and {@code app.llm.minimax.enabled}
- * flags default to false). The
+ * {@code application-test.properties} — the {@code app.llm.minimax.enabled}
+ * flag defaults to false). The
  * {@code LlmAutoConfiguration.mockLlmClient()} therefore wins and the
  * {@code MockLlmClient} is what the LLM call resolves to. That bean
  * returns a deterministic JSON stub so the full pipeline (quota gate +

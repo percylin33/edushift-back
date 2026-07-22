@@ -8,6 +8,7 @@ import java.util.UUID;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
@@ -83,4 +84,45 @@ public interface TeacherRepository extends JpaRepository<Teacher, UUID> {
 			@Param("status") EmploymentStatus status,
 			@Param("hasUserAccount") Boolean hasUserAccount,
 			Pageable pageable);
+
+	/**
+	 * Atomically increments {@code teachers.assignments_count} by 1 for the
+	 * teacher identified by its public UUID. Used by
+	 * {@code TeacherAssignmentWorkloadListener} to keep the workload
+	 * counter consistent with the {@code teacher_assignments} table.
+	 *
+	 * <p>Returns the number of rows updated. A {@code 0} result means the
+	 * teacher was not found in the current tenant scope (cross-tenant race
+	 * or stale event) — the caller treats this as a no-op warning.</p>
+	 */
+	@Modifying
+	@Query("""
+			update Teacher t
+			set t.assignmentsCount = t.assignmentsCount + 1
+			where t.publicUuid = :publicUuid
+			""")
+	int incrementAssignmentsCountByPublicUuid(@Param("publicUuid") UUID publicUuid);
+
+	/**
+	 * Atomically decrements {@code teachers.assignments_count} by 1 for
+	 * the teacher identified by its public UUID. Used by
+	 * {@code TeacherAssignmentUnassignedWorkloadListener} (Sprint 5 /
+	 * DEBT-TEA-3) when an assignment is soft-ended. Mirrors
+	 * {@link #incrementAssignmentsCountByPublicUuid(UUID)}.
+	 *
+	 * <p>The {@code assignmentsCount > 0} guard prevents the counter from
+	 * going negative on event reordering or duplicate unassigned events.
+	 * The DB-level CHECK constraint {@code chk_teachers_assignments_count_nonneg}
+	 * (migration V79) is the ultimate backstop; this clause keeps the
+	 * generated {@code WHERE} selective so concurrent decrements cannot
+	 * starve the counter below zero.</p>
+	 */
+	@Modifying
+	@Query("""
+			update Teacher t
+			set t.assignmentsCount = t.assignmentsCount - 1
+			where t.publicUuid = :publicUuid
+			  and t.assignmentsCount > 0
+			""")
+	int decrementAssignmentsCountByPublicUuid(@Param("publicUuid") UUID publicUuid);
 }

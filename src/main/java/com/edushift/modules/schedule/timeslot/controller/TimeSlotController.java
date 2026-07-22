@@ -144,14 +144,15 @@ public class TimeSlotController {
 
 	@GetMapping("/teachers/{teacherUuid}/schedule")
 	@SecurityRequirement(name = "bearerAuth")
-	@PreAuthorize("hasRole('TENANT_ADMIN')")
+	@PreAuthorize("hasAnyRole('TENANT_ADMIN','TEACHER')")
 	@Operation(
-			summary = "Teacher's weekly schedule (TENANT_ADMIN)",
+			summary = "Teacher's weekly schedule (TENANT_ADMIN or TEACHER-self)",
 			description = "Flat list of slots across every active assignment of the "
 					+ "teacher; section + course + period populated per row. Optional "
 					+ "?periodId narrows to a single period. Sorted by (dayOfWeek asc, "
 					+ "startTime asc). 404 RESOURCE_NOT_FOUND if teacher / period UUID "
-					+ "is unknown / cross-tenant."
+					+ "is unknown / cross-tenant, or if a TEACHER caller asks for a "
+					+ "different teacher (anti-enumeration). Sprint 5 / DEBT-TEA-1."
 	)
 	public ResponseEntity<List<ScheduleSlotItem>> teacherSchedule(
 			@PathVariable UUID teacherUuid,

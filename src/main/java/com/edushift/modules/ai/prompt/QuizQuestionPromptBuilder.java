@@ -1,6 +1,6 @@
 package com.edushift.modules.ai.prompt;
 
-import com.edushift.modules.ai.config.OpenRouterProperties;
+import com.edushift.modules.ai.config.MiniMaxProperties;
 import com.edushift.modules.ai.llm.LlmClient.LlmRequest;
 import java.util.List;
 import java.util.Map;
@@ -51,9 +51,9 @@ public class QuizQuestionPromptBuilder {
      * generations in the audit log. */
     public static final String PROMPT_VERSION = "quiz-question-suggest/v1";
 
-    private final OpenRouterProperties props;
+    private final MiniMaxProperties props;
 
-    public QuizQuestionPromptBuilder(OpenRouterProperties props) {
+    public QuizQuestionPromptBuilder(MiniMaxProperties props) {
         this.props = props;
     }
 

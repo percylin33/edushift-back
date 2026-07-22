@@ -20,11 +20,15 @@ import com.edushift.modules.teachers.repository.TeacherRepository;
 import com.edushift.shared.exception.BadRequestException;
 import com.edushift.shared.exception.ConflictException;
 import com.edushift.shared.exception.ResourceNotFoundException;
+import com.edushift.shared.security.CurrentUserProvider;
 import java.time.LocalTime;
 import java.util.List;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.GrantedAuthority;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -58,6 +62,7 @@ public class TimeSlotServiceImpl implements TimeSlotService {
 	private final SectionRepository sectionRepository;
 	private final AcademicPeriodRepository periodRepository;
 	private final TimeSlotMapper mapper;
+	private final CurrentUserProvider currentUserProvider;
 
 	// =========================================================================
 	// CRUD
@@ -137,6 +142,28 @@ public class TimeSlotServiceImpl implements TimeSlotService {
 	public List<ScheduleSlotItem> getTeacherSchedule(UUID teacherUuid, UUID periodUuid) {
 		Teacher teacher = teacherRepository.findByPublicUuid(teacherUuid)
 				.orElseThrow(() -> new ResourceNotFoundException("Teacher", teacherUuid));
+
+		// Sprint 5 / DEBT-TEA-1: TENANT_ADMIN sees any teacher; a TEACHER caller
+		// may only see their own schedule. Anti-enumeration: surface the same
+		// 404 we'd return for an unknown teacher — never confirm to the caller
+		// that someone else's schedule exists.
+		if (!isCurrentUserAdmin()) {
+			UUID callerUserPublicUuid = currentUserProvider.currentUserId()
+					.orElseThrow(() -> new ResourceNotFoundException(
+							"Teacher", teacherUuid));
+			UUID myTeacherPublicUuid = teacherRepository
+					.findByUserId(callerUserPublicUuid)
+					.map(Teacher::getPublicUuid)
+					.orElseThrow(() -> new ResourceNotFoundException(
+							"Teacher", teacherUuid));
+			if (!teacher.getPublicUuid().equals(myTeacherPublicUuid)) {
+				log.warn("[schedule.time-slot] self-only guard hit -- callerUserId={} "
+						+ "askedTeacher={} myTeacher={}",
+						callerUserPublicUuid, teacher.getPublicUuid(), myTeacherPublicUuid);
+				throw new ResourceNotFoundException("Teacher", teacherUuid);
+			}
+		}
+
 		AcademicPeriod period = (periodUuid == null) ? null : periodRepository
 				.findByPublicUuid(periodUuid)
 				.orElseThrow(() -> new ResourceNotFoundException("AcademicPeriod", periodUuid));
@@ -181,6 +208,18 @@ public class TimeSlotServiceImpl implements TimeSlotService {
 	private TimeSlot loadSlot(UUID publicUuid) {
 		return timeSlotRepository.findByPublicUuid(publicUuid)
 				.orElseThrow(() -> new ResourceNotFoundException("TimeSlot", publicUuid));
+	}
+
+	private boolean isCurrentUserAdmin() {
+		Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+		if (auth == null || !auth.isAuthenticated()) return false;
+		for (GrantedAuthority granted : auth.getAuthorities()) {
+			String authority = granted.getAuthority();
+			if (authority == null) continue;
+			if (authority.equals("TENANT_ADMIN")) return true;
+			if (authority.equals("ROLE_TENANT_ADMIN")) return true;
+		}
+		return false;
 	}
 
 	private static void ensureAssignmentActive(TeacherAssignment assignment) {

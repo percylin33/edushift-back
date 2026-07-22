@@ -31,6 +31,7 @@ import com.edushift.modules.teachers.entity.EmploymentStatus;
 import com.edushift.modules.teachers.entity.Teacher;
 import com.edushift.modules.teachers.repository.TeacherRepository;
 import com.edushift.modules.tenants.entity.Tenant;
+import com.edushift.modules.tenants.entity.TenantPlan;
 import com.edushift.modules.tenants.entity.TenantStatus;
 import com.edushift.modules.tenants.repository.TenantRepository;
 import com.edushift.shared.multitenancy.TenantContext;
@@ -43,6 +44,7 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.web.client.TestRestTemplate;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
@@ -91,6 +93,7 @@ class TeacherAssignmentTenantIsolationIT extends IntegrationTest {
 	@Autowired private AcademicPeriodRepository periodRepository;
 	@Autowired private PasswordEncoder passwordEncoder;
 	@Autowired private PlatformTransactionManager txManager;
+	@Autowired private JdbcTemplate jdbcTemplate;
 	@Autowired private ObjectMapper objectMapper;
 
 	private TransactionTemplate tx;
@@ -304,7 +307,15 @@ class TeacherAssignmentTenantIsolationIT extends IntegrationTest {
 		t.setSlug(slugPrefix + UUID.randomUUID().toString().substring(0, 8));
 		t.setName("IT Tenant " + t.getSlug());
 		t.setStatus(TenantStatus.ACTIVE);
+		t.setPlan(TenantPlan.TRIAL);
+		t.setPlanId(resolveDefaultPlanId());
 		return tx().execute(s -> tenantRepository.saveAndFlush(t));
+	}
+
+	private java.util.UUID resolveDefaultPlanId() {
+		return jdbcTemplate.queryForObject(
+				"select id from edushift.platform_plans where code = ?",
+				java.util.UUID.class, "TRIAL");
 	}
 
 	private void createAdmin(Tenant tenant, String email, String rawPassword) {

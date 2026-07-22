@@ -3,6 +3,7 @@ package com.edushift.modules.schedule.timeslot.service.impl;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.never;
@@ -29,12 +30,15 @@ import com.edushift.modules.teachers.repository.TeacherRepository;
 import com.edushift.shared.exception.BadRequestException;
 import com.edushift.shared.exception.ConflictException;
 import com.edushift.shared.exception.ResourceNotFoundException;
+import com.edushift.shared.security.CurrentUserProvider;
 import java.lang.reflect.Field;
 import java.time.Instant;
 import java.time.LocalTime;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -43,6 +47,9 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.security.core.context.SecurityContextHolder;
 
 /**
  * Unit tests for {@link TimeSlotServiceImpl} (Sprint 5A — BE-5A.3).
@@ -59,9 +66,28 @@ class TimeSlotServiceImplTest {
 	@Mock private TeacherRepository teacherRepository;
 	@Mock private SectionRepository sectionRepository;
 	@Mock private AcademicPeriodRepository periodRepository;
+	@Mock private CurrentUserProvider currentUserProvider;
 	@Spy private TimeSlotMapper mapper = new TimeSlotMapper();
 
 	@InjectMocks private TimeSlotServiceImpl service;
+
+	@BeforeEach
+	void authenticateAsAdmin() {
+		// Sprint 5 / DEBT-TEA-1: getTeacherSchedule now has a self-only
+		// guardrail. Every test that exercises the happy path runs as
+		// TENANT_ADMIN (the legacy behaviour); the new SelfOnly nested class
+		// covers the TEACHER branches.
+		SecurityContextHolder.getContext().setAuthentication(
+				new UsernamePasswordAuthenticationToken(
+						"admin-user",
+						"n/a",
+						List.of(new SimpleGrantedAuthority("ROLE_TENANT_ADMIN"))));
+	}
+
+	@AfterEach
+	void clearSecurity() {
+		SecurityContextHolder.clearContext();
+	}
 
 	// =========================================================================
 	// listSlotsOfAssignment
@@ -367,6 +393,103 @@ class TimeSlotServiceImplTest {
 			assertThatThrownBy(() -> service.getTeacherSchedule(anyUuid, null))
 					.isInstanceOf(ResourceNotFoundException.class);
 		}
+	}
+
+	// =========================================================================
+	// Sprint 5 / DEBT-TEA-1: self-only guardrail on getTeacherSchedule
+	// =========================================================================
+
+	@Nested
+	@DisplayName("getTeacherSchedule self-only (DEBT-TEA-1)")
+	class TeacherScheduleSelfOnly {
+
+		@Test
+		@DisplayName("SPRINT5-CASCADE: TEACHER asking for own schedule → 200")
+		void teacherAskingOwn() {
+			Teacher teacher = newTeacher();
+			UUID callerUserPublicUuid = UUID.randomUUID();
+			teacher.setUserId(callerUserPublicUuid);
+			TeacherAssignment assignment = newAssignment(true);
+			TimeSlot slot = newSlot(assignment, (short) 1,
+					LocalTime.of(8, 0), LocalTime.of(9, 0), null);
+
+			switchToTeacherRole();
+			when(currentUserProvider.currentUserId())
+					.thenReturn(Optional.of(callerUserPublicUuid));
+			when(teacherRepository.findByPublicUuid(teacher.getPublicUuid()))
+					.thenReturn(Optional.of(teacher));
+			when(teacherRepository.findByUserId(callerUserPublicUuid))
+					.thenReturn(Optional.of(teacher));
+			when(assignmentRepository.findAllByTeacher(teacher, null, true))
+					.thenReturn(List.of(assignment));
+			when(timeSlotRepository.findAllByAssignmentInOrdered(List.of(assignment)))
+					.thenReturn(List.of(slot));
+
+			List<ScheduleSlotItem> result = service.getTeacherSchedule(
+					teacher.getPublicUuid(), null);
+
+			assertThat(result).hasSize(1);
+		}
+
+		@Test
+		@DisplayName("SPRINT5-CASCADE: TEACHER asking for another teacher's schedule → 404 "
+				+ "(anti-enumeration, same code as unknown teacher)")
+		void teacherAskingAnother() {
+			Teacher teacherA = newTeacher();
+			Teacher teacherB = newTeacher();
+			UUID callerUserPublicUuid = UUID.randomUUID();
+			teacherA.setUserId(callerUserPublicUuid);
+			// teacherB belongs to a different user → no link to caller.
+			teacherB.setUserId(UUID.randomUUID());
+
+			switchToTeacherRole();
+			when(currentUserProvider.currentUserId())
+					.thenReturn(Optional.of(callerUserPublicUuid));
+			when(teacherRepository.findByPublicUuid(teacherB.getPublicUuid()))
+					.thenReturn(Optional.of(teacherB));
+			when(teacherRepository.findByUserId(callerUserPublicUuid))
+					.thenReturn(Optional.of(teacherA));
+
+			assertThatThrownBy(() -> service.getTeacherSchedule(
+					teacherB.getPublicUuid(), null))
+					.isInstanceOf(ResourceNotFoundException.class);
+			// No DB lookup beyond the teacher→teacher self-link:
+			// the guardrail kicks in BEFORE assignment / slot fetches.
+			verify(assignmentRepository, never()).findAllByTeacher(any(), any(), anyBoolean());
+			verify(timeSlotRepository, never())
+					.findAllByAssignmentInOrdered(any());
+		}
+
+		@Test
+		@DisplayName("SPRINT5-CASCADE: TEACHER bearer has no linked Teacher row → 404")
+		void teacherWithUnlinkedUser() {
+			UUID callerUserPublicUuid = UUID.randomUUID();
+			Teacher teacherB = newTeacher();
+
+			switchToTeacherRole();
+			when(currentUserProvider.currentUserId())
+					.thenReturn(Optional.of(callerUserPublicUuid));
+			when(teacherRepository.findByPublicUuid(teacherB.getPublicUuid()))
+					.thenReturn(Optional.of(teacherB));
+			when(teacherRepository.findByUserId(callerUserPublicUuid))
+					.thenReturn(Optional.empty());
+
+			assertThatThrownBy(() -> service.getTeacherSchedule(
+					teacherB.getPublicUuid(), null))
+					.isInstanceOf(ResourceNotFoundException.class);
+		}
+	}
+
+	private static void switchToTeacherRole() {
+		SecurityContextHolder.getContext().setAuthentication(
+				new UsernamePasswordAuthenticationToken(
+						"teacher-user",
+						"n/a",
+						List.of(new SimpleGrantedAuthority("ROLE_TEACHER"))));
+	}
+
+	private static boolean anyBoolean() {
+		return org.mockito.ArgumentMatchers.anyBoolean();
 	}
 
 	@Nested

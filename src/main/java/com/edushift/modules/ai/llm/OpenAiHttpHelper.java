@@ -18,19 +18,19 @@ import java.util.Map;
  * the OpenAI-compatible {@code /chat/completions} protocol
  * (BE-7c.1.1).
  *
- * <p>Both OpenRouter and the MiniMax M3 API Platform expose this
- * dialect, so we centralise the request/response shape here and let
- * the two clients (which differ only on auth, base URL, and the
- * {@code X-Provider} header) plug in their specifics via
- * {@link #authHeader()}, {@link #extraHeaders()}, and
- * {@link #providerId()}.</p>
+ * <p>The MiniMax M3 API Platform exposes this OpenAI-compatible
+ * dialect; future Kimi/GLM clients (also OpenAI-compatible) will
+ * reuse the same helper. We centralise the request/response shape
+ * here and let each concrete client plug in its specifics (auth,
+ * base URL, extra headers, provider id) via {@link #authHeader()},
+ * {@link #extraHeaders()}, and {@link #providerId()}.</p>
  *
  * <p>This is a pure helper — it is NOT itself an {@link LlmClient} bean
  * and is not visible to the rest of the app. The retry loop
  * (backoff, max-attempts) is still owned by each concrete client,
- * because the timing characteristics differ per provider
- * (e.g. OpenRouter is more aggressive with {@code Retry-After},
- * MiniMax has its own rate-limit semantics).</p>
+ * because the timing characteristics differ per provider (e.g.
+ * MiniMax has its own rate-limit semantics; Kimi/GLM may diverge
+ * further).</p>
  *
  * <h3>Wire shape</h3>
  * <pre>

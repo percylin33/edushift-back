@@ -8,24 +8,36 @@ import com.edushift.modules.academic.period.entity.AcademicPeriod;
 import com.edushift.modules.academic.period.repository.AcademicPeriodRepository;
 import com.edushift.modules.academic.section.entity.Section;
 import com.edushift.modules.academic.section.repository.SectionRepository;
+import com.edushift.modules.audit.events.AuditAction;
+import com.edushift.modules.audit.service.AuditLogger;
 import com.edushift.modules.teachers.assignments.dto.AssignmentListItem;
 import com.edushift.modules.teachers.assignments.dto.AssignmentResponse;
 import com.edushift.modules.teachers.assignments.dto.CreateAssignmentRequest;
 import com.edushift.modules.teachers.assignments.dto.SectionTeacherItem;
 import com.edushift.modules.teachers.assignments.entity.TeacherAssignment;
+import com.edushift.modules.teachers.assignments.event.TeacherAssignmentCreatedEvent;
+import com.edushift.modules.teachers.assignments.event.TeacherAssignmentUnassignedEvent;
 import com.edushift.modules.teachers.assignments.mapper.TeacherAssignmentMapper;
 import com.edushift.modules.teachers.assignments.repository.TeacherAssignmentRepository;
 import com.edushift.modules.teachers.assignments.service.TeacherAssignmentService;
 import com.edushift.modules.teachers.entity.Teacher;
 import com.edushift.modules.teachers.repository.TeacherRepository;
+import com.edushift.shared.constants.ModuleNames;
 import com.edushift.shared.exception.ConflictException;
 import com.edushift.shared.exception.ResourceNotFoundException;
+import com.edushift.shared.multitenancy.TenantContext;
+import com.edushift.shared.security.CurrentUserProvider;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.GrantedAuthority;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -63,6 +75,9 @@ public class TeacherAssignmentServiceImpl implements TeacherAssignmentService {
 	private final AcademicPeriodRepository periodRepository;
 	private final CourseLevelRepository courseLevelRepository;
 	private final TeacherAssignmentMapper mapper;
+	private final ApplicationEventPublisher eventPublisher;
+	private final AuditLogger auditLogger;
+	private final CurrentUserProvider currentUserProvider;
 
 	// =========================================================================
 	// Reads
@@ -73,6 +88,29 @@ public class TeacherAssignmentServiceImpl implements TeacherAssignmentService {
 	public List<AssignmentListItem> listForTeacher(UUID teacherPublicUuid,
 			UUID periodPublicUuid, boolean activeOnly) {
 		Teacher teacher = loadTeacher(teacherPublicUuid);
+
+		// Sprint 5 / DEBT-TEA-1: a TEACHER caller may only see their own
+		// assignments. Admin sees any. Anti-enumeration: surface 404 when
+		// the caller is a teacher of a different teacher — never confirm
+		// that someone else's assignments exist.
+		if (!isCurrentUserAdmin()) {
+			UUID callerUserPublicUuid = currentUserProvider.currentUserId()
+					.orElseThrow(() -> new ResourceNotFoundException(
+							"Teacher", teacherPublicUuid));
+			UUID myTeacherPublicUuid = teacherRepository
+					.findByUserId(callerUserPublicUuid)
+					.map(Teacher::getPublicUuid)
+					.orElseThrow(() -> new ResourceNotFoundException(
+							"Teacher", teacherPublicUuid));
+			if (!teacher.getPublicUuid().equals(myTeacherPublicUuid)) {
+				log.warn("[teachers.assignments] self-only guard hit -- callerUserId={} "
+						+ "askedTeacher={} myTeacher={}",
+						callerUserPublicUuid, teacher.getPublicUuid(),
+						myTeacherPublicUuid);
+				throw new ResourceNotFoundException("Teacher", teacherPublicUuid);
+			}
+		}
+
 		AcademicPeriod period = (periodPublicUuid == null)
 				? null : loadPeriod(periodPublicUuid);
 
@@ -87,6 +125,28 @@ public class TeacherAssignmentServiceImpl implements TeacherAssignmentService {
 	public List<SectionTeacherItem> listForSection(UUID sectionPublicUuid,
 			UUID periodPublicUuid) {
 		Section section = loadSection(sectionPublicUuid);
+
+		// Sprint 5 / DEBT-TEA-1: a TEACHER caller must have at least one
+		// ACTIVE assignment in this section (any course, any period);
+		// otherwise we surface 404 to avoid leaking the roster of co-
+		// teachers to a teacher who has never taught in the section.
+		// Admin sees any section. Anti-enumeration: same code as a
+		// missing section.
+		if (!isCurrentUserAdmin()) {
+			UUID callerUserPublicUuid = currentUserProvider.currentUserId()
+					.orElseThrow(() -> new ResourceNotFoundException(
+							"Section", sectionPublicUuid));
+			boolean isTeacherOfSection = assignmentRepository
+					.existsActiveBySectionAndTeacherUserId(
+							section, callerUserPublicUuid);
+			if (!isTeacherOfSection) {
+				log.warn("[teachers.assignments] teacher-of-section guard hit -- "
+						+ "section={} callerUserId={} (no active assignment in section)",
+						section.getPublicUuid(), callerUserPublicUuid);
+				throw new ResourceNotFoundException("Section", sectionPublicUuid);
+			}
+		}
+
 		AcademicPeriod period = (periodPublicUuid == null)
 				? null : loadPeriod(periodPublicUuid);
 
@@ -125,6 +185,46 @@ public class TeacherAssignmentServiceImpl implements TeacherAssignmentService {
 
 		try {
 			TeacherAssignment saved = assignmentRepository.saveAndFlush(assignment);
+
+			// Sprint 5 / DEBT-TEA-1 cascade: write to the central audit log
+			// BEFORE the in-tx domain event so the audit row lands in the same
+			// transaction. AuditLogger is defensive (errors are swallowed and
+			// logged at ERROR), so it cannot break the business flow even if
+			// the audit subsystem is degraded. Convention: AuditAction.CREATE
+			// + resourceType=PascalCase + metadata.<module>.event=canonical
+			// (mirrors AttendanceAuditLogger).
+			auditLogger.log(
+					AuditAction.CREATE,
+					"TeacherAssignment",
+					saved.getPublicUuid(),
+					"Teacher assigned: teacher=" + teacher.getPublicUuid()
+							+ " section=" + section.getPublicUuid()
+							+ " course=" + course.getPublicUuid()
+							+ " period=" + period.getPublicUuid(),
+					Map.of(
+							"teachers.event", "TeacherAssignmentCreated",
+							"teacherPublicUuid", teacher.getPublicUuid().toString(),
+							"sectionPublicUuid", section.getPublicUuid().toString(),
+							"coursePublicUuid", course.getPublicUuid().toString(),
+							"periodPublicUuid", period.getPublicUuid().toString()),
+					ModuleNames.TEACHERS);
+
+			// Sprint 5 / DEBT-TEA-1 cascade: fire domain event so listeners
+			// can (a) bump the teacher's active-assignment counter (workload)
+			// and (b) publish notifications to the teacher + enrolled students
+			// of the section. Published in-tx so listeners using
+			// @EventListener can join the same Hibernate session; the
+			// existing NotificationEventListener consumes the fan-out
+			// asynchronously @TransactionalEventListener(AFTER_COMMIT).
+			eventPublisher.publishEvent(new TeacherAssignmentCreatedEvent(
+					saved.getPublicUuid(),
+					teacher.getPublicUuid(),
+					section.getPublicUuid(),
+					course.getPublicUuid(),
+					period.getPublicUuid(),
+					TenantContext.currentRequired(),
+					Instant.now()));
+
 			log.info("[teachers.assignments] created -- publicUuid={} teacher={} section={} course={} period={}",
 					saved.getPublicUuid(),
 					teacher.getPublicUuid(),
@@ -159,6 +259,38 @@ public class TeacherAssignmentServiceImpl implements TeacherAssignmentService {
 
 		assignment.setUnassignedAt(Instant.now());
 		assignmentRepository.saveAndFlush(assignment);
+
+		// Sprint 5 / DEBT-TEA-3 cascade: write audit log + publish domain
+		// event so listeners (workload decrement) run in the same
+		// transaction. AuditAction.UPDATE matches the convention used by
+		// AttendanceAuditLogger.logSessionClosed — soft-end preserves the
+		// row, so we are updating state, not deleting.
+		auditLogger.log(
+				AuditAction.UPDATE,
+				"TeacherAssignment",
+				assignment.getPublicUuid(),
+				"Teacher unassigned: teacher=" + assignment.getTeacher().getPublicUuid()
+						+ " section=" + assignment.getSection().getPublicUuid()
+						+ " course=" + assignment.getCourse().getPublicUuid()
+						+ " period=" + assignment.getAcademicPeriod().getPublicUuid(),
+				Map.of(
+						"teachers.event", "TeacherAssignmentUnassigned",
+						"teacherPublicUuid", assignment.getTeacher().getPublicUuid().toString(),
+						"sectionPublicUuid", assignment.getSection().getPublicUuid().toString(),
+						"coursePublicUuid", assignment.getCourse().getPublicUuid().toString(),
+						"periodPublicUuid", assignment.getAcademicPeriod().getPublicUuid().toString(),
+						"unassignedAt", assignment.getUnassignedAt().toString()),
+				ModuleNames.TEACHERS);
+
+		eventPublisher.publishEvent(new TeacherAssignmentUnassignedEvent(
+				assignment.getPublicUuid(),
+				assignment.getTeacher().getPublicUuid(),
+				assignment.getSection().getPublicUuid(),
+				assignment.getCourse().getPublicUuid(),
+				assignment.getAcademicPeriod().getPublicUuid(),
+				TenantContext.currentRequired(),
+				assignment.getUnassignedAt()));
+
 		log.info("[teachers.assignments] soft-ended -- publicUuid={} teacher={} unassignedAt={}",
 				assignment.getPublicUuid(),
 				assignment.getTeacher().getPublicUuid(),
@@ -234,6 +366,26 @@ public class TeacherAssignmentServiceImpl implements TeacherAssignmentService {
 	private AcademicPeriod loadPeriod(UUID publicUuid) {
 		return periodRepository.findByPublicUuid(publicUuid)
 				.orElseThrow(() -> new ResourceNotFoundException("AcademicPeriod", publicUuid));
+	}
+
+	/**
+	 * Sprint 5 / DEBT-TEA-1 — detects whether the current
+	 * {@code Authentication} carries the {@code TENANT_ADMIN} authority.
+	 * Mirrors {@code AttendanceServiceImpl.isCurrentUserAdmin} so the
+	 * guardrail logic is identical across modules. Returns false on no
+	 * context (e.g. internal calls) so the safe path is "fall back to the
+	 * most restrictive check".
+	 */
+	private static boolean isCurrentUserAdmin() {
+		Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+		if (auth == null || !auth.isAuthenticated()) return false;
+		for (GrantedAuthority granted : auth.getAuthorities()) {
+			String authority = granted.getAuthority();
+			if (authority == null) continue;
+			if (authority.equals("TENANT_ADMIN")) return true;
+			if (authority.equals("ROLE_TENANT_ADMIN")) return true;
+		}
+		return false;
 	}
 
 	private static String blankToNull(String s) {

@@ -3,7 +3,7 @@ package com.edushift.modules.ai.prompt;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import com.edushift.modules.ai.config.OpenRouterProperties;
+import com.edushift.modules.ai.config.MiniMaxProperties;
 import com.edushift.modules.ai.llm.LlmClient.LlmRequest;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -20,13 +20,13 @@ import org.junit.jupiter.api.Test;
  */
 class QuizQuestionPromptBuilderTest {
 
-    private OpenRouterProperties props;
+    private MiniMaxProperties props;
     private QuizQuestionPromptBuilder builder;
 
     @BeforeEach
     void setUp() {
-        props = new OpenRouterProperties();
-        props.setDefaultModel("openai/gpt-4o-mini");
+        props = new MiniMaxProperties();
+        props.setDefaultModel("minimax/MiniMax-M3");
         builder = new QuizQuestionPromptBuilder(props);
     }
 
@@ -35,7 +35,7 @@ class QuizQuestionPromptBuilderTest {
     void buildReturnsExpectedLlmRequest() {
         LlmRequest req = builder.build("Capitales de Europa", 3, "MC", null);
 
-        assertThat(req.model()).isEqualTo("openai/gpt-4o-mini");
+        assertThat(req.model()).isEqualTo("minimax/MiniMax-M3");
         assertThat(req.temperature()).isEqualTo(0.2);
         assertThat(req.maxTokens()).isEqualTo(2048);
 
@@ -67,15 +67,15 @@ class QuizQuestionPromptBuilderTest {
     @Test
     @DisplayName("build: explicit model wins over the default")
     void buildExplicitModelOverridesDefault() {
-        LlmRequest req = builder.build("Algo", 1, null, "anthropic/claude-3-haiku");
-        assertThat(req.model()).isEqualTo("anthropic/claude-3-haiku");
+        LlmRequest req = builder.build("Algo", 1, null, "minimax/MiniMax-M2");
+        assertThat(req.model()).isEqualTo("minimax/MiniMax-M2");
     }
 
     @Test
     @DisplayName("build: blank explicit model falls back to props.defaultModel")
     void buildBlankModelFallsBack() {
         LlmRequest req = builder.build("Algo", 1, null, "  ");
-        assertThat(req.model()).isEqualTo("openai/gpt-4o-mini");
+        assertThat(req.model()).isEqualTo("minimax/MiniMax-M3");
     }
 
     @Test

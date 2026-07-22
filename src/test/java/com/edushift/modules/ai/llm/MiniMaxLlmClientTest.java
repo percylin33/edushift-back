@@ -30,11 +30,10 @@ import org.mockito.ArgumentCaptor;
  * so the production constructor (which Spring uses) stays single and
  * unambiguous.</p>
  *
- * <p>Note: the wire shape is identical to OpenRouter's (because
- * MiniMax's API Platform is OpenAI-compatible), so we lean on the
- * shared {@link OpenAiHttpHelper} rather than re-testing the JSON
- * parser — that coverage is owned by the (unchanged) OpenRouter
- * spec. The MiniMax-specific assertions are: provider id, auth
+ * <p>Note: the wire shape is identical to the underlying OpenAI-compatible
+ * spec (because MiniMax's API Platform is OpenAI-compatible), so we lean
+ * on the shared {@link OpenAiHttpHelper} rather than re-testing the JSON
+ * parser. The MiniMax-specific assertions are: provider id, auth
  * header, base URL, and retry policy.</p>
  */
 class MiniMaxLlmClientTest {

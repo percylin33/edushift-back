@@ -1,6 +1,6 @@
 package com.edushift.modules.ai.prompt;
 
-import com.edushift.modules.ai.config.OpenRouterProperties;
+import com.edushift.modules.ai.config.MiniMaxProperties;
 import com.edushift.modules.ai.dto.GenerateSessionRequest;
 import com.edushift.modules.ai.llm.LlmClient.LlmRequest;
 import java.util.List;
@@ -108,9 +108,9 @@ public class SessionGeneratorPromptBuilder {
             }
             """;
 
-    private final OpenRouterProperties props;
+    private final MiniMaxProperties props;
 
-    public SessionGeneratorPromptBuilder(OpenRouterProperties props) {
+    public SessionGeneratorPromptBuilder(MiniMaxProperties props) {
         this.props = props;
     }
 
@@ -149,7 +149,7 @@ public class SessionGeneratorPromptBuilder {
                 /* maxTokens    */ 2048,
                 /* stopSeqs     */ null,
                 /* extra        */ Map.of(
-                        // Hint the provider to use JSON mode (OpenRouter / OpenAI).
+                        // Hint the provider to use JSON mode (MiniMax / OpenAI).
                         "response_format", Map.of("type", "json_object")
                 )
         );

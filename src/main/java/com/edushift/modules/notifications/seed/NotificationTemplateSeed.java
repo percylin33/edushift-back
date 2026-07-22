@@ -31,6 +31,12 @@ import java.util.List;
  *       TENANT_ADMIN (ANNOUNCEMENT category, BE-9.4).</li>
  *   <li><b>PASSWORD_RESET</b> — to the user who clicked "forgot
  *       password" (SYSTEM category, Sprint 17 / BE-17.1).</li>
+ *   <li><b>TEACHER_ASSIGNED</b> — to the teacher when a new
+ *       TeacherAssignment row is created (SYSTEM category, Sprint 5
+ *       / DEBT-TEA-1 cascade).</li>
+ *   <li><b>SECTION_NEW_TEACHER</b> — to every enrolled student of
+ *       the section when a new teacher is assigned (ANNOUNCEMENT
+ *       category, Sprint 5 / DEBT-TEA-1 cascade).</li>
  * </ol>
  */
 public final class NotificationTemplateSeed {
@@ -122,6 +128,25 @@ public final class NotificationTemplateSeed {
                                 <p>Si el botón no funciona, copia y pega este enlace en tu navegador:<br/>
                                    <code>{{resetLink}}</code></p>
                                 <p style="color:#888;font-size:0.85em">Equipo {{tenantName}}</p>
+                                """),
+                build("TEACHER_ASSIGNED", "SYSTEM",
+                                "Has sido asignado(a) — {{sectionName}}",
+                                """
+                                <h2>Nueva asignación académica</h2>
+                                <p>Hola <b>{{teacherName}}</b>,</p>
+                                <p>Has sido asignado(a) al nivel <b>{{courseCode}}</b>, sección
+                                   <b>{{sectionName}}</b>.</p>
+                                <p>Puedes revisar los detalles en tu panel "Mis cursos".</p>
+                                <p style="color:#888;font-size:0.85em">Asignación: {{assignmentPublicUuid}}</p>
+                                """),
+                build("SECTION_NEW_TEACHER", "ANNOUNCEMENT",
+                                "Nuevo docente en tu sección — {{sectionName}}",
+                                """
+                                <h2>Nuevo docente asignado</h2>
+                                <p>Hola,</p>
+                                <p>Te informamos que el(la) docente <b>{{teacherName}}</b> ha sido asignado(a)
+                                   a tu sección <b>{{sectionName}}</b> del nivel <b>{{levelCode}}</b>.</p>
+                                <p>Si tienes dudas, consulta con tu coordinadora académica.</p>
                                 """)
         );
     }

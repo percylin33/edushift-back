@@ -18,26 +18,27 @@ import org.springframework.stereotype.Component;
  * wrapper around {@link OpenAiHttpHelper} that only configures the
  * MiniMax-specific bits: provider id, auth scheme, base URL, and
  * the default model. Wire shape and error codes are the same as
- * OpenRouter's (the LLM contract is provider-agnostic).</p>
+ * any other OpenAI-compatible gateway (the LLM contract is
+ * provider-agnostic).</p>
  *
- * <h3>Why a separate class (vs. parameterising OpenRouterLlmClient)</h3>
+ * <h3>Why a dedicated client</h3>
  * <p>MiniMax's auth header is identical ({@code Bearer <key>}) and
  * the wire shape is identical, but the operational concerns differ:
  * MiniMax has its own rate-limit semantics and may require
  * MiniMax-specific {@code extra} params (e.g.
  * {@code response_format={"type":"json_object"}}). Keeping a
- * dedicated client lets us evolve each provider independently
- * without breaking the other.</p>
+ * dedicated client lets us evolve the provider integration
+ * independently and makes swapping in another OpenAI-compatible
+ * provider straightforward.</p>
  *
  * <h3>Activation</h3>
  * <p>Active when {@code app.llm.minimax.enabled=true} AND the API
- * key is set. Mutually exclusive with {@link OpenRouterLlmClient} by
- * convention — if both are enabled, Spring will fail to start with
- * an "ambiguous bean" error, which is the correct behavior.</p>
+ * key is set. When no real provider is enabled, the
+ * {@link MockLlmClient} fallback takes over.</p>
  *
  * <h3>Retry policy</h3>
- * Mirrors OpenRouter's: up to {@code MiniMaxProperties.maxRetries}
- * retries on {@code TIMEOUT}/{@code NETWORK}/{@code 5xx}/{@code 429},
+ * Up to {@code MiniMaxProperties.maxRetries} retries on
+ * {@code TIMEOUT}/{@code NETWORK}/{@code 5xx}/{@code 429},
  * exponential backoff capped at 4s.
  */
 @Component

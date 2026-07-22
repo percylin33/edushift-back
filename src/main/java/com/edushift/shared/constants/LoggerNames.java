@@ -17,7 +17,7 @@ public final class LoggerNames {
 	/** Handled and unhandled exceptions raised by the API. */
 	public static final String EXCEPTIONS = "edushift.exceptions";
 
-	/** AI module: OpenRouter calls, latency, tokens, retries. */
+	/** AI module: MiniMax (and future Kimi/GLM) calls, latency, tokens, retries. */
 	public static final String AI = "edushift.ai";
 
 	/** Persisted audit events (mirrored to file for compliance retention). */

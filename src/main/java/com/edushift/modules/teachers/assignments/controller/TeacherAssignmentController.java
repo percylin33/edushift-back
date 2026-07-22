@@ -83,11 +83,14 @@ public class TeacherAssignmentController {
 
 	@GetMapping("/teachers/{teacherUuid}/assignments")
 	@SecurityRequirement(name = "bearerAuth")
-	@PreAuthorize("hasRole('TENANT_ADMIN')")
+	@PreAuthorize("hasAnyRole('TENANT_ADMIN','TEACHER')")
 	@Operation(
-			summary = "List a teacher's assignments",
+			summary = "List a teacher's assignments (TENANT_ADMIN or TEACHER-self)",
 			description = "Filters: optional period; optional active flag (default true). "
-					+ "Set active=false to include historical (soft-ended) rows."
+					+ "Set active=false to include historical (soft-ended) rows. "
+					+ "Sprint 5 / DEBT-TEA-1: a TEACHER bearer may only list their "
+					+ "OWN assignments — asking for another teacher's assignments "
+					+ "returns 404 RESOURCE_NOT_FOUND (anti-enumeration)."
 	)
 	public ResponseEntity<List<AssignmentListItem>> listForTeacher(
 			@PathVariable UUID teacherUuid,
@@ -125,11 +128,14 @@ public class TeacherAssignmentController {
 
 	@GetMapping("/academic/sections/{sectionUuid}/teachers")
 	@SecurityRequirement(name = "bearerAuth")
-	@PreAuthorize("hasRole('TENANT_ADMIN')")
+	@PreAuthorize("hasAnyRole('TENANT_ADMIN','TEACHER')")
 	@Operation(
-			summary = "List active teachers assigned to a section",
+			summary = "List active teachers assigned to a section (TENANT_ADMIN or TEACHER-of-section)",
 			description = "Returns the active assignments of the section grouped per "
-					+ "teacher + course. Optionally narrowed to a single period."
+					+ "teacher + course. Optionally narrowed to a single period. "
+					+ "Sprint 5 / DEBT-TEA-1: a TEACHER bearer must have at least "
+					+ "one ACTIVE assignment in this section (any course, any period); "
+					+ "otherwise the response is 404 RESOURCE_NOT_FOUND (anti-enumeration)."
 	)
 	public ResponseEntity<List<SectionTeacherItem>> listForSection(
 			@PathVariable UUID sectionUuid,

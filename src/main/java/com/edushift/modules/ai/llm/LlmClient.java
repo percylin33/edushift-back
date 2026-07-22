@@ -8,12 +8,12 @@ import java.util.Map;
  *
  * <p>Wraps any text-completion model behind a stable contract so the
  * {@code LmsAiService} (and the rest of the AI module) does not depend
- * on a specific provider (OpenAI, OpenRouter, Anthropic, Ollama, ...).
- * The implementation is selected at runtime by the
- * {@code llm} configuration profile; see
- * {@link com.edushift.modules.ai.llm.OpenRouterLlmClient} and
- * {@link com.edushift.modules.ai.llm.MockLlmClient} for the two
- * bundled impls.</p>
+ * on a specific provider. The active provider today is {@link
+ * com.edushift.modules.ai.llm.MiniMaxLlmClient} (MiniMax M3 API
+ * Platform); the {@link com.edushift.modules.ai.llm.MockLlmClient}
+ * stays as the fallback for dev/test. The implementation is selected
+ * at runtime by the {@code app.llm.minimax.enabled} configuration
+ * flag.</p>
  *
  * <h3>Contract</h3>
  * <ul>
@@ -25,14 +25,14 @@ import java.util.Map;
  *   <li><b>Retry-aware</b>: the impl performs retries with backoff on
  *       transient errors (5xx, timeouts). The caller does NOT need to
  *       retry. {@code maxRetries} is configured at the impl level
- *       (see {@code OpenRouterProperties.maxRetries}).</li>
+ *       (see {@code MiniMaxProperties.maxRetries}).</li>
  *   <li><b>Throws on terminal failures</b>: after retries are exhausted
  *       or on a permanent error (4xx, parse error), the impl throws an
  *       {@link LlmException} with a stable {@code code} that the
  *       {@code AiController} maps to an HTTP error.</li>
  * </ul>
  *
- * @see OpenRouterLlmClient
+ * @see MiniMaxLlmClient
  * @see MockLlmClient
  */
 public interface LlmClient {
@@ -59,8 +59,9 @@ public interface LlmClient {
      *
      * <p>Default implementation (BE-7c.1 backward compat): runs
      * {@link #complete(LlmRequest)} and emits the resulting text in
-     * pseudo-token chunks of ~20 chars. Real providers (OpenRouter,
-     * MiniMax) override this with native SSE / chunked responses.
+     * pseudo-token chunks of ~20 chars. Real providers (MiniMax,
+     * future Kimi/GLM) override this with native SSE / chunked
+     * responses.
      *
      * <p>The returned {@link StreamResult} carries the final token usage
      * and latency, same as {@link LlmResponse}.
@@ -144,7 +145,7 @@ public interface LlmClient {
     }
 
     /**
-     * Human-readable provider id (e.g. {@code "openrouter"}, {@code "mock"}).
+     * Human-readable provider id (e.g. {@code "minimax"}, {@code "mock"}).
      * Used in the {@code ai_generations.model_used} audit row and in the
      * {@code X-Provider} response header.
      */
@@ -153,7 +154,7 @@ public interface LlmClient {
     /**
      * Per-request LLM configuration.
      *
-     * @param model          OpenRouter model id, e.g. {@code openai/gpt-4o-mini}.
+     * @param model          MiniMax model id, e.g. {@code minimax/MiniMax-M3}.
      *                       Required. Picked by the caller from
      *                       {@code tenant_ai_settings.default_model} or
      *                       the app-level default.
@@ -205,8 +206,8 @@ public interface LlmClient {
     /**
      * One message in a chat history (Sprint 8 / BE-8.3). The chat
      * service builds a list of these and passes it via
-     * {@link LlmRequest#history()}. Real providers (OpenRouter,
-     * MiniMax) translate this into the {@code messages} array of the
+     * {@link LlmRequest#history()}. Real providers (MiniMax, future
+     * Kimi/GLM) translate this into the {@code messages} array of the
      * chat-completion request.
      *
      * @param role    {@code "user"} or {@code "assistant"}.

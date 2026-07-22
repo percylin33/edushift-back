@@ -11,16 +11,16 @@ import org.slf4j.LoggerFactory;
  * <p>Returns a deterministic, hardcoded JSON blob that satisfies the
  * {@code LmsAiService}'s parser. This lets the AI module boot and serve
  * requests (so the FE panel is usable in dev) without a real LLM key.
- * The shape matches what a real OpenRouter call would return, so the
+ * The shape matches what a real MiniMax call would return, so the
  * downstream parsing path is exercised end-to-end.</p>
  *
  * <p>Wiring lives in {@code com.edushift.modules.ai.config.LlmAutoConfiguration},
  * which registers this class as a {@code @Bean} via
  * {@code @ConditionalOnMissingBean(LlmClient.class)} — the bean factory
  * is evaluated AFTER the regular component scan, so any enabled real
- * provider ({@code OpenRouterLlmClient}, {@code MiniMaxLlmClient})
- * wins deterministically. This class is intentionally NOT a
- * {@code @Component}.</p>
+ * provider (currently {@code MiniMaxLlmClient}; future Kimi/GLM
+ * clients will follow the same pattern) wins deterministically. This
+ * class is intentionally NOT a {@code @Component}.</p>
  *
  * <h3>Test/dev behaviour</h3>
  * <ul>

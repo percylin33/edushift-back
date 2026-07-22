@@ -6,7 +6,7 @@
 	  - edushift.security    -> security / auth events
 	  - edushift.requests    -> HTTP access log
 	  - edushift.exceptions  -> handled & unhandled exceptions
-	  - edushift.ai          -> AI / OpenRouter integration
+	  - edushift.ai          -> AI / MiniMax (and future Kimi/GLM) integration
 	  - edushift.audit       -> audit event mirror (compliance retention)
 
 	MDC fields surfaced in every log line:
@@ -149,7 +149,7 @@
 			</rollingPolicy>
 		</appender>
 
-		<!-- AI / OpenRouter log: latency, retries, model usage. Kept 30 days. -->
+		<!-- AI / MiniMax log: latency, retries, model usage. Kept 30 days. -->
 		<appender name="AI_FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
 			<file>${LOG_PATH}/ai.log</file>
 			<encoder>

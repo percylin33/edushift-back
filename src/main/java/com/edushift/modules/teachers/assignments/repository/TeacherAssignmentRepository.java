@@ -137,4 +137,29 @@ public interface TeacherAssignmentRepository extends JpaRepository<TeacherAssign
 			where a.academicPeriod = :period and a.unassignedAt is null
 			""")
 	boolean existsActiveByPeriod(@Param("period") AcademicPeriod period);
+
+	/**
+	 * Sprint 5 / DEBT-TEA-1 — guardrail for the relaxed
+	 * {@code GET /academic/sections/{uuid}/teachers} endpoint. Returns
+	 * true iff the user identified by {@code userPublicUuid} has at least
+	 * one ACTIVE assignment in the given section (any course, any
+	 * period). Used by the self-only check in
+	 * {@code TeacherAssignmentServiceImpl.listForSection}: a TEACHER
+	 * bearer who has never taught in the section must NOT see the roster
+	 * of co-teachers.
+	 *
+	 * <p>The query joins {@code teachers} explicitly because the
+	 * tenant-scoped filter on {@code teacher_assignments} alone is not
+	 * enough — we need to bind to the {@code user_id} field of the
+	 * teacher, which lives on a different entity.</p>
+	 */
+	@Query("""
+			select count(a) > 0 from TeacherAssignment a
+			where a.section = :section
+			  and a.unassignedAt is null
+			  and a.teacher.userId = :userPublicUuid
+			""")
+	boolean existsActiveBySectionAndTeacherUserId(
+			@Param("section") Section section,
+			@Param("userPublicUuid") UUID userPublicUuid);
 }

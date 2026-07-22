@@ -104,7 +104,7 @@ public class AiController {
     @PreAuthorize("hasAuthority('" + LmsAuthorities.LMS_AI_GENERATE + "')")
     @Operation(summary = "Suggest quiz questions on a topic",
                description = """
-                       Calls the configured LLM (OpenRouter, MiniMax, or Mock)
+                       Calls the configured LLM (MiniMax or Mock)
                        to suggest N questions (MC/TF/ShortAnswer) for the given
                        topic. Subject to the tenant's AI quota and master
                        switch. Synchronous by default (latency 1-3s); pass

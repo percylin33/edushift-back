@@ -146,6 +146,13 @@ public class Teacher extends TenantAwareEntity {
 	private EmploymentStatus employmentStatus = EmploymentStatus.ACTIVE;
 
 	// ---------------------------------------------------------------------------
+	// Workload counter (Sprint 5 / DEBT-TEA-1)
+	// ---------------------------------------------------------------------------
+
+	@Column(name = "assignments_count", nullable = false)
+	private Integer assignmentsCount = 0;
+
+	// ---------------------------------------------------------------------------
 	// Optional cross-module link
 	// ---------------------------------------------------------------------------
 
@@ -179,6 +186,9 @@ public class Teacher extends TenantAwareEntity {
 		}
 		if (metadata == null) {
 			metadata = new HashMap<>();
+		}
+		if (assignmentsCount == null) {
+			assignmentsCount = 0;
 		}
 		normalizeEmail();
 	}

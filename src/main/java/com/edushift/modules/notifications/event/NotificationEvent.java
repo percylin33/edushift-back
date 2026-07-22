@@ -36,7 +36,21 @@ public record NotificationEvent(
         /** Source entity id, for audit / idempotency (e.g. sessionUuid, evaluationUuid). */
         UUID sourceId,
         /** When the event happened (for sorting/audit). */
-        Instant occurredAt
+        Instant occurredAt,
+        /**
+         * Tenant the event belongs to. Used by
+         * {@link NotificationEventListener} to restore the
+         * {@code TenantContext} in the async post-commit thread.
+         *
+         * <p>Optional — older publishers that don't set it fall
+         * back to the legacy behaviour (the listener logs a warning
+         * and skips dispatch). New publishers should ALWAYS set it
+         * via {@code NotificationEvent.Builder.tenantId(UUID)}; the
+         * cross-module pattern is to read it from the current
+         * {@code TenantContext.currentRequired()} right before
+         * publishing.</p>
+         */
+        UUID tenantId
 ) {
 
     /**
@@ -54,6 +68,7 @@ public record NotificationEvent(
         private Map<String, Object> payload = Map.of();
         private UUID sourceId;
         private Instant occurredAt = Instant.now();
+        private UUID tenantId;
 
         public Builder templateKey(String key) { this.templateKey = key; return this; }
         public Builder category(Category c) { this.category = c; return this; }
@@ -61,6 +76,12 @@ public record NotificationEvent(
         public Builder payload(Map<String, Object> p) { this.payload = p; return this; }
         public Builder sourceId(UUID id) { this.sourceId = id; return this; }
         public Builder occurredAt(Instant t) { this.occurredAt = t; return this; }
+        /**
+         * Set the tenant scope for the event. Required to enable
+         * dispatch from the async post-commit listener — see
+         * {@link NotificationEvent#tenantId()}.
+         */
+        public Builder tenantId(UUID id) { this.tenantId = id; return this; }
         public Builder put(String key, Object value) {
             if (payload.isEmpty()) payload = new java.util.HashMap<>();
             if (payload instanceof java.util.HashMap) {
@@ -76,7 +97,7 @@ public record NotificationEvent(
         public NotificationEvent build() {
             return new NotificationEvent(
                     templateKey, category, recipients == null ? List.of() : recipients,
-                    payload, sourceId, occurredAt);
+                    payload, sourceId, occurredAt, tenantId);
         }
     }
 }

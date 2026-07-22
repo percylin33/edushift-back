@@ -29,8 +29,8 @@ class AiDtoTest {
                 "MC", 5,
                 List.of(new QuestionSuggestion.OptionSuggestion("Paris", true, "Correct")),
                 "Trivia");
-        var r = new SuggestQuizQuestionsResponse(List.of(q), "MiniMax/MiniMax-M2",
-                "openrouter", "v1", List.of(UUID.randomUUID().toString()));
+        var r = new SuggestQuizQuestionsResponse(List.of(q), "minimax/MiniMax-M2",
+                "minimax", "v1", List.of(UUID.randomUUID().toString()));
         assertThat(r.questions()).hasSize(1);
         assertThat(r.model()).isEqualTo("MiniMax/MiniMax-M2");
         assertThat(r.generationUuids()).hasSize(1);
@@ -103,7 +103,7 @@ class AiDtoTest {
         gen.setUpdatedAt(java.time.Instant.now());
         var q = List.of(new QuestionSuggestion("id", "Q?", "MC", 5, List.of(), null));
         GenerationStatusResponse r = GenerationStatusResponse.completed(gen, q, "model-x",
-                "openrouter", "v1");
+                "minimax", "v1");
         assertThat(r.status()).isEqualTo(com.edushift.modules.ai.entity.AiGeneration.Status.COMPLETED);
         assertThat(r.questions()).hasSize(1);
         assertThat(r.model()).isEqualTo("model-x");

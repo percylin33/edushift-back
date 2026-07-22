@@ -11,11 +11,10 @@ import org.springframework.context.annotation.Configuration;
 /**
  * Wiring of the {@link LlmClient} provider chain (Sprint 7c).
  *
- * <p>Real providers ({@code OpenRouterLlmClient}, {@code MiniMaxLlmClient})
- * register themselves as {@code @Component} beans gated by their own
- * {@code @ConditionalOnProperty} (see {@code app.llm.openrouter.enabled} /
- * {@code app.llm.minimax.enabled}). When at least one of them is enabled,
- * the resulting bean wins and {@link #mockLlmClient()} below is skipped.</p>
+ * <p>The real provider ({@code MiniMaxLlmClient}) registers itself as a
+ * {@code @Component} bean gated by its own {@code @ConditionalOnProperty}
+ * (see {@code app.llm.minimax.enabled}). When it is enabled, the resulting
+ * bean wins and {@link #mockLlmClient()} below is skipped.</p>
  *
  * <p>If no real provider is enabled (typical for dev/test without an API
  * key), the {@link MockLlmClient} fallback is registered via a {@code @Bean}
@@ -43,7 +42,7 @@ public class LlmAutoConfiguration {
 	@ConditionalOnMissingBean(LlmClient.class)
 	public LlmClient mockLlmClient() {
 		log.warn("[llm-config] No real LLM provider enabled "
-				+ "(app.llm.openrouter.enabled / app.llm.minimax.enabled both false). "
+				+ "(app.llm.minimax.enabled=false). "
 				+ "Falling back to MockLlmClient — AI responses are deterministic stubs.");
 		return new MockLlmClient();
 	}

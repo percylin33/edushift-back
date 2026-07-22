@@ -1,6 +1,6 @@
 package com.edushift.modules.ai.prompt;
 
-import com.edushift.modules.ai.config.OpenRouterProperties;
+import com.edushift.modules.ai.config.MiniMaxProperties;
 import com.edushift.modules.ai.dto.GenerateRubricRequest;
 import com.edushift.modules.ai.llm.LlmClient.LlmRequest;
 import java.util.Map;
@@ -88,9 +88,9 @@ public class RubricGeneratorPromptBuilder {
             }
             """;
 
-    private final OpenRouterProperties props;
+    private final MiniMaxProperties props;
 
-    public RubricGeneratorPromptBuilder(OpenRouterProperties props) {
+    public RubricGeneratorPromptBuilder(MiniMaxProperties props) {
         this.props = props;
     }
 

@@ -10,8 +10,8 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  *
  * <p>MiniMax exposes an OpenAI-compatible {@code /chat/completions}
  * endpoint (their "API Platform" product), so the wire shape is the
- * same as OpenRouter — only the base URL, auth scheme, and the
- * master {@code enabled} flag differ.</p>
+ * standard OpenAI chat-completion dialect — only the base URL, auth
+ * scheme, and the master {@code enabled} flag are specific to MiniMax.</p>
  *
  * <h3>Activating</h3>
  * <pre>
@@ -22,9 +22,10 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  * </pre>
  *
  * <p>If {@code enabled=false} (the default), the {@code MockLlmClient}
- * is used. The setting is independent of OpenRouter: enabling both
- * throws on startup (the two beans are mutually exclusive by
- * convention — never run two LLMs in the same request stream).</p>
+ * is used as the dev/test fallback. Future migrations to Kimi or GLM
+ * (also OpenAI-compatible) will land behind their own
+ * {@code @ConditionalOnProperty} flag and a parallel
+ * {@code *Properties} class — same pattern as MiniMax.</p>
  */
 @Getter
 @Setter
