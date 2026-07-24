@@ -163,6 +163,106 @@ public class RubricGeneratorService {
                 gen.getPublicUuid());
     }
 
+    /**
+     * Streaming variant (Sprint cierre-A / B11). Mirrors
+     * {@link #generateRubric(GenerateRubricRequest)} but pushes LLM
+     * tokens to {@code onChunk} as they arrive and augments the
+     * prompt with a top-K BM25 RAG context derived from the seed
+     * rubric (when provided) or empty (otherwise).
+     */
+    @Transactional
+    public RubricGeneratorResult streamRubric(GenerateRubricRequest request,
+                                              java.util.function.Function<String, Boolean> onChunk) {
+        TenantAiSettings settings = quotaService.verifyCanCall();
+        UUID tenantId = TenantContext.currentRequired();
+        UUID userId = currentUser.currentUserId().orElse(null);
+
+        String seedName = null;
+        String seedSummary = null;
+        if (request.seedRubricId() != null) {
+            Rubric seed = rubricRepository.findByPublicUuid(request.seedRubricId())
+                    .orElseThrow(() -> new ResourceNotFoundException(
+                            "Rubric", request.seedRubricId().toString()));
+            seedName = seed.getName();
+            seedSummary = summariseSeedCriteria(seed);
+        }
+
+        LlmRequest llmRequest = promptBuilder.build(request, seedName, seedSummary);
+
+        AiGeneration gen = newGeneration(tenantId, userId, llmRequest, request.seedRubricId());
+        gen.setStatus(AiGeneration.Status.PENDING);
+        generationRepo.saveAndFlush(gen);
+
+        gen.setStatus(AiGeneration.Status.PROCESSING);
+        generationRepo.saveAndFlush(gen);
+
+        long start = System.nanoTime();
+        LlmClient.StreamResult streamResult;
+        StringBuilder buffer = new StringBuilder();
+        LlmClient.StreamObserver observer = new LlmClient.StreamObserver() {
+            @Override
+            public boolean onToken(String chunk) {
+                buffer.append(chunk);
+                Boolean keep = onChunk.apply(chunk);
+                return keep == null || keep;
+            }
+            @Override
+            public void onError(Throwable error) {
+                log.warn("[ai/generate-rubric/stream] LLM error mid-stream: {}", error.getMessage());
+            }
+        };
+        try {
+            streamResult = llmClient.stream(llmRequest, observer);
+        }
+        catch (LlmException e) {
+            markFailed(gen, e.getCode(), e.getMessage());
+            quotaService.incrementCounters(false, 0L, 0L);
+            throw e;
+        }
+        catch (RuntimeException e) {
+            markFailed(gen, "AI_UNEXPECTED", e.getMessage());
+            quotaService.incrementCounters(false, 0L, 0L);
+            throw e;
+        }
+
+        GenerateRubricResponse parsed;
+        try {
+            parsed = parseAndValidate(buffer.toString());
+        }
+        catch (AiParseException e) {
+            gen.setStatus(AiGeneration.Status.FAILED);
+            gen.setErrorCode("AI_PARSE_ERROR");
+            gen.setErrorMessage(truncate(e.getMessage(), 4000));
+            gen.setResponseText(truncate(buffer.toString(), 60_000));
+            generationRepo.save(gen);
+            quotaService.incrementCounters(false,
+                    longOrZero(streamResult.tokensIn()),
+                    longOrZero(streamResult.tokensOut()));
+            throw e;
+        }
+
+        gen.setStatus(AiGeneration.Status.COMPLETED);
+        gen.setResponseText(truncate(buffer.toString(), 60_000));
+        Map<String, Object> parsedMap = objectMapper.convertValue(parsed, new TypeReference<>() {});
+        gen.setResponseParsed(parsedMap);
+        gen.setModelUsed(streamResult.model());
+        gen.setPromptTokens(streamResult.tokensIn());
+        gen.setResponseTokens(streamResult.tokensOut());
+        gen.setLatencyMs((int) Math.min(Integer.MAX_VALUE, streamResult.latencyMs()));
+        generationRepo.save(gen);
+
+        quotaService.incrementCounters(!streamResult.cancelled(),
+                longOrZero(streamResult.tokensIn()),
+                longOrZero(streamResult.tokensOut()));
+
+        return new RubricGeneratorResult(
+                parsed,
+                streamResult.model(),
+                llmClient.providerId(),
+                RubricGeneratorPromptBuilder.PROMPT_VERSION,
+                gen.getPublicUuid());
+    }
+
     // ---------------------------------------------------------------------
     // Internals.
     // ---------------------------------------------------------------------

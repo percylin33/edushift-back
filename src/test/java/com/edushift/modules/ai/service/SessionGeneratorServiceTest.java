@@ -73,6 +73,7 @@ class SessionGeneratorServiceTest {
     private CapacityRepository capacityRepository;
     private com.edushift.modules.sessions.learning.service.LearningSessionService learningSessionService;
     private com.edushift.modules.teachers.assignments.repository.TeacherAssignmentRepository teacherAssignmentRepository;
+    private com.edushift.modules.ai.rag.RagContextService ragContextService;
     private SessionGeneratorService service;
 
     private final UUID tenantId = UUID.fromString("11111111-1111-1111-1111-111111111111");
@@ -94,11 +95,14 @@ class SessionGeneratorServiceTest {
         capacityRepository = mock(CapacityRepository.class);
         learningSessionService = mock(com.edushift.modules.sessions.learning.service.LearningSessionService.class);
         teacherAssignmentRepository = mock(com.edushift.modules.teachers.assignments.repository.TeacherAssignmentRepository.class);
+        ragContextService = mock(com.edushift.modules.ai.rag.RagContextService.class);
 
         service = new SessionGeneratorService(
                 llmClient, promptBuilder, quotaService, generationRepo, currentUser, objectMapper,
                 courseRepository, courseLevelRepository, competencyRepository, capacityRepository,
-                learningSessionService, teacherAssignmentRepository);
+                learningSessionService, teacherAssignmentRepository, ragContextService);
+
+        when(ragContextService.retrieveForCourse(any(), any())).thenReturn(List.of());
 
         // Default wiring.
         TenantContext.set(tenantId);

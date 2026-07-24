@@ -17,6 +17,8 @@ import com.edushift.modules.ai.llm.LlmClient.LlmRequest;
 import com.edushift.modules.ai.llm.LlmClient.LlmResponse;
 import com.edushift.modules.ai.llm.LlmException;
 import com.edushift.modules.ai.prompt.SessionGeneratorPromptBuilder;
+import com.edushift.modules.ai.rag.RagContextService;
+import com.edushift.modules.ai.rag.RagContextService.RagSnippet;
 import com.edushift.modules.ai.repository.AiGenerationRepository;
 import com.edushift.shared.multitenancy.TenantContext;
 import com.edushift.shared.security.CurrentUserProvider;
@@ -85,6 +87,7 @@ public class SessionGeneratorService {
      */
     private final com.edushift.modules.sessions.learning.service.LearningSessionService learningSessionService;
     private final com.edushift.modules.teachers.assignments.repository.TeacherAssignmentRepository teacherAssignmentRepository;
+    private final RagContextService ragContextService;
 
     public SessionGeneratorService(LlmClient llmClient,
                                    SessionGeneratorPromptBuilder promptBuilder,
@@ -97,7 +100,8 @@ public class SessionGeneratorService {
                                    CompetencyRepository competencyRepository,
                                    CapacityRepository capacityRepository,
                                    com.edushift.modules.sessions.learning.service.LearningSessionService learningSessionService,
-                                   com.edushift.modules.teachers.assignments.repository.TeacherAssignmentRepository teacherAssignmentRepository) {
+                                   com.edushift.modules.teachers.assignments.repository.TeacherAssignmentRepository teacherAssignmentRepository,
+                                   RagContextService ragContextService) {
         this.llmClient = llmClient;
         this.promptBuilder = promptBuilder;
         this.quotaService = quotaService;
@@ -110,6 +114,7 @@ public class SessionGeneratorService {
         this.capacityRepository = capacityRepository;
         this.learningSessionService = learningSessionService;
         this.teacherAssignmentRepository = teacherAssignmentRepository;
+        this.ragContextService = ragContextService;
     }
 
     /**
@@ -227,6 +232,135 @@ public class SessionGeneratorService {
                 SessionGeneratorPromptBuilder.PROMPT_VERSION,
                 gen.getPublicUuid(),
                 persistedSession);
+    }
+
+    /**
+     * Streaming variant (Sprint cierre-A / B11). Same contract as
+     * {@link #generateSession(GenerateSessionRequest)} but pushes LLM
+     * tokens to {@code onChunk} as they arrive and augments the
+     * prompt with a top-K BM25 RAG context (see
+     * {@link RagContextService}) over the course's competencies and
+     * capacities.
+     */
+    @Transactional
+    public SessionGeneratorResult streamSession(GenerateSessionRequest request,
+                                                java.util.function.Function<String, Boolean> onChunk) {
+        // 1. Quota gate.
+        TenantAiSettings settings = quotaService.verifyCanCall();
+        UUID tenantId = TenantContext.currentRequired();
+        UUID userId = currentUser.currentUserId().orElse(null);
+
+        // 2. Resolve course.
+        Course course = courseRepository.findByPublicUuid(request.courseId())
+                .orElseThrow(() -> new com.edushift.shared.exception.ResourceNotFoundException(
+                        "Course", request.courseId().toString()));
+
+        // 3. Resolve grade + competency/capacity names.
+        String gradeName = courseLevelRepository
+                .findAllByCourse(course)
+                .stream()
+                .findFirst()
+                .map(cl -> cl.getLevel().getName())
+                .orElse(null);
+        List<String> competencyNames = resolveCompetencyNames(request.competencyIds());
+        List<String> capacityNames = resolveCapacityNames(request.capacityIds());
+
+        // 4. RAG context (Sprint cierre-A / B11). Top-K BM25 over the
+        //    course's competencies + capacities. Null course = skip.
+        List<RagSnippet> ragSnippets = ragContextService.retrieveForCourse(course.getPublicUuid(), request.topic());
+        LlmRequest llmRequest = promptBuilder.buildWithRag(
+                request, course.getName(), gradeName, competencyNames, capacityNames, ragSnippets);
+
+        // 5. Persist a PENDING audit row.
+        AiGeneration gen = newGeneration(tenantId, userId, llmRequest, course.getPublicUuid());
+        gen.setStatus(AiGeneration.Status.PENDING);
+        generationRepo.saveAndFlush(gen);
+
+        // 6. Run the streaming LLM call.
+        gen.setStatus(AiGeneration.Status.PROCESSING);
+        generationRepo.saveAndFlush(gen);
+
+        long start = System.nanoTime();
+        LlmClient.StreamResult streamResult;
+        StringBuilder buffer = new StringBuilder();
+        LlmClient.StreamObserver observer = new LlmClient.StreamObserver() {
+            @Override
+			public boolean onToken(String chunk) {
+				buffer.append(chunk);
+				Boolean keep = onChunk.apply(chunk);
+				return keep == null || keep;
+			}
+			@Override
+			public void onError(Throwable error) {
+				log.warn("[ai/generate-session/stream] LLM error mid-stream: {}", error.getMessage());
+			}
+		};
+        try {
+            streamResult = llmClient.stream(llmRequest, observer);
+        }
+        catch (LlmException e) {
+            long latency = (System.nanoTime() - start) / 1_000_000L;
+            markFailed(gen, e.getCode(), e.getMessage());
+            quotaService.incrementCounters(false, 0L, 0L);
+            throw e;
+        }
+        catch (RuntimeException e) {
+            markFailed(gen, "AI_UNEXPECTED", e.getMessage());
+            quotaService.incrementCounters(false, 0L, 0L);
+            throw e;
+        }
+
+        // 7. Parse the buffered text and validate.
+        GenerateSessionResponse parsed;
+        try {
+            parsed = parseAndValidate(buffer.toString(), request.durationMinutes());
+        }
+        catch (AiParseException e) {
+            long latency = (System.nanoTime() - start) / 1_000_000L;
+            markFailedWithResponseText(gen, buffer.toString(), e.getMessage());
+            quotaService.incrementCounters(false,
+                    longOrZero(streamResult.tokensIn()),
+                    longOrZero(streamResult.tokensOut()));
+            throw e;
+        }
+
+        // 8. Mark COMPLETED + persist as draft LearningSession.
+        markCompletedFromStream(gen, streamResult, parsed);
+        quotaService.incrementCounters(!streamResult.cancelled(),
+                longOrZero(streamResult.tokensIn()),
+                longOrZero(streamResult.tokensOut()));
+
+        UUID persistedSessionUuid = persistAsLearningSession(request, userId, parsed, course, tenantId);
+
+        return new SessionGeneratorResult(
+                parsed,
+                streamResult.model(),
+                llmClient.providerId(),
+                SessionGeneratorPromptBuilder.PROMPT_VERSION,
+                gen.getPublicUuid(),
+                persistedSessionUuid);
+    }
+
+    private void markCompletedFromStream(AiGeneration gen, LlmClient.StreamResult result,
+                                         GenerateSessionResponse parsed) {
+        gen.setStatus(AiGeneration.Status.COMPLETED);
+        gen.setResponseText(truncate(objectMapper.convertValue(parsed, String.class), 60_000));
+        Map<String, Object> parsedMap = objectMapper.convertValue(parsed,
+                new com.fasterxml.jackson.core.type.TypeReference<Map<String, Object>>() {});
+        gen.setResponseParsed(parsedMap);
+        gen.setModelUsed(result.model());
+        gen.setPromptTokens(result.tokensIn());
+        gen.setResponseTokens(result.tokensOut());
+        gen.setLatencyMs((int) Math.min(Integer.MAX_VALUE, result.latencyMs()));
+        generationRepo.save(gen);
+    }
+
+    private void markFailedWithResponseText(AiGeneration gen, String text, String message) {
+        gen.setStatus(AiGeneration.Status.FAILED);
+        gen.setErrorCode("AI_PARSE_ERROR");
+        gen.setErrorMessage(truncate(message, 4000));
+        gen.setResponseText(truncate(text, 60_000));
+        generationRepo.save(gen);
     }
 
     /**

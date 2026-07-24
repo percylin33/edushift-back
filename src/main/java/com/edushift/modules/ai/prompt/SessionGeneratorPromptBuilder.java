@@ -3,6 +3,7 @@ package com.edushift.modules.ai.prompt;
 import com.edushift.modules.ai.config.MiniMaxProperties;
 import com.edushift.modules.ai.dto.GenerateSessionRequest;
 import com.edushift.modules.ai.llm.LlmClient.LlmRequest;
+import com.edushift.modules.ai.rag.RagContextService.RagSnippet;
 import java.util.List;
 import java.util.Map;
 import org.springframework.stereotype.Component;
@@ -153,6 +154,48 @@ public class SessionGeneratorPromptBuilder {
                         "response_format", Map.of("type", "json_object")
                 )
         );
+    }
+
+    /**
+     * RAG-augmented variant (Sprint cierre-A / B11). Prepends the
+     * top-K BM25-retrieved snippets as a {@code [CONTEXTO]} block so
+     * the LLM can ground the lesson in the course's own competencies
+     * and capacities.
+     */
+    public LlmRequest buildWithRag(GenerateSessionRequest req,
+                                    String courseName,
+                                    String gradeName,
+                                    List<String> competencyNames,
+                                    List<String> capacityNames,
+                                    List<RagSnippet> ragSnippets) {
+        LlmRequest base = build(req, courseName, gradeName, competencyNames, capacityNames);
+        if (ragSnippets == null || ragSnippets.isEmpty()) {
+            return base;
+        }
+        String augmented = injectContext(base.userPrompt(), ragSnippets);
+        return new LlmRequest(
+                base.model(),
+                base.systemPrompt(),
+                augmented,
+                base.temperature(),
+                base.maxTokens(),
+                base.stopSequences(),
+                base.extra(),
+                base.history());
+    }
+
+    private static String injectContext(String userPrompt, List<RagSnippet> snippets) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("[CONTEXTO RECUPERADO DEL CURSO]\n");
+        for (RagSnippet s : snippets) {
+            sb.append("- (").append(s.kind()).append(") ")
+              .append(s.title()).append(": ")
+              .append(s.text()).append('\n');
+        }
+        sb.append("\nUsa el contexto anterior cuando sea relevante para el tema. ")
+          .append("Si el contexto no es relevante, ignóralo.\n\n");
+        sb.append(userPrompt);
+        return sb.toString();
     }
 
     private String buildUserPrompt(GenerateSessionRequest req,

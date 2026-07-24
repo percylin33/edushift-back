@@ -9,6 +9,7 @@ import com.edushift.modules.ai.dto.SuggestQuizQuestionsRequest;
 import com.edushift.modules.ai.dto.SuggestQuizQuestionsResponse;
 import com.edushift.modules.ai.entity.AiGeneration;
 import com.edushift.modules.ai.exception.AiGenerationNotFoundException;
+import com.edushift.modules.ai.llm.LlmClient;
 import com.edushift.modules.ai.repository.AiGenerationRepository;
 import com.edushift.modules.ai.service.AsyncLmsAiOrchestrator;
 import com.edushift.modules.ai.service.LmsAiService;
@@ -28,6 +29,7 @@ import java.util.List;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.transaction.annotation.Transactional;
@@ -39,6 +41,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 /**
  * REST adapter for the AI module (BE-7c.1 + BE-7c.2 + BE-8.1).
@@ -98,6 +101,7 @@ public class AiController {
     private final SessionGeneratorService sessionGeneratorService;
     private final RubricGeneratorService rubricGeneratorService;
     private final AiGenerationRepository generationRepo;
+    private final LlmClient llmClient;
     private final ObjectMapper objectMapper;
 
     @PostMapping("/quiz-questions")
@@ -165,6 +169,108 @@ public class AiController {
     ) {
         SessionGeneratorResult result = sessionGeneratorService.generateSession(request);
         return ResponseEntity.ok(ApiResponse.ok(result));
+    }
+
+    /**
+     * SSE streaming variant of {@code POST /v1/ai/generate-session}
+     * (Sprint cierre-A / B11). Emits:
+     * <ul>
+     *   <li>{@code event: token} — one event per LLM chunk (JSON-encoded
+     *       text chunk).</li>
+     *   <li>{@code event: done}   — terminal event carrying the
+     *       {@link SessionGeneratorResult} JSON
+     *       ({@code session + model + provider + promptVersion +
+     *       generationUuid + persistedSessionUuid}).</li>
+     *   <li>{@code event: error}  — terminal event on LLM/parse failure
+     *       with the error message.</li>
+     * </ul>
+     * Backward-compatible: the sync endpoint above remains.
+     */
+    @PostMapping(value = "/v1/ai/generate-session/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    @PreAuthorize("hasAuthority('" + LmsAuthorities.LMS_AI_GENERATE + "')")
+    @Operation(summary = "Generate a learning session outline with AI (SSE streaming)")
+    public SseEmitter streamGenerateSession(@Valid @RequestBody GenerateSessionRequest request) {
+        SseEmitter emitter = new SseEmitter(120_000L);
+        Thread worker = new Thread(() -> {
+            try {
+                SessionGeneratorResult result = sessionGeneratorService.streamSession(
+                        request,
+                        chunk -> {
+                            try {
+                                emitter.send(SseEmitter.event().name("token").data(chunk));
+                                return true;
+                            }
+                            catch (java.io.IOException e) {
+                                return false;
+                            }
+                        });
+                emitter.send(SseEmitter.event().name("done").data(objectMapper.writeValueAsString(result)));
+                emitter.complete();
+            }
+            catch (com.edushift.modules.ai.exception.AiModuleException ex) {
+                sendErrorAndComplete(emitter, ex.getMessage());
+            }
+            catch (Exception ex) {
+                sendErrorAndComplete(emitter,
+                        ex.getMessage() == null ? ex.getClass().getSimpleName() : ex.getMessage());
+            }
+        }, "ai-session-stream");
+        worker.setDaemon(true);
+        worker.start();
+        emitter.onCompletion(() -> { if (worker.isAlive()) worker.interrupt(); });
+        emitter.onTimeout(() -> { if (worker.isAlive()) worker.interrupt(); emitter.complete(); });
+        emitter.onError(ex -> { if (worker.isAlive()) worker.interrupt(); });
+        return emitter;
+    }
+
+    /**
+     * SSE streaming variant of {@code POST /v1/ai/generate-rubric}
+     * (Sprint cierre-A / B11). Same event shape as
+     * {@link #streamGenerateSession(GenerateSessionRequest)}.
+     */
+    @PostMapping(value = "/v1/ai/generate-rubric/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    @PreAuthorize("hasAuthority('" + LmsAuthorities.LMS_AI_GENERATE + "')")
+    @Operation(summary = "Generate a rubric draft with AI (SSE streaming)")
+    public SseEmitter streamGenerateRubric(@Valid @RequestBody GenerateRubricRequest request) {
+        SseEmitter emitter = new SseEmitter(120_000L);
+        Thread worker = new Thread(() -> {
+            try {
+                RubricGeneratorResult result = rubricGeneratorService.streamRubric(
+                        request,
+                        chunk -> {
+                            try {
+                                emitter.send(SseEmitter.event().name("token").data(chunk));
+                                return true;
+                            }
+                            catch (java.io.IOException e) {
+                                return false;
+                            }
+                        });
+                emitter.send(SseEmitter.event().name("done").data(objectMapper.writeValueAsString(result)));
+                emitter.complete();
+            }
+            catch (com.edushift.modules.ai.exception.AiModuleException ex) {
+                sendErrorAndComplete(emitter, ex.getMessage());
+            }
+            catch (Exception ex) {
+                sendErrorAndComplete(emitter,
+                        ex.getMessage() == null ? ex.getClass().getSimpleName() : ex.getMessage());
+            }
+        }, "ai-rubric-stream");
+        worker.setDaemon(true);
+        worker.start();
+        emitter.onCompletion(() -> { if (worker.isAlive()) worker.interrupt(); });
+        emitter.onTimeout(() -> { if (worker.isAlive()) worker.interrupt(); emitter.complete(); });
+        emitter.onError(ex -> { if (worker.isAlive()) worker.interrupt(); });
+        return emitter;
+    }
+
+    private static void sendErrorAndComplete(SseEmitter emitter, String message) {
+        try {
+            emitter.send(SseEmitter.event().name("error").data(message == null ? "unknown" : message));
+        }
+        catch (java.io.IOException ignored) { /* client gone */ }
+        emitter.complete();
     }
 
     @PostMapping("/v1/ai/generate-rubric")
