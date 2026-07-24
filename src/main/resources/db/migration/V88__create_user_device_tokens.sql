@@ -25,13 +25,23 @@ CREATE TABLE IF NOT EXISTS edushift.user_device_tokens (
     id                      uuid          PRIMARY KEY,
     tenant_id               uuid          NOT NULL,
 
-    -- Audit (BaseEntity contract)
+    -- Audit (BaseEntity contract — required by Hibernate schema-validation
+    -- because UserDeviceToken extends TenantAwareEntity which extends
+    -- BaseEntity with @SQLDelete soft-delete).
     created_at              timestamptz   NOT NULL,
     updated_at              timestamptz   NOT NULL,
+    created_by              uuid,
+    updated_by              uuid,
+    deleted                 boolean       NOT NULL DEFAULT false,
+    deleted_at              timestamptz,
 
     user_public_uuid        uuid          NOT NULL,
     token                   varchar(512)  NOT NULL,
     platform                varchar(10)   NOT NULL,
+    -- `active` is independent from `deleted`:
+    --   * active=false   -> the user opted out / token rotated (FCM API rejected).
+    --   * deleted=true   -> the row was hard-removed by the app (audit-trail).
+    -- Both transitions keep the row visible to the audit UI.
     active                  boolean       NOT NULL DEFAULT true,
     last_seen_at            timestamptz   NOT NULL DEFAULT NOW(),
     unregistered_at         timestamptz,
@@ -45,6 +55,11 @@ CREATE TABLE IF NOT EXISTS edushift.user_device_tokens (
     CONSTRAINT chk_user_device_tokens_lifecycle CHECK (
         (active = true  AND unregistered_at IS NULL)
      OR (active = false AND unregistered_at IS NOT NULL)
+    ),
+
+    CONSTRAINT chk_user_device_tokens_deleted_at_consistent CHECK (
+        (deleted = false AND deleted_at IS NULL)
+     OR (deleted = true  AND deleted_at IS NOT NULL)
     ),
 
     CONSTRAINT fk_user_device_tokens_tenant
