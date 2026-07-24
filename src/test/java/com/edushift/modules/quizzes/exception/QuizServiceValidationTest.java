@@ -28,6 +28,7 @@ import com.edushift.modules.quizzes.service.impl.QuizServiceImpl;
 import com.edushift.modules.academic.section.entity.Section;
 import com.edushift.modules.academic.section.repository.SectionRepository;
 import com.edushift.modules.students.enrollments.repository.StudentEnrollmentRepository;
+import com.edushift.modules.auth.repository.UserRepository;
 import java.lang.reflect.Field;
 import java.time.Instant;
 import java.util.List;
@@ -64,6 +65,7 @@ class QuizServiceValidationTest {
 	private QuizAttemptService attemptService;
 	private ApplicationEventPublisher eventPublisher;
 	private StudentEnrollmentRepository enrollmentRepository;
+	private UserRepository userRepository;
 	private QuizServiceImpl service;
 
 	@BeforeEach
@@ -76,10 +78,11 @@ class QuizServiceValidationTest {
 		attemptService = mock(QuizAttemptService.class);
 		eventPublisher = mock(ApplicationEventPublisher.class);
 		enrollmentRepository = mock(StudentEnrollmentRepository.class);
+		userRepository = mock(UserRepository.class);
 		service = new QuizServiceImpl(
 				quizRepository, questionRepository, optionRepository,
 				sectionRepository, quizMapper, attemptService,
-				eventPublisher, enrollmentRepository);
+				eventPublisher, enrollmentRepository, userRepository);
 	}
 
 	// ------------------------------------------------------------------
