@@ -8,6 +8,7 @@ import com.edushift.modules.students.repository.BulkImportJobRepository;
 import com.edushift.modules.students.service.BulkImportService;
 import com.edushift.modules.students.service.bulk.StudentBulkImportRunner;
 import com.edushift.modules.students.service.bulk.StudentTemplateGenerator;
+import com.edushift.modules.teachers.bulk.TeacherBulkImportRunner;
 import com.edushift.shared.exception.BusinessException;
 import com.edushift.shared.exception.ResourceNotFoundException;
 import com.edushift.shared.multitenancy.TenantContext;
@@ -53,6 +54,7 @@ public class BulkImportServiceImpl implements BulkImportService {
 	private final BulkImportJobRepository jobRepository;
 	private final BulkImportJobMapper mapper;
 	private final StudentBulkImportRunner runner;
+	private final TeacherBulkImportRunner teacherRunner;
 	private final StudentTemplateGenerator templateGenerator;
 
 	// ===========================================================================
@@ -63,50 +65,82 @@ public class BulkImportServiceImpl implements BulkImportService {
 	@Transactional
 	public BulkImportJobResponse enqueueStudentsImport(MultipartFile file) {
 		validateUpload(file);
+		byte[] payload = readPayload(file);
+		BulkImportJob saved = persistPendingJob(BulkImportJobType.STUDENTS, file);
+		dispatchAfterCommit(saved, payload, runner);
+		log.info("[bulk-import] enqueued -- jobId={} fileName={} size={} bytes",
+				saved.getPublicUuid(), saved.getFileName(), saved.getFileSizeBytes());
+		return mapper.toResponse(saved);
+	}
 
-		byte[] payload;
+	/**
+	 * Cierre-B / F7 — teacher counterpart. Same envelope validation,
+	 * same {@code PENDING} row + {@code @Async} dispatch; the only
+	 * differences are the {@code jobType} value and the runner class.
+	 */
+	@Override
+	@Transactional
+	public BulkImportJobResponse enqueueTeachersImport(MultipartFile file) {
+		validateUpload(file);
+		byte[] payload = readPayload(file);
+		BulkImportJob saved = persistPendingJob(BulkImportJobType.TEACHERS, file);
+		dispatchAfterCommit(saved, payload, teacherRunner);
+		log.info("[bulk-import/teachers] enqueued -- jobId={} fileName={} size={} bytes",
+				saved.getPublicUuid(), saved.getFileName(), saved.getFileSizeBytes());
+		return mapper.toResponse(saved);
+	}
+
+	private byte[] readPayload(MultipartFile file) {
 		try {
-			payload = file.getBytes();
+			return file.getBytes();
 		}
 		catch (IOException e) {
 			throw new BusinessException("INVALID_FILE",
 					"Could not read the uploaded file: " + e.getMessage());
 		}
+	}
 
+	private BulkImportJob persistPendingJob(BulkImportJobType type, MultipartFile file) {
 		BulkImportJob job = new BulkImportJob();
-		job.setJobType(BulkImportJobType.STUDENTS);
+		job.setJobType(type);
 		job.setFileName(safeFileName(file));
 		job.setFileSizeBytes(file.getSize());
-		BulkImportJob saved = jobRepository.saveAndFlush(job);
+		return jobRepository.saveAndFlush(job);
+	}
 
-		// Defer the @Async dispatch until AFTER the enclosing transaction
-		// commits — otherwise the worker can race the commit and look up
-		// the job via findById before the row is visible to other
-		// connections, surfacing as a phantom 404 in the worker. If no
-		// transaction is active (callers without @Transactional, e.g. unit
-		// tests), fall back to dispatching synchronously — the worker is
-		// still @Async and runs on its own pool.
+	/**
+	 * Defer the {@code @Async} dispatch until AFTER the enclosing
+	 * transaction commits — otherwise the worker can race the commit and
+	 * look up the job via {@code findById} before the row is visible to
+	 * other connections, surfacing as a phantom 404 in the worker.
+	 */
+	private void dispatchAfterCommit(BulkImportJob saved, byte[] payload, Object runnerBean) {
 		final UUID tenantId = TenantContext.currentRequired();
 		final UUID jobId = saved.getId();
-		final UUID jobPublicUuid = saved.getPublicUuid();
-		final String fileName = saved.getFileName();
-		final long fileSizeBytes = saved.getFileSizeBytes();
 		if (TransactionSynchronizationManager.isSynchronizationActive()) {
 			TransactionSynchronizationManager.registerSynchronization(
 					new TransactionSynchronization() {
 						@Override
 						public void afterCommit() {
-							runner.run(jobId, tenantId, payload);
+							invokeRunner(runnerBean, jobId, tenantId, payload);
 						}
 					});
 		}
 		else {
-			runner.run(jobId, tenantId, payload);
+			invokeRunner(runnerBean, jobId, tenantId, payload);
 		}
+	}
 
-		log.info("[bulk-import] enqueued -- jobId={} fileName={} size={} bytes",
-				jobPublicUuid, fileName, fileSizeBytes);
-		return mapper.toResponse(saved);
+	private static void invokeRunner(Object runner, UUID jobId, UUID tenantId, byte[] payload) {
+		if (runner instanceof StudentBulkImportRunner s) {
+			s.run(jobId, tenantId, payload);
+		}
+		else if (runner instanceof TeacherBulkImportRunner t) {
+			t.run(jobId, tenantId, payload);
+		}
+		else {
+			throw new IllegalStateException("Unknown bulk-import runner: " + runner.getClass());
+		}
 	}
 
 	// ===========================================================================
