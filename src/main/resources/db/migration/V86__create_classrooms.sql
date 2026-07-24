@@ -43,8 +43,6 @@ CREATE TABLE IF NOT EXISTS edushift.classrooms (
 
     CONSTRAINT uk_classrooms_public_uuid UNIQUE (public_uuid),
 
-    CONSTRAINT uk_classrooms_tenant_code UNIQUE (tenant_id, code) WHERE NOT deleted,
-
     CONSTRAINT chk_classrooms_type CHECK (
         type IN ('CLASSROOM', 'LAB', 'GYM', 'LIBRARY', 'AUDITORIUM', 'OUTDOOR', 'OTHER')
     ),
@@ -66,6 +64,14 @@ CREATE TABLE IF NOT EXISTS edushift.classrooms (
 
 CREATE INDEX idx_classrooms_tenant_active
     ON edushift.classrooms (tenant_id, type)
+    WHERE deleted = false;
+
+-- Per-tenant unique on `code` ignoring soft-deleted rows. PostgreSQL does
+-- NOT accept `UNIQUE (cols) WHERE <cond>` as a CONSTRAINT (same trap as
+-- V82 — see ADR-Cierre-A.5). The correct construct is a PARTIAL UNIQUE
+-- INDEX. ADR-Cierre-C.4.
+CREATE UNIQUE INDEX uk_classrooms_tenant_code
+    ON edushift.classrooms (tenant_id, code)
     WHERE deleted = false;
 
 CREATE TRIGGER set_updated_at_classrooms
