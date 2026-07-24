@@ -145,12 +145,12 @@ public class AiController {
                        activities, resources, evaluation criteria) aligned to the
                        MINEDU Perú lesson template.
 
-                       The output is **not** persisted as a `LearningSession` —
-                       the FE shows it in a preview modal and the user explicitly
-                       accepts (FE-8.1 will POST to `/v1/learning-sessions`).
-                       Synchronous only in BE-8.1; the async path lands in
-                       BE-9.x if needed (current 1-3s latency is acceptable for
-                       a teacher-facing flow).
+                       As of Sprint 18 (cierre-A / B3), the outline is also
+                       persisted as a draft `LearningSession` for the caller's
+                       active teacher assignment on the course. The returned
+                       envelope carries `persistedSessionUuid` (nullable) so
+                       the FE can deep-link the user straight into the editor.
+                       Synchronous only; the async path lands in BE-9.x if needed.
                        """)
     @ApiResponses({
             @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "Session outline generated"),

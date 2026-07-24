@@ -71,6 +71,8 @@ class SessionGeneratorServiceTest {
     private CourseLevelRepository courseLevelRepository;
     private CompetencyRepository competencyRepository;
     private CapacityRepository capacityRepository;
+    private com.edushift.modules.sessions.learning.service.LearningSessionService learningSessionService;
+    private com.edushift.modules.teachers.assignments.repository.TeacherAssignmentRepository teacherAssignmentRepository;
     private SessionGeneratorService service;
 
     private final UUID tenantId = UUID.fromString("11111111-1111-1111-1111-111111111111");
@@ -90,12 +92,13 @@ class SessionGeneratorServiceTest {
         courseLevelRepository = mock(CourseLevelRepository.class);
         competencyRepository = mock(CompetencyRepository.class);
         capacityRepository = mock(CapacityRepository.class);
+        learningSessionService = mock(com.edushift.modules.sessions.learning.service.LearningSessionService.class);
+        teacherAssignmentRepository = mock(com.edushift.modules.teachers.assignments.repository.TeacherAssignmentRepository.class);
 
         service = new SessionGeneratorService(
                 llmClient, promptBuilder, quotaService, generationRepo, currentUser, objectMapper,
                 courseRepository, courseLevelRepository, competencyRepository, capacityRepository,
-                null, // learningSessionService — null OK because tests don't exercise persist
-                null); // teacherAssignmentRepository — same
+                learningSessionService, teacherAssignmentRepository);
 
         // Default wiring.
         TenantContext.set(tenantId);
@@ -318,6 +321,128 @@ class SessionGeneratorServiceTest {
 
             // FAILED row, no success bump.
             verify(quotaService, times(1)).incrementCounters(false, 0L, 0L);
+        }
+    }
+
+    @Nested
+    @DisplayName("Persisted LearningSession (cierre-A / B3)")
+    class PersistsLearningSession {
+
+        private static final String VALID_LLM_JSON = """
+                {
+                  "title": "La fotosíntesis en plantas superiores",
+                  "summary": "Los estudiantes exploran el proceso de fotosíntesis, identificando sus fases y productos.",
+                  "activities": [
+                    { "phase": "INICIO",     "name": "Lluvia de ideas",   "durationMinutes": 10, "description": "Motivación con imágenes de plantas verdes." },
+                    { "phase": "DESARROLLO", "name": "Lectura dirigida",  "durationMinutes": 20, "description": "Lectura del texto escolar con guía." },
+                    { "phase": "DESARROLLO", "name": "Experimento simple","durationMinutes": 10, "description": "Plantar una semilla con diferentes condiciones de luz." },
+                    { "phase": "CIERRE",     "name": "Metacognición",     "durationMinutes":  5, "description": "Reflexión grupal sobre lo aprendido." }
+                  ],
+                  "resources": [
+                    { "type": "TEXT", "title": "Texto escolar", "url": null, "description": "Capítulo 4 del libro de Ciencia y Ambiente." }
+                  ],
+                  "evaluationCriteria": [
+                    { "name": "Comprensión del proceso", "weight": 0.6, "description": "Identifica las fases de la fotosíntesis." },
+                    { "name": "Trabajo en equipo",        "weight": 0.4, "description": "Colabora activamente con sus compañeros." }
+                  ]
+                }
+                """;
+
+        @Test
+        @DisplayName("Happy path: outline persisted as draft LearningSession and UUID returned")
+        void persistsAsDraftSession() {
+            when(quotaService.verifyCanCall()).thenReturn(stubSettings());
+            Course course = stubCourse();
+            when(courseRepository.findByPublicUuid(courseId)).thenReturn(Optional.of(course));
+            when(courseLevelRepository.findAllByCourse(course)).thenReturn(List.of());
+
+            com.edushift.modules.teachers.assignments.entity.TeacherAssignment assignment =
+                    mock(com.edushift.modules.teachers.assignments.entity.TeacherAssignment.class);
+            when(assignment.getPublicUuid()).thenReturn(UUID.randomUUID());
+            when(teacherAssignmentRepository.findActiveByCourseAndTeacherUuid(course, userId))
+                    .thenReturn(List.of(assignment));
+
+            UUID createdSessionUuid = UUID.randomUUID();
+            com.edushift.modules.sessions.learning.dto.LearningSessionResponse createdResp =
+                    mock(com.edushift.modules.sessions.learning.dto.LearningSessionResponse.class);
+            when(createdResp.publicUuid()).thenReturn(createdSessionUuid);
+            when(learningSessionService.create(any())).thenReturn(createdResp);
+
+            when(llmClient.complete(any())).thenReturn(
+                    new LlmResponse(VALID_LLM_JSON, "mock-model", 200, 350, 1234L));
+
+            GenerateSessionRequest req = new GenerateSessionRequest(
+                    "Fotosíntesis", courseId, unitId, 45, null, null);
+
+            SessionGeneratorService.SessionGeneratorResult result = service.generateSession(req);
+
+            assertThat(result.persistedSessionUuid())
+                    .as("persistedSessionUuid must be wired to LearningSessionService.create()")
+                    .isEqualTo(createdSessionUuid);
+
+            ArgumentCaptor<com.edushift.modules.sessions.learning.dto.CreateLearningSessionRequest> captor =
+                    ArgumentCaptor.forClass(com.edushift.modules.sessions.learning.dto.CreateLearningSessionRequest.class);
+            verify(learningSessionService, times(1)).create(captor.capture());
+            com.edushift.modules.sessions.learning.dto.CreateLearningSessionRequest sent = captor.getValue();
+            assertThat(sent.title()).isEqualTo("La fotosíntesis en plantas superiores");
+            assertThat(sent.assignmentUuid()).isEqualTo(assignment.getPublicUuid());
+            assertThat(sent.unitUuid()).isEqualTo(unitId);
+            assertThat(sent.durationMinutes()).isEqualTo(45);
+            assertThat(sent.scheduledDate()).isEqualTo(java.time.LocalDate.now());
+            assertThat(sent.content().activities()).hasSize(4);
+            assertThat(sent.content().materials()).hasSize(1);
+            assertThat(sent.content().observations()).contains("Criterios de evaluación");
+        }
+
+        @Test
+        @DisplayName("No active assignment → persistedSessionUuid is null but generation still succeeds")
+        void noAssignmentPersistsNothing() {
+            when(quotaService.verifyCanCall()).thenReturn(stubSettings());
+            Course course = stubCourse();
+            when(courseRepository.findByPublicUuid(courseId)).thenReturn(Optional.of(course));
+            when(courseLevelRepository.findAllByCourse(course)).thenReturn(List.of());
+            when(teacherAssignmentRepository.findActiveByCourseAndTeacherUuid(course, userId))
+                    .thenReturn(List.of());
+            when(llmClient.complete(any())).thenReturn(
+                    new LlmResponse(VALID_LLM_JSON, "mock-model", 200, 350, 1234L));
+
+            GenerateSessionRequest req = new GenerateSessionRequest(
+                    "Fotosíntesis", courseId, unitId, 45, null, null);
+
+            SessionGeneratorService.SessionGeneratorResult result = service.generateSession(req);
+
+            assertThat(result.session().title()).isEqualTo("La fotosíntesis en plantas superiores");
+            assertThat(result.persistedSessionUuid()).isNull();
+            verify(learningSessionService, never()).create(any());
+        }
+
+        @Test
+        @DisplayName("LearningSessionService throws → persistedSessionUuid is null, generation still succeeds")
+        void persistFailureDoesNotFailGeneration() {
+            when(quotaService.verifyCanCall()).thenReturn(stubSettings());
+            Course course = stubCourse();
+            when(courseRepository.findByPublicUuid(courseId)).thenReturn(Optional.of(course));
+            when(courseLevelRepository.findAllByCourse(course)).thenReturn(List.of());
+
+            com.edushift.modules.teachers.assignments.entity.TeacherAssignment assignment =
+                    mock(com.edushift.modules.teachers.assignments.entity.TeacherAssignment.class);
+            when(assignment.getPublicUuid()).thenReturn(UUID.randomUUID());
+            when(teacherAssignmentRepository.findActiveByCourseAndTeacherUuid(course, userId))
+                    .thenReturn(List.of(assignment));
+            when(learningSessionService.create(any())).thenThrow(
+                    new RuntimeException("boom: validation failed for unit X"));
+
+            when(llmClient.complete(any())).thenReturn(
+                    new LlmResponse(VALID_LLM_JSON, "mock-model", 200, 350, 1234L));
+
+            GenerateSessionRequest req = new GenerateSessionRequest(
+                    "Fotosíntesis", courseId, unitId, 45, null, null);
+
+            SessionGeneratorService.SessionGeneratorResult result = service.generateSession(req);
+
+            assertThat(result.session().title()).isEqualTo("La fotosíntesis en plantas superiores");
+            assertThat(result.persistedSessionUuid()).isNull();
+            verify(quotaService, times(1)).incrementCounters(true, 200L, 350L);
         }
     }
 
