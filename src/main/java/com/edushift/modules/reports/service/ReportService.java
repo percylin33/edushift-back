@@ -75,6 +75,19 @@ public class ReportService {
     }
 
     /**
+     * Sprint cierre-C / B12 -- lightweight status poll used by
+     * {@code ReportEmailDispatcher} to decide whether to send the
+     * generated output. Returns only the status to avoid loading the
+     * full row + the file bytes on every poll.
+     */
+    @Transactional(readOnly = true)
+    public ReportJob.Status getStatus(UUID publicUuid) {
+        return jobRepo.findByPublicUuid(publicUuid)
+                .map(ReportJob::getStatus)
+                .orElse(null);
+    }
+
+    /**
      * DEBT-FK-BUGS-2 / list endpoint: lista los jobs del usuario en el
      * tenant actual, paginados, mas recientes primero. Filtra por
      * {@code tenantId} para garantizar que un usuario de tenant B

@@ -107,6 +107,13 @@ public class ReportJob extends TenantAwareEntity {
     @Column(name = "expires_at", nullable = false)
     private Instant expiresAt = Instant.now().plusSeconds(600); // 10 min
 
+    /**
+     * Sprint cierre-C / B12 -- backlink to the {@link ReportTemplate}
+     * that dispatched this job. NULL for ad-hoc wizard runs.
+     */
+    @Column(name = "triggered_by_template")
+    private UUID triggeredByTemplate;
+
     @PrePersist
     private void onCreate() {
         if (publicUuid == null) publicUuid = UUID.randomUUID();
