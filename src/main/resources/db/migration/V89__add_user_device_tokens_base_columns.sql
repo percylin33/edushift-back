@@ -45,6 +45,14 @@ ALTER TABLE edushift.user_device_tokens
 -- Constraints: same chk_user_device_tokens_deleted_at_consistent we
 -- added to V88 retroactively; safe because the backfill above ensures
 -- `deleted=false` and `deleted_at IS NULL` for every existing row.
+--
+-- DROP IF EXISTS first so the migration is idempotent: if a teammate
+-- ran V89 by hand before Flyway noticed it (the user's situation),
+-- the constraint already exists and Flyway would otherwise fail the
+-- second time around.
+ALTER TABLE edushift.user_device_tokens
+    DROP CONSTRAINT IF EXISTS chk_user_device_tokens_deleted_at_consistent;
+
 ALTER TABLE edushift.user_device_tokens
     ADD CONSTRAINT chk_user_device_tokens_deleted_at_consistent CHECK (
         (deleted = false AND deleted_at IS NULL)
