@@ -127,4 +127,32 @@ public class MercadoPagoClient {
             throw new PaymentFailedException("MP getPayment parse error: " + e.getMessage());
         }
     }
+
+    /**
+     * Issue a refund for a payment (Sprint cierre-A / B5).
+     *
+     * <p>MercadoPago's refund API is {@code POST /v1/payments/{id}/refunds}.
+     * Returns the raw response (typically a list of refund ids); the
+     * caller treats the DB transition as the source of truth and logs
+     * but does not fail when MP returns an error.</p>
+     */
+    public Map<String, Object> refundPayment(String externalId) {
+        try {
+            String body = restClient().post()
+                    .uri("/v1/payments/{id}/refunds", externalId)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(Map.of())
+                    .retrieve()
+                    .body(String.class);
+            if (body == null || body.isBlank()) {
+                return Map.of("ok", true);
+            }
+            JsonNode node = objectMapper.readTree(body);
+            return objectMapper.convertValue(node, Map.class);
+        } catch (RestClientException e) {
+            throw new PaymentFailedException("MP refundPayment failed: " + e.getMessage());
+        } catch (Exception e) {
+            throw new PaymentFailedException("MP refundPayment parse error: " + e.getMessage());
+        }
+    }
 }
