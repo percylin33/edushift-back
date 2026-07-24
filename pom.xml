@@ -236,6 +236,25 @@
 		</dependency>
 
 		<!--
+		  Firebase Admin SDK (https://firebase.google.com/docs/admin/setup#java).
+		  Sprint cierre-C / B8 — Firebase Cloud Messaging (FCM) push
+		  notifications. Loaded by FcmInitializer/FcmSender only when
+		  `app.integrations.firebase.enabled=true`; otherwise the
+		  @ConditionalOnProperty guard skips the bean and the JAR
+		  is never instantiated (so a missing service-account JSON does
+		  not break the LOCAL_FS dev profile).
+
+		  firebase-admin pulls grpc-netty + protobuf + google-api-client
+		  transitively. Same trade-off as google-cloud-storage: ~6-8 MB
+		  extra in prod; dev never instantiates it.
+		-->
+		<dependency>
+			<groupId>com.google.firebase</groupId>
+			<artifactId>firebase-admin</artifactId>
+			<version>9.4.1</version>
+		</dependency>
+
+		<!--
 		  Testcontainers (https://testcontainers.com/) - hermetic, ephemeral
 		  Postgres for integration tests. Docker is required on the dev box
 		  and on CI runners. The Spring Boot starter brings the

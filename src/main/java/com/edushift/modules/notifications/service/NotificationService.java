@@ -7,6 +7,7 @@ import com.edushift.modules.notifications.entity.Notification.Channel;
 import com.edushift.modules.notifications.entity.Notification.Status;
 import com.edushift.modules.notifications.entity.NotificationPreference;
 import com.edushift.modules.notifications.entity.NotificationTemplate;
+import com.edushift.modules.notifications.fcm.FcmSender;
 import com.edushift.modules.notifications.repository.EmailOutboxRepository;
 import com.edushift.modules.notifications.repository.NotificationPreferenceRepository;
 import com.edushift.modules.notifications.repository.NotificationRepository;
@@ -14,12 +15,14 @@ import com.edushift.modules.notifications.repository.NotificationTemplateReposit
 import com.edushift.shared.multitenancy.TenantContext;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -59,6 +62,15 @@ public class NotificationService {
     private final EmailOutboxRepository outboxRepo;
     private final NotificationTemplateEngine engine;
     private final ObjectMapper objectMapper;
+
+    /**
+     * Sprint cierre-C / B8 -- FCM push notifications. Injected
+     * {@code required=false} because the bean only exists when
+     * {@code app.integrations.firebase.enabled=true}; otherwise push
+     * silently no-ops.
+     */
+    @Autowired(required = false)
+    private FcmSender fcmSender;
 
     /**
      * Notify a single recipient about an event. Returns the
@@ -122,6 +134,19 @@ public class NotificationService {
                 outboxRepo.save(row);
             }
         }
+
+        // 6) Sprint cierre-C / B8 -- FCM push (best-effort). The sender is
+        //    only present when app.integrations.firebase.enabled=true;
+        //    otherwise this no-ops so the in-app history still ships.
+        if (fcmSender != null && !isOptedOut(cmd.recipientUserId(), Channel.EMAIL, cmd.category())) {
+            Map<String, String> data = new HashMap<>();
+            data.put("notificationPublicUuid", n.getPublicUuid().toString());
+            data.put("templateKey", cmd.templateKey());
+            data.put("category", cmd.category().name());
+            data.put("channel", channel.name());
+            fcmSender.send(cmd.recipientUserId(), rendered.subject(), rendered.bodyHtml(), data);
+        }
+
         return Optional.of(n.getPublicUuid());
     }
 
@@ -201,6 +226,22 @@ public class NotificationService {
                 });
         pref.setEnabled(enabled);
         return preferenceRepo.save(pref);
+    }
+
+    // ------------------------------------------------------------------
+    // Rendering helpers
+    // ------------------------------------------------------------------
+
+    @Transactional(readOnly = true)
+    public String renderSubject(Notification n) {
+        if (n == null) return null;
+        NotificationTemplate template = templateRepo
+                .findByKeyAndLocale(n.getTemplateKey(), "es-PE")
+                .orElse(null);
+        if (template == null) {
+            return n.getTemplateKey() + " · " + n.getSentAt();
+        }
+        return engine.render(template, n.getPayload()).subject();
     }
 
     // ------------------------------------------------------------------
