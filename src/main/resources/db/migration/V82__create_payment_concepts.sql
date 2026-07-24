@@ -46,9 +46,6 @@ CREATE TABLE IF NOT EXISTS edushift.payment_concepts (
     CONSTRAINT uk_payment_concepts_public_uuid
         UNIQUE (public_uuid),
 
-    CONSTRAINT uk_payment_concepts_tenant_code
-        UNIQUE (tenant_id, code) WHERE NOT deleted,
-
     CONSTRAINT chk_payment_concepts_amount_positive
         CHECK (default_amount_cents >= 0),
 
@@ -83,6 +80,13 @@ CREATE TABLE IF NOT EXISTS edushift.payment_concepts (
 -- del invoice composer).
 CREATE INDEX idx_payment_concepts_tenant_active
     ON edushift.payment_concepts (tenant_id, is_active, sort_order)
+    WHERE deleted = false;
+
+-- Per-tenant unique on `code` ignoring soft-deleted rows. PostgreSQL does
+-- NOT accept `UNIQUE (cols) WHERE <cond>` as a constraint; the correct
+-- construct is a PARTIAL UNIQUE INDEX. ADR-Cierre-A.5.
+CREATE UNIQUE INDEX uk_payment_concepts_tenant_code
+    ON edushift.payment_concepts (tenant_id, code)
     WHERE deleted = false;
 
 CREATE TRIGGER set_updated_at_payment_concepts
