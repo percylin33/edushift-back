@@ -46,16 +46,35 @@ public class CsvReportGenerator {
 
     private static void writeAttendanceSummary(
             java.io.Writer w, JdbcTemplate jdbc, UUID tenantId) throws IOException {
-        writeln(w, "section_id,section_name,date,slot,total_students,present,absent,late,excused");
+        writeln(w, "session_uuid,section_name,date,slot,total_students,present,absent,late,excused");
+        // Group the actual records: one row per session with the
+        // per-status counts. This replaces the previous (broken)
+        // LEFT JOIN against edushift.attendance_summaries, which
+        // was a non-existent table; the original query also
+        // referenced s.name which doesn't exist on attendance_sessions
+        // (the name is on sections).
+        //
+        // DEBT-NOTIF-CSV fix (Sprint 9B / BE-9B.2): the previous
+        // query would have crashed at runtime with a relation-
+        // does-not-exist error. Aggregating from attendance_records
+        // directly is also more accurate (no stale cached summary
+        // that could drift from the records).
         jdbc.query(
                 """
-                SELECT s.public_uuid, s.name, a.occurred_on, a.slot, a.total_students,
-                       a.present_count, a.absent_count, a.late_count, a.excused_count
+                SELECT s.public_uuid, sec.name, s.occurred_on, s.slot,
+                       count(r.id) as total,
+                       count(*) FILTER (WHERE r.status = 'PRESENT') as present,
+                       count(*) FILTER (WHERE r.status = 'ABSENT') as absent,
+                       count(*) FILTER (WHERE r.status = 'LATE') as late,
+                       count(*) FILTER (WHERE r.status = 'EXCUSED') as excused
                 FROM edushift.attendance_sessions s
-                LEFT JOIN edushift.attendance_summaries a ON a.session_id = s.id
+                JOIN edushift.sections sec ON sec.id = s.section_id
+                LEFT JOIN edushift.attendance_records r ON r.session_id = s.id
                 WHERE s.tenant_id = ? AND s.deleted = false
-                ORDER BY s.occurred_on DESC
+                GROUP BY s.id, s.public_uuid, sec.name, s.occurred_on, s.slot
+                ORDER BY s.occurred_on DESC, s.slot ASC
                 """,
+                ps -> ps.setObject(1, tenantId),
                 rs -> {
                     try {
                         writeln(w,
@@ -63,14 +82,13 @@ public class CsvReportGenerator {
                                 safe(rs.getString(2)) + "," +
                                 safe(rs.getString(3)) + "," +
                                 safe(rs.getString(4)) + "," +
-                                safe(rs.getString(5)) + "," +
-                                safe(rs.getString(6)) + "," +
-                                safe(rs.getString(7)) + "," +
-                                safe(rs.getString(8)) + "," +
-                                safe(rs.getString(9)));
+                                rs.getLong(5) + "," +
+                                rs.getLong(6) + "," +
+                                rs.getLong(7) + "," +
+                                rs.getLong(8) + "," +
+                                rs.getLong(9));
                     } catch (IOException e) { throw new RuntimeException(e); }
-                },
-                tenantId);
+                });
     }
 
     private static void writeGradeBook(java.io.Writer w, JdbcTemplate jdbc, UUID tenantId) throws IOException {

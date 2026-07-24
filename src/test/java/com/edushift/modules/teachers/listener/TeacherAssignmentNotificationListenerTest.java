@@ -11,6 +11,8 @@ import com.edushift.modules.academic.levelgrade.entity.AcademicLevel;
 import com.edushift.modules.academic.levelgrade.entity.Grade;
 import com.edushift.modules.academic.section.entity.Section;
 import com.edushift.modules.academic.section.repository.SectionRepository;
+import com.edushift.modules.auth.entity.User;
+import com.edushift.modules.auth.repository.UserRepository;
 import com.edushift.modules.students.enrollments.entity.StudentEnrollment;
 import com.edushift.modules.students.enrollments.entity.StudentEnrollmentStatus;
 import com.edushift.modules.students.enrollments.repository.StudentEnrollmentRepository;
@@ -43,6 +45,7 @@ class TeacherAssignmentNotificationListenerTest {
 	@Mock private TeacherRepository teacherRepository;
 	@Mock private SectionRepository sectionRepository;
 	@Mock private StudentEnrollmentRepository studentEnrollmentRepository;
+	@Mock private UserRepository userRepository;
 	@Mock private ApplicationEventPublisher eventPublisher;
 
 	@InjectMocks private TeacherAssignmentNotificationListener listener;
@@ -53,21 +56,46 @@ class TeacherAssignmentNotificationListenerTest {
 		Teacher teacher = makeTeacher("Ada", "Lovelace", "ada@school.edu",
 				UUID.randomUUID());
 		Section section = makeSection("A");
+		UUID teacherPublicUserId = UUID.randomUUID();
 
 		when(teacherRepository.findByPublicUuid(any(UUID.class)))
 				.thenReturn(Optional.of(teacher));
 		when(sectionRepository.findByPublicUuid(any(UUID.class)))
 				.thenReturn(Optional.of(section));
+		// DEBT-NOTIF-4 fix: the publisher now resolves teacher.userId (internal)
+		// -> publicUuid via userRepository. Stub the lookup.
+		when(userRepository.findById(teacher.getUserId()))
+				.thenReturn(Optional.of(makeUserWithPublicUuid(teacher.getUserId(), teacherPublicUserId)));
 
 		Student s1 = makeStudent("11111111", "11111111@school.edu", UUID.randomUUID());
 		Student s2 = makeStudent("22222222", "22222222@school.edu", UUID.randomUUID());
 		Student s3 = makeStudent("33333333", null, null); // skip — no userId
+		UUID s1PublicUserId = UUID.randomUUID();
+		UUID s2PublicUserId = UUID.randomUUID();
 
 		when(studentEnrollmentRepository.findActiveBySection(section))
 				.thenReturn(List.of(
 						makeEnrollment(s1, section),
 						makeEnrollment(s2, section),
 						makeEnrollment(s3, section)));
+		// Bulk lookup for the two students with userIds (s1 + s2); s3 has no userId.
+		java.util.List<User> bulkUsers = new java.util.ArrayList<>();
+		bulkUsers.add(makeUserWithPublicUuid(s1.getUserId(), s1PublicUserId));
+		bulkUsers.add(makeUserWithPublicUuid(s2.getUserId(), s2PublicUserId));
+		java.util.Map<UUID, User> bulkByInternalId = new java.util.HashMap<>();
+		for (User u : bulkUsers) bulkByInternalId.put(u.getId(), u);
+		when(userRepository.findAllById(any(java.lang.Iterable.class)))
+				.thenAnswer(invocation -> {
+					@SuppressWarnings("unchecked")
+					java.util.Collection<UUID> ids =
+							(java.util.Collection<UUID>) invocation.getArgument(0);
+					java.util.List<User> out = new java.util.ArrayList<>();
+					for (UUID id : ids) {
+						User u = bulkByInternalId.get(id);
+						if (u != null) out.add(u);
+					}
+					return out;
+				});
 
 		TeacherAssignmentCreatedEvent event = newEvent();
 
@@ -83,7 +111,8 @@ class TeacherAssignmentNotificationListenerTest {
 				(com.edushift.modules.notifications.event.NotificationEvent) published.get(0);
 		assertThat(first.templateKey()).isEqualTo("TEACHER_ASSIGNED");
 		assertThat(first.recipients()).hasSize(1);
-		assertThat(first.recipients().get(0).userId()).isEqualTo(teacher.getUserId());
+		// The recipient must be the publicUuid, NOT the internal id.
+		assertThat(first.recipients().get(0).userId()).isEqualTo(teacherPublicUserId);
 
 		com.edushift.modules.notifications.event.NotificationEvent second =
 				(com.edushift.modules.notifications.event.NotificationEvent) published.get(1);
@@ -91,7 +120,7 @@ class TeacherAssignmentNotificationListenerTest {
 		assertThat(second.recipients()).hasSize(2);
 		assertThat(second.recipients())
 				.extracting(com.edushift.modules.notifications.event.NotificationEvent.Recipient::userId)
-				.containsExactlyInAnyOrder(s1.getUserId(), s2.getUserId());
+				.containsExactlyInAnyOrder(s1PublicUserId, s2PublicUserId);
 	}
 
 	@Test
@@ -100,6 +129,7 @@ class TeacherAssignmentNotificationListenerTest {
 		Teacher teacher = makeTeacher("Ada", "Lovelace", "ada@school.edu", null);
 		Section section = makeSection("A");
 		Student s1 = makeStudent("11111111", "11111111@school.edu", UUID.randomUUID());
+		UUID s1PublicUserId = UUID.randomUUID();
 
 		when(teacherRepository.findByPublicUuid(any(UUID.class)))
 				.thenReturn(Optional.of(teacher));
@@ -107,6 +137,17 @@ class TeacherAssignmentNotificationListenerTest {
 				.thenReturn(Optional.of(section));
 		when(studentEnrollmentRepository.findActiveBySection(section))
 				.thenReturn(List.of(makeEnrollment(s1, section)));
+		when(userRepository.findAllById(any(java.lang.Iterable.class)))
+				.thenAnswer(invocation -> {
+					@SuppressWarnings("unchecked")
+					java.util.Collection<UUID> ids =
+							(java.util.Collection<UUID>) invocation.getArgument(0);
+					java.util.List<User> out = new java.util.ArrayList<>();
+					if (ids.contains(s1.getUserId())) {
+						out.add(makeUserWithPublicUuid(s1.getUserId(), s1PublicUserId));
+					}
+					return out;
+				});
 
 		listener.onAssignmentCreated(newEvent());
 
@@ -119,6 +160,7 @@ class TeacherAssignmentNotificationListenerTest {
 	void sectionEmpty() {
 		Teacher teacher = makeTeacher("Ada", "Lovelace", "ada@school.edu", UUID.randomUUID());
 		Section section = makeSection("A");
+		UUID teacherPublicUserId = UUID.randomUUID();
 
 		when(teacherRepository.findByPublicUuid(any(UUID.class)))
 				.thenReturn(Optional.of(teacher));
@@ -126,6 +168,8 @@ class TeacherAssignmentNotificationListenerTest {
 				.thenReturn(Optional.of(section));
 		when(studentEnrollmentRepository.findActiveBySection(section))
 				.thenReturn(List.of());
+		when(userRepository.findById(teacher.getUserId()))
+				.thenReturn(Optional.of(makeUserWithPublicUuid(teacher.getUserId(), teacherPublicUserId)));
 
 		listener.onAssignmentCreated(newEvent());
 
@@ -222,5 +266,20 @@ class TeacherAssignmentNotificationListenerTest {
 			}
 		}
 		throw new RuntimeException("Field not found: " + name);
+	}
+
+	/**
+	 * DEBT-NOTIF-4 helper: builds a {@link User} with the given internal
+	 * id and the given publicUuid. Used to stub the
+	 * {@code userRepository.findById} / {@code findAllById} lookups that
+	 * the publisher now performs to resolve internal-id recipients
+	 * to the publicUuid that the FK expects.
+	 */
+	private static User makeUserWithPublicUuid(UUID internalId, UUID publicUuid) {
+		User u = new User();
+		setField(u, "id", internalId);
+		u.setPublicUuid(publicUuid);
+		u.setEmail("stub+" + internalId + "@school.edu");
+		return u;
 	}
 }

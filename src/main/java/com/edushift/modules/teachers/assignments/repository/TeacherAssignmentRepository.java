@@ -162,4 +162,21 @@ public interface TeacherAssignmentRepository extends JpaRepository<TeacherAssign
 	boolean existsActiveBySectionAndTeacherUserId(
 			@Param("section") Section section,
 			@Param("userPublicUuid") UUID userPublicUuid);
+
+	/**
+	 * Sprint 9B / BE-9B.1 — bulk lookup of distinct active section ids
+	 * for a teacher. Powers the teacher dashboard so every query can
+	 * be anchored to {@code section_id in (...)} without N+1.
+	 *
+	 * <p>Returns only the ids — the caller resolves the
+	 * {@code Section} entities with a second query if names are
+	 * needed. Tenant-scoped via {@code @TenantId} on the
+	 * {@code TeacherAssignment} entity.</p>
+	 */
+	@Query("""
+			select distinct a.section.id from TeacherAssignment a
+			where a.teacher = :teacher
+			  and a.unassignedAt is null
+			""")
+	List<UUID> findActiveSectionIdsByTeacher(@Param("teacher") Teacher teacher);
 }

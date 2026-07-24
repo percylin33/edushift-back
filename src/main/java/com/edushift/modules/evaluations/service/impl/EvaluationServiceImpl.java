@@ -26,6 +26,7 @@ import com.edushift.modules.students.enrollments.repository.StudentEnrollmentRep
 import com.edushift.shared.exception.BadRequestException;
 import com.edushift.shared.exception.ConflictException;
 import com.edushift.shared.exception.ResourceNotFoundException;
+import com.edushift.shared.multitenancy.TenantContext;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
@@ -76,6 +77,7 @@ public class EvaluationServiceImpl implements EvaluationService {
 	private final EvaluationMapper mapper;
 	private final ApplicationEventPublisher eventPublisher; // Sprint 9 / BE-9.3
 	private final StudentEnrollmentRepository studentEnrollmentRepository; // Sprint 9 / BE-9.3
+private final com.edushift.modules.auth.repository.UserRepository userRepository; // DEBT-NOTIF-4 (Sprint 9A)
 
 	// =========================================================================
 	// Reads
@@ -283,10 +285,27 @@ public class EvaluationServiceImpl implements EvaluationService {
 		Section section = saved.getTeacherAssignment().getSection();
 		List<StudentEnrollment> enrolled = studentEnrollmentRepository.findActiveBySection(section);
 		if (!enrolled.isEmpty()) {
+			// DEBT-NOTIF-4 (Sprint 9A): resolve internal user ids to public
+			// uuids in a single bulk query so the listener async receives
+			// recipient.userId matching users(public_uuid), not users(id).
+			java.util.Set<UUID> studentUserInternalIds = new java.util.HashSet<>();
+			for (StudentEnrollment e : enrolled) {
+				UUID uid = e.getStudent() == null ? null : e.getStudent().getUserId();
+				if (uid != null) studentUserInternalIds.add(uid);
+			}
+			java.util.Map<UUID, UUID> internalToPublic = new java.util.HashMap<>();
+			for (com.edushift.modules.auth.entity.User u : userRepository.findAllById(studentUserInternalIds)) {
+				internalToPublic.put(u.getId(), u.getPublicUuid());
+			}
 			List<com.edushift.modules.notifications.event.NotificationEvent.Recipient> recipients = enrolled.stream()
-					.map(e -> e.getStudent().getUserId())
+					.map(e -> {
+						UUID internalId = e.getStudent() == null ? null : e.getStudent().getUserId();
+						UUID publicId = internalId == null ? null : internalToPublic.get(internalId);
+						return publicId == null
+								? null
+								: new com.edushift.modules.notifications.event.NotificationEvent.Recipient(publicId, null);
+					})
 					.filter(Objects::nonNull)
-					.map(uid -> new com.edushift.modules.notifications.event.NotificationEvent.Recipient(uid, null))
 					.toList();
 			String courseName = saved.getTeacherAssignment().getCourse().getName();
 			String evalTitle = saved.getName();
@@ -295,6 +314,7 @@ public class EvaluationServiceImpl implements EvaluationService {
 							.templateKey("GRADE_PUBLISHED")
 							.category(com.edushift.modules.notifications.entity.Notification.Category.GRADE)
 							.sourceId(saved.getPublicUuid())
+							.tenantId(TenantContext.currentRequired())
 							.recipients(java.util.List.of(r))
 							.payload(java.util.Map.of(
 									"studentName", "",

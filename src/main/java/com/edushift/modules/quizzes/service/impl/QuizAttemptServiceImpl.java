@@ -37,6 +37,7 @@ import com.edushift.modules.students.enrollments.repository.StudentEnrollmentRep
 import com.edushift.modules.students.repository.StudentRepository;
 import com.edushift.modules.auth.repository.UserRepository;
 import com.edushift.modules.auth.entity.User;
+import com.edushift.shared.multitenancy.TenantContext;
 import com.edushift.shared.security.CurrentUserProvider;
 import com.edushift.shared.security.LmsAuthorities;
 import java.time.Instant;
@@ -305,21 +306,7 @@ public class QuizAttemptServiceImpl implements QuizAttemptService {
 
 		// Sprint 9 / BE-9.3 — fire AI_FEEDBACK_READY when fully auto-graded.
 		if (saved.getStatus() == AttemptStatus.GRADED) {
-			UUID studentUserId = saved.getStudentUserId();
-			if (studentUserId != null) {
-				eventPublisher.publishEvent(
-						com.edushift.modules.notifications.event.NotificationEvent.builder()
-								.templateKey("AI_FEEDBACK_READY")
-								.category(com.edushift.modules.notifications.entity.Notification.Category.AI_FEEDBACK)
-								.sourceId(saved.getPublicUuid())
-								.recipients(java.util.List.of(
-										new com.edushift.modules.notifications.event.NotificationEvent.Recipient(
-												studentUserId, null)))
-								.payload(java.util.Map.of(
-										"studentName", "",
-										"taskTitle", saved.getQuiz().getTitle()))
-								.build());
-			}
+			publishAiFeedbackReadyTo(saved);
 		}
 
 		// Caller (student) sees their own attempt; reveal only if
@@ -401,24 +388,45 @@ public class QuizAttemptServiceImpl implements QuizAttemptService {
 				saved.getPublicUuid(), saved.getStatus(), saved.getScore());
 
 		// Sprint 9 / BE-9.3 — fire AI_FEEDBACK_READY after manual grading.
-		UUID studentUserId = saved.getStudentUserId();
-		if (studentUserId != null) {
-			eventPublisher.publishEvent(
-					com.edushift.modules.notifications.event.NotificationEvent.builder()
-							.templateKey("AI_FEEDBACK_READY")
-							.category(com.edushift.modules.notifications.entity.Notification.Category.AI_FEEDBACK)
-							.sourceId(saved.getPublicUuid())
-							.recipients(java.util.List.of(
-									new com.edushift.modules.notifications.event.NotificationEvent.Recipient(
-											studentUserId, null)))
-							.payload(java.util.Map.of(
-									"studentName", "",
-									"taskTitle", saved.getQuiz().getTitle()))
-							.build());
-		}
+		publishAiFeedbackReadyTo(saved);
 
 		return attemptMapper.toResponse(saved, attempt.getQuiz(), true,
 				pendingAnswerCount(saved));
+	}
+
+	/**
+	 * DEBT-NOTIF-4 (Sprint 9A): fire {@code AI_FEEDBACK_READY} to the
+	 * student identified by the attempt's internal user id. Resolves
+	 * internal -> publicUuid via {@code userRepository.findById} so the
+	 * listener async receives a recipient.userId matching
+	 * {@code users(public_uuid)} (not {@code users(id)}).
+	 */
+	private void publishAiFeedbackReadyTo(com.edushift.modules.quizzes.entity.QuizAttempt saved) {
+		UUID studentUserInternal = saved.getStudentUserId();
+		if (studentUserInternal == null) {
+			return;
+		}
+		java.util.Optional<com.edushift.modules.auth.entity.User> studentUser =
+				userRepository.findById(studentUserInternal);
+		if (studentUser.isEmpty()) {
+			log.warn("[quizzes.notifications] skip AI_FEEDBACK_READY -- student user_id={} not found in users (orphaned link)",
+					studentUserInternal);
+			return;
+		}
+		UUID studentPublicUserId = studentUser.get().getPublicUuid();
+		eventPublisher.publishEvent(
+				com.edushift.modules.notifications.event.NotificationEvent.builder()
+						.templateKey("AI_FEEDBACK_READY")
+						.category(com.edushift.modules.notifications.entity.Notification.Category.AI_FEEDBACK)
+						.sourceId(saved.getPublicUuid())
+						.tenantId(com.edushift.shared.multitenancy.TenantContext.currentRequired())
+						.recipients(java.util.List.of(
+								new com.edushift.modules.notifications.event.NotificationEvent.Recipient(
+										studentPublicUserId, null)))
+						.payload(java.util.Map.of(
+								"studentName", "",
+								"taskTitle", saved.getQuiz().getTitle()))
+						.build());
 	}
 
 	@Override

@@ -20,6 +20,7 @@ import com.edushift.modules.tasks.submission.mapper.SubmissionMapper;
 import com.edushift.modules.tasks.submission.repository.SubmissionRepository;
 import com.edushift.modules.tasks.submission.repository.SubmissionRevisionRepository;
 import com.edushift.modules.tasks.submission.service.SubmissionService;
+import com.edushift.shared.multitenancy.TenantContext;
 import java.time.Instant;
 import java.util.Optional;
 import java.util.UUID;
@@ -65,6 +66,7 @@ public class SubmissionServiceImpl implements SubmissionService {
 	private final TaskRepository taskRepository;
 	private final SubmissionRepository submissionRepository;
 	private final SubmissionRevisionRepository revisionRepository;
+	private final com.edushift.modules.auth.repository.UserRepository userRepository; // DEBT-NOTIF-4 (Sprint 9A)
 	private final FileObjectService fileObjectService;
 	private final SubmissionMapper submissionMapper;
 	private final ApplicationEventPublisher eventPublisher; // Sprint 9 / BE-9.3
@@ -165,17 +167,29 @@ public class SubmissionServiceImpl implements SubmissionService {
 		Submission saved = submissionRepository.save(entity);
 
 		// Sprint 9 / BE-9.3 — fire TASK_RETURNED to the student.
-		UUID studentUserId = saved.getStudentUserId();
-		if (studentUserId != null) {
+		// DEBT-NOTIF-4 (Sprint 9A): resolve internal user id to publicUuid
+		// via userRepository.findById so the listener async receives a
+		// recipient.userId matching users(public_uuid), not users(id).
+		UUID studentUserInternal = saved.getStudentUserId();
+		if (studentUserInternal != null) {
+			java.util.Optional<com.edushift.modules.auth.entity.User> studentUser =
+					userRepository.findById(studentUserInternal);
+			if (studentUser.isEmpty()) {
+				log.warn("[tasks.notifications] skip TASK_RETURNED -- student user_id={} not found in users (orphaned link)",
+						studentUserInternal);
+				return submissionMapper.toResponse(saved);
+			}
+			UUID studentPublicUserId = studentUser.get().getPublicUuid();
 			String taskTitle = saved.getTask() == null ? "" : saved.getTask().getTitle();
 			eventPublisher.publishEvent(
 					com.edushift.modules.notifications.event.NotificationEvent.builder()
 							.templateKey("TASK_RETURNED")
 							.category(com.edushift.modules.notifications.entity.Notification.Category.TASK)
 							.sourceId(saved.getPublicUuid())
+							.tenantId(TenantContext.currentRequired())
 							.recipients(java.util.List.of(
 									new com.edushift.modules.notifications.event.NotificationEvent.Recipient(
-											studentUserId, null)))
+											studentPublicUserId, null)))
 							.payload(java.util.Map.of(
 									"studentName", "",
 									"taskTitle", taskTitle,

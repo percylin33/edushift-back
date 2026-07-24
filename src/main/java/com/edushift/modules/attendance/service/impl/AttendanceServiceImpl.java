@@ -36,13 +36,17 @@ import com.edushift.modules.attendance.service.AttendanceUserCache;
 import com.edushift.modules.attendance.service.QrTokenService;
 import com.edushift.modules.auth.entity.User;
 import com.edushift.modules.students.entity.Student;
+import com.edushift.modules.students.entity.StudentGuardian;
+import com.edushift.modules.students.entity.Guardian;
 import com.edushift.modules.students.enrollments.entity.StudentEnrollment;
 import com.edushift.modules.students.enrollments.repository.StudentEnrollmentRepository;
+import com.edushift.modules.students.repository.StudentGuardianRepository;
 import com.edushift.modules.students.repository.StudentRepository;
 import com.edushift.modules.tenants.service.TenantSettingsService;
 import com.edushift.shared.exception.BadRequestException;
 import com.edushift.shared.exception.ResourceNotFoundException;
 import com.edushift.shared.exception.UnauthorizedException;
+import com.edushift.shared.multitenancy.TenantContext;
 import com.edushift.shared.security.CurrentUserProvider;
 import java.time.Duration;
 import java.time.Instant;
@@ -53,6 +57,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
@@ -100,6 +105,8 @@ public class AttendanceServiceImpl implements AttendanceService {
 	private final CurrentUserProvider currentUserProvider;
 	private final AttendanceAuditLogger auditLogger;
 	private final ApplicationEventPublisher eventPublisher; // Sprint 9 / BE-9.3
+	private final StudentGuardianRepository studentGuardianRepository; // Sprint 9A / BE-9A.1
+	private final com.edushift.modules.auth.repository.UserRepository userRepository; // DEBT-NOTIF-4 (Sprint 9A)
 	/** Sprint 18 / BE-18.6 — SSE pub/sub for live attendance events. */
 	private final com.edushift.modules.attendance.events.AttendanceEventPublisher realtimePublisher;
 
@@ -228,30 +235,80 @@ public class AttendanceServiceImpl implements AttendanceService {
 		}
 		recordRepository.saveAll(toInsert);
 
-		// Sprint 9 / BE-9.3 — fire STUDENT_ABSENT for each materialized
-		// absent record (the parent should know).
+		// Sprint 9A / BE-9A.1 — fire STUDENT_ABSENT for each materialized
+		// absent record to the student's PRIMARY LINKED GUARDIAN (NOT
+		// the student themselves, which is the bug this replaces — the
+		// original BE-9.3 publisher used student.userId, which is almost
+		// always null for K-12 students, so notifications were silently
+		// dropped). The lookup uses a single bulk query
+		// (StudentGuardianRepository.findActiveByStudentIdsWithLinkedGuardian)
+		// to avoid N+1 across N absences.
 		String sectionName = session.getSection() == null ? "" : session.getSection().getName();
-		for (AttendanceRecord rec : toInsert) {
-			Student student = rec.getStudent();
-			UUID studentUserId = student == null ? null : student.getUserId();
-			String studentName = student == null ? "" : student.fullName();
-			if (studentUserId != null) {
+		List<UUID> studentIds = toInsert.stream()
+				.map(r -> r.getStudent() == null ? null : r.getStudent().getId())
+				.filter(Objects::nonNull)
+				.toList();
+		if (!studentIds.isEmpty()) {
+			List<StudentGuardian> guardians =
+					studentGuardianRepository.findActiveByStudentIdsWithLinkedGuardian(studentIds);
+			// DEBT-NOTIF-4 (Sprint 9A): build a single bulk lookup map
+			// (guardian internal id -> publicUuid) so the listener
+			// async receives a recipient.userId that matches users(public_uuid),
+			// not users(id). Avoids N+1 across N absences.
+			java.util.Set<UUID> guardianUserInternalIds = new java.util.HashSet<>();
+			for (StudentGuardian sg : guardians) {
+				if (sg.getGuardian() != null && sg.getGuardian().getUserId() != null) {
+					guardianUserInternalIds.add(sg.getGuardian().getUserId());
+				}
+			}
+			java.util.Map<UUID, UUID> guardianInternalToPublic = new java.util.HashMap<>();
+			for (com.edushift.modules.auth.entity.User u : userRepository.findAllById(guardianUserInternalIds)) {
+				guardianInternalToPublic.put(u.getId(), u.getPublicUuid());
+			}
+			int published = 0;
+			int skipped = 0;
+			for (StudentGuardian sg : guardians) {
+				Student student = sg.getStudent();
+				if (student == null) {
+					skipped++;
+					continue;
+				}
+				Guardian guardian = sg.getGuardian();
+				if (guardian == null || guardian.getUserId() == null) {
+					skipped++;
+					continue;
+				}
+				UUID guardianPublicUserId = guardianInternalToPublic.get(guardian.getUserId());
+				if (guardianPublicUserId == null) {
+					log.warn(
+							"[attendance] absence fan-out -- skip; guardian user_id={} not found in users (orphaned link)",
+							guardian.getUserId());
+					skipped++;
+					continue;
+				}
 				eventPublisher.publishEvent(
 						com.edushift.modules.notifications.event.NotificationEvent.builder()
 								.templateKey("STUDENT_ABSENT")
 								.category(com.edushift.modules.notifications.entity.Notification.Category.ABSENCE)
-								.sourceId(rec.getPublicUuid())
+								.sourceId(session.getPublicUuid())
+								.tenantId(TenantContext.currentRequired())
 								.recipients(java.util.List.of(
 										new com.edushift.modules.notifications.event.NotificationEvent.Recipient(
-												studentUserId, null)))
+												guardianPublicUserId,
+												guardian.getEmail())))
 								.payload(java.util.Map.of(
-										"studentName", studentName,
+										"studentName", student.fullName(),
 										"date", absentAt.toString(),
 										"reason", "",
 										"courseName", sectionName,
-										"parentName", ""))
+										"parentName", guardian.fullName()))
 								.build());
+				published++;
 			}
+			log.info(
+					"[attendance] absence fan-out -- session={} sessionDate={} materialized={} published={} skipped={}",
+					session.getPublicUuid(), session.getOccurredOn(),
+					toInsert.size(), published, skipped);
 		}
 
 		return toInsert.size();
@@ -841,30 +898,54 @@ public class AttendanceServiceImpl implements AttendanceService {
 		// is manually marked ABSENT (the parent should know). The
 		// NotificationEventListener consumes AFTER_COMMIT so a
 		// rollback cancels the notification.
+		//
+		// DEBT-NOTIF-4 fix (Sprint 9A): resolve to the guardian via
+		// StudentGuardianRepository (single bulk query) — the
+		// original code used student.getUserId() which is almost
+		// always null for K-12 students and would FK-fail when
+		// populated (internal id != public_uuid). The guardian with a
+		// linked user_id is the only "real" recipient in this
+		// scenario.
 		if (saved.getStatus() == AttendanceRecordStatus.ABSENT
 				&& prevStatus != AttendanceRecordStatus.ABSENT) {
-			java.util.UUID studentUserId = saved.getStudent() == null ? null : saved.getStudent().getUserId();
 			String studentName = saved.getStudent() == null ? "" : saved.getStudent().fullName();
 			String sectionName = saved.getSession() == null || saved.getSession().getSection() == null
 					? "" : saved.getSession().getSection().getName();
-			eventPublisher.publishEvent(
-					com.edushift.modules.notifications.event.NotificationEvent.builder()
-							.templateKey("STUDENT_ABSENT")
-							.category(com.edushift.modules.notifications.entity.Notification.Category.ABSENCE)
-							.sourceId(saved.getPublicUuid())
-							.recipients(studentUserId == null
-									? java.util.List.of()
-									: java.util.List.of(
-										new com.edushift.modules.notifications.event.NotificationEvent.Recipient(
-												studentUserId, null)))
-							.payload(java.util.Map.of(
-									"studentName", studentName,
-									"date", saved.getSession().getOccurredOn().toString(),
-									"reason", saved.getNotes() == null ? "" : saved.getNotes(),
-									"courseName", sectionName,
-									"parentName", ""
-							))
-							.build());
+			Student student = saved.getStudent();
+			if (student != null && student.getId() != null) {
+				List<StudentGuardian> guardians =
+						studentGuardianRepository.findActiveByStudentIdsWithLinkedGuardian(
+								java.util.List.of(student.getId()));
+				if (!guardians.isEmpty()) {
+					StudentGuardian sg = guardians.get(0);
+					Guardian guardian = sg.getGuardian();
+					if (guardian != null && guardian.getUserId() != null) {
+						// DEBT-NOTIF-4: single-user resolution.
+						java.util.Optional<com.edushift.modules.auth.entity.User> guardianUser =
+								userRepository.findById(guardian.getUserId());
+						if (guardianUser.isPresent()) {
+							UUID guardianPublicUserId = guardianUser.get().getPublicUuid();
+							eventPublisher.publishEvent(
+									com.edushift.modules.notifications.event.NotificationEvent.builder()
+											.templateKey("STUDENT_ABSENT")
+											.category(com.edushift.modules.notifications.entity.Notification.Category.ABSENCE)
+											.sourceId(saved.getPublicUuid())
+											.tenantId(TenantContext.currentRequired())
+											.recipients(java.util.List.of(
+													new com.edushift.modules.notifications.event.NotificationEvent.Recipient(
+															guardianPublicUserId,
+															guardian.getEmail())))
+											.payload(java.util.Map.of(
+													"studentName", studentName,
+													"date", saved.getSession().getOccurredOn().toString(),
+													"reason", saved.getNotes() == null ? "" : saved.getNotes(),
+													"courseName", sectionName,
+													"parentName", guardian.fullName()))
+											.build());
+						}
+					}
+				}
+			}
 		}
 
 		return toRecordResponseWithUsers(saved, null);

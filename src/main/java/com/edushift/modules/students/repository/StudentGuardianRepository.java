@@ -1,6 +1,7 @@
 package com.edushift.modules.students.repository;
 
 import com.edushift.modules.students.entity.StudentGuardian;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -44,4 +45,26 @@ public interface StudentGuardianRepository extends JpaRepository<StudentGuardian
 			  and sg.isPrimaryContact = true
 			""")
 	long countActivePrimaryContacts(@Param("studentId") UUID studentId);
+
+	/**
+	 * Sprint 9A / BE-9A.1 — bulk lookup of (student, primary-guardian-with-userId)
+	 * pairs for a list of student internal ids. Returns only rows where
+	 * the student has an ACTIVE link to a guardian whose own {@code user_id}
+	 * is populated (i.e. the guardian has a portal login). Rows are ordered
+	 * with the primary contact first so the publisher picks the same
+	 * contact regardless of insertion order.
+	 *
+	 * <p>Used by {@code AttendanceServiceImpl.closeSession} to dispatch
+	 * {@code STUDENT_ABSENT} notifications to the right parent in a
+	 * single round-trip (no N+1).</p>
+	 */
+	@Query("""
+			select sg from StudentGuardian sg
+			join fetch sg.guardian g
+			where sg.student.id in :studentIds
+			  and g.userId is not null
+			order by sg.isPrimaryContact desc, sg.createdAt asc
+			""")
+	List<StudentGuardian> findActiveByStudentIdsWithLinkedGuardian(
+			@Param("studentIds") Collection<UUID> studentIds);
 }

@@ -35,6 +35,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
+import com.edushift.shared.multitenancy.TenantContext;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.ApplicationEventPublisher;
@@ -82,6 +83,7 @@ public class QuizServiceImpl implements QuizService {
 	private final QuizAttemptService attemptService;
 	private final ApplicationEventPublisher eventPublisher; // Sprint 9 / BE-9.3
 	private final StudentEnrollmentRepository studentEnrollmentRepository; // Sprint 9 / BE-9.3
+private final com.edushift.modules.auth.repository.UserRepository userRepository; // DEBT-NOTIF-4 (Sprint 9A)
 
 	// ------------------------------------------------------------------
 	// Builder
@@ -227,16 +229,34 @@ public class QuizServiceImpl implements QuizService {
 		List<StudentEnrollment> enrolled = studentEnrollmentRepository.findActiveBySection(section);
 		if (!enrolled.isEmpty()) {
 			String dueDate = saved.getDueAt() == null ? "" : saved.getDueAt().toString();
+			// DEBT-NOTIF-4 (Sprint 9A): resolve internal user ids to public
+			// uuids in a single bulk query so the listener async receives
+			// recipient.userId matching users(public_uuid), not users(id).
+			java.util.Set<UUID> studentUserInternalIds = new java.util.HashSet<>();
+			for (StudentEnrollment e : enrolled) {
+				UUID uid = e.getStudent() == null ? null : e.getStudent().getUserId();
+				if (uid != null) studentUserInternalIds.add(uid);
+			}
+			java.util.Map<UUID, UUID> internalToPublic = new java.util.HashMap<>();
+			for (com.edushift.modules.auth.entity.User u : userRepository.findAllById(studentUserInternalIds)) {
+				internalToPublic.put(u.getId(), u.getPublicUuid());
+			}
 			List<com.edushift.modules.notifications.event.NotificationEvent.Recipient> recipients = enrolled.stream()
-					.map(e -> e.getStudent().getUserId())
+					.map(e -> {
+						UUID internalId = e.getStudent() == null ? null : e.getStudent().getUserId();
+						UUID publicId = internalId == null ? null : internalToPublic.get(internalId);
+						return publicId == null
+								? null
+								: new com.edushift.modules.notifications.event.NotificationEvent.Recipient(publicId, null);
+					})
 					.filter(Objects::nonNull)
-					.map(uid -> new com.edushift.modules.notifications.event.NotificationEvent.Recipient(uid, null))
 					.toList();
 			recipients.forEach(r -> eventPublisher.publishEvent(
 					com.edushift.modules.notifications.event.NotificationEvent.builder()
 							.templateKey("QUIZ_PUBLISHED")
 							.category(com.edushift.modules.notifications.entity.Notification.Category.QUIZ)
 							.sourceId(saved.getPublicUuid())
+							.tenantId(TenantContext.currentRequired())
 							.recipients(java.util.List.of(r))
 							.payload(java.util.Map.of(
 									"studentName", "",
