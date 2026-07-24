@@ -12,6 +12,7 @@ import com.edushift.modules.schedule.timeslot.dto.UpdateTimeSlotRequest;
 import com.edushift.modules.schedule.timeslot.entity.TimeSlot;
 import com.edushift.modules.schedule.timeslot.mapper.TimeSlotMapper;
 import com.edushift.modules.schedule.timeslot.repository.TimeSlotRepository;
+import com.edushift.modules.schedule.timeslot.service.ScheduleConflictDetector;
 import com.edushift.modules.schedule.timeslot.service.TimeSlotService;
 import com.edushift.modules.teachers.assignments.entity.TeacherAssignment;
 import com.edushift.modules.teachers.assignments.repository.TeacherAssignmentRepository;
@@ -63,6 +64,7 @@ public class TimeSlotServiceImpl implements TimeSlotService {
 	private final AcademicPeriodRepository periodRepository;
 	private final TimeSlotMapper mapper;
 	private final CurrentUserProvider currentUserProvider;
+	private final ScheduleConflictDetector conflictDetector;
 
 	// =========================================================================
 	// CRUD
@@ -94,6 +96,9 @@ public class TimeSlotServiceImpl implements TimeSlotService {
 				request.startTime(), request.endTime(), null);
 
 		TimeSlot slot = mapper.fromCreate(request, assignment);
+		slot.setTeacherAssignment(assignment);
+		assertNoConflicts(slot, null);
+
 		TimeSlot saved = timeSlotRepository.saveAndFlush(slot);
 
 		log.info("[schedule.time-slot] created -- publicUuid={} assignment={} day={} {}-{}",
@@ -117,6 +122,7 @@ public class TimeSlotServiceImpl implements TimeSlotService {
 		validateTimeRange(slot.getStartTime(), slot.getEndTime());
 		ensureNoOverlap(slot.getTeacherAssignment(), slot.getDayOfWeek(),
 				slot.getStartTime(), slot.getEndTime(), slot.getId());
+		assertNoConflicts(slot, slot.getId());
 
 		TimeSlot saved = timeSlotRepository.saveAndFlush(slot);
 		log.info("[schedule.time-slot] updated -- publicUuid={} day={} {}-{}",
@@ -245,6 +251,7 @@ public class TimeSlotServiceImpl implements TimeSlotService {
 
 	private void ensureNoOverlap(TeacherAssignment assignment, Short dayOfWeek,
 			LocalTime startTime, LocalTime endTime, UUID excludeId) {
+		// Legacy per-assignment overlap kept for backward compatibility.
 		List<TimeSlot> conflicts = timeSlotRepository.findOverlapping(
 				assignment, dayOfWeek, startTime, endTime, excludeId);
 		if (!conflicts.isEmpty()) {
@@ -254,5 +261,24 @@ public class TimeSlotServiceImpl implements TimeSlotService {
 							.formatted(startTime, endTime, dayOfWeek,
 									first.getStartTime(), first.getEndTime()));
 		}
+	}
+
+	/**
+	 * Sprint cierre-C / B4 -- multi-dimension conflict check (teacher,
+	 * classroom, section). Wired into {@link #createSlot} and
+	 * {@link #updateSlot}; surfaces a structured 409 via
+	 * {@link com.edushift.modules.schedule.timeslot.service.ScheduleConflictException}
+	 * with the offending dimension + slotUuid so the FE can highlight
+	 * the conflicting cell in the schedule grid.
+	 */
+	private void assertNoConflicts(TimeSlot slot, UUID excludeId) {
+		conflictDetector.assertNoConflicts(
+				slot.getTeacherAssignment().getPublicUuid(),
+				slot.getClassroomId(),
+				slot.getClassroom(),
+				slot.getDayOfWeek(),
+				slot.getStartTime(),
+				slot.getEndTime(),
+				excludeId);
 	}
 }

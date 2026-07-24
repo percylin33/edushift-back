@@ -83,6 +83,16 @@ public class TimeSlot extends TenantAwareEntity {
 	@Column(name = "classroom", length = 80)
 	private String classroom;
 
+	/**
+	 * Sprint cierre-C / B4 -- nullable FK to {@code edushift.classrooms}.
+	 * Coexists with the legacy free-text {@code classroom} column
+	 * during the B4 transition; new slots reference an
+	 * {@link com.edushift.modules.academic.classrooms.entity.Classroom}
+	 * for proper conflict detection. Pre-B4 slots leave this null.
+	 */
+	@Column(name = "classroom_id", columnDefinition = "uuid")
+	private java.util.UUID classroomId;
+
 	@PrePersist
 	private void onPrePersist() {
 		if (publicUuid == null) {

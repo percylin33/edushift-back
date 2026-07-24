@@ -68,4 +68,78 @@ public interface TimeSlotRepository extends JpaRepository<TimeSlot, UUID> {
 			@Param("startTime") LocalTime startTime,
 			@Param("endTime") LocalTime endTime,
 			@Param("excludeId") UUID excludeId);
+
+	// ----------------------------------------------------------------------
+	// Sprint cierre-C / B4 -- conflict detection queries.
+	// Each query is tenant-scoped explicitly (defense-in-depth on top of
+	// Hibernate's @TenantId on TimeSlot) and returns ALL slots in that
+	// tenant + day; the caller (ScheduleConflictDetector) checks
+	// time overlap in Java.
+	// ----------------------------------------------------------------------
+
+	/**
+	 * All non-deleted slots in {@code tenantId} where the underlying
+	 * teacher's publicUuid matches on the given day.
+	 */
+	@Query("""
+			select s from TimeSlot s
+			where s.tenantId = :tenantId
+			  and s.deleted = false
+			  and s.teacherAssignment.teacher.publicUuid = :teacherUuid
+			  and s.dayOfWeek = :dayOfWeek
+			""")
+	List<TimeSlot> findByTenantIdAndTeacherAndDay(
+			@Param("tenantId") UUID tenantId,
+			@Param("teacherUuid") UUID teacherUuid,
+			@Param("dayOfWeek") Short dayOfWeek);
+
+	/**
+	 * All non-deleted slots in {@code tenantId} pointing at
+	 * {@code classroomId} on the given day (B4 FK).
+	 */
+	@Query("""
+			select s from TimeSlot s
+			where s.tenantId = :tenantId
+			  and s.deleted = false
+			  and s.classroomId = :classroomId
+			  and s.dayOfWeek = :dayOfWeek
+			""")
+	List<TimeSlot> findByTenantIdAndClassroomAndDay(
+			@Param("tenantId") UUID tenantId,
+			@Param("classroomId") UUID classroomId,
+			@Param("dayOfWeek") Short dayOfWeek);
+
+	/**
+	 * All non-deleted slots in {@code tenantId} carrying the legacy
+	 * free-text {@code classroom} label on the given day. Pre-B4 slots
+	 * that haven't been migrated to {@code classroomId} yet still go
+	 * through the same conflict check.
+	 */
+	@Query("""
+			select s from TimeSlot s
+			where s.tenantId = :tenantId
+			  and s.deleted = false
+			  and s.classroom = :classroomLabel
+			  and s.dayOfWeek = :dayOfWeek
+			""")
+	List<TimeSlot> findByTenantIdAndClassroomLabelAndDay(
+			@Param("tenantId") UUID tenantId,
+			@Param("classroomLabel") String classroomLabel,
+			@Param("dayOfWeek") Short dayOfWeek);
+
+	/**
+	 * All non-deleted slots in {@code tenantId} attached to the same
+	 * section (via the teacher assignment) on the given day.
+	 */
+	@Query("""
+			select s from TimeSlot s
+			where s.tenantId = :tenantId
+			  and s.deleted = false
+			  and s.teacherAssignment.section.publicUuid = :sectionUuid
+			  and s.dayOfWeek = :dayOfWeek
+			""")
+	List<TimeSlot> findByTenantIdAndSectionAndDay(
+			@Param("tenantId") UUID tenantId,
+			@Param("sectionUuid") UUID sectionUuid,
+			@Param("dayOfWeek") Short dayOfWeek);
 }
