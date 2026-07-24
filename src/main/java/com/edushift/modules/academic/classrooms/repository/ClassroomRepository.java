@@ -20,5 +20,5 @@ public interface ClassroomRepository extends JpaRepository<Classroom, UUID> {
 
 	Page<Classroom> findByDeletedFalseOrderByCodeAsc(Pageable pageable);
 
-	List<Classroom> findByDeletedFalseAndActiveTrueOrderByCodeAsc();
+	List<Classroom> findByDeletedFalseOrderByCodeAsc();
 }
