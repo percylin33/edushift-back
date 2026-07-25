@@ -1,73 +1,51 @@
-# syntax=docker/dockerfile:1.7
-
 # =============================================================================
-# EduShift backend - multi-stage Dockerfile
-# Stage 1: build con Maven (cache de dependencias)
-# Stage 2: runtime mínimo (JRE 21 Alpine, usuario no-root)
+# Sprint cierre-D / I1 — Backend Dockerfile
+# =============================================================================
+# Multi-stage build:
+#   1. build  — Maven + JDK 21, compiles + packages the jar
+#   2. runtime — JRE 21, runs the fat jar
 #
-# Antes se usaba `extract --layers` (Spring Boot layertools) entre stages 2 y 3
-# para separar dependencias / snapshot-dependencies / application en capas
-# independientes. Eso requería que el manifest principal del jar quedara en la
-# imagen runtime (clase `org.springframework.boot.loader.launch.JarLauncher`) y
-# el comando COPY no incluía `META-INF/`. Resultado en runtime:
-#   "Could not find or load main class org.springframework.boot.loader.launch.JarLauncher"
-#   "java.lang.ClassNotFoundException: org.springframework.boot.loader.launch.JarLauncher"
-# Spring Boot 3.3+ ya no genera una capa `META-INF` separada cuando usás
-# `--layers`, por lo que el patrón es frágil. Se reemplaza por el método
-# directo y portable: copiar el jar ejecutable y arrancarlo con `java -jar`.
-# El cache de Maven lo da BuildKit con `--mount=type=cache,target=/root/.m2`.
+# Build:  docker build -t edushift-back:local -f edushift-back/Dockerfile edushift-back
+# Run:    docker run --rm -p 8081:8081 edushift-back:local
 # =============================================================================
 
-# -----------------------------------------------------------------------------
-# Stage 1: build
-# -----------------------------------------------------------------------------
-FROM maven:3.9-eclipse-temurin-21 AS builder
+# ---- Stage 1: build ----
+FROM eclipse-temurin:21-jdk-jammy AS build
 WORKDIR /workspace
 
-# Cachear dependencias antes de copiar fuentes (mejor reuso de capas)
+# Cache dependencies separately from source for faster incremental builds.
 COPY pom.xml ./
 COPY .mvn .mvn
-COPY mvnw mvnw
-# Git en Windows no conserva el bit +x; chmod explícito antes de ejecutar.
-RUN chmod +x ./mvnw
-RUN --mount=type=cache,target=/root/.m2 \
-    ./mvnw -B -ntp dependency:go-offline
+COPY mvnw ./
+RUN chmod +x mvnw && ./mvnw -B -ntp dependency:go-offline
 
+# Now copy source and build.
 COPY src ./src
+RUN ./mvnw -B -ntp -DskipTests package
 
-ARG MAVEN_OPTS=""
-ARG SKIP_TESTS=true
-RUN --mount=type=cache,target=/root/.m2 \
-    ./mvnw -B -ntp clean package -DskipTests=${SKIP_TESTS}
+# ---- Stage 2: runtime ----
+FROM eclipse-temurin:21-jre-jammy AS runtime
 
-# -----------------------------------------------------------------------------
-# Stage 2: runtime
-# -----------------------------------------------------------------------------
-FROM eclipse-temurin:21-jre-alpine AS runtime
-
-RUN apk add --no-cache tzdata curl \
-    && addgroup -S edushift \
-    && adduser -S -G edushift -h /app edushift
+# Run as non-root (defence in depth; ECS/Fargate also has its own UID).
+RUN groupadd --system --gid 1001 edushift \
+ && useradd  --system --uid 1001 --gid edushift --home-dir /app --shell /sbin/nologin edushift
 
 WORKDIR /app
 
-ENV SPRING_PROFILES_ACTIVE=prod \
-    SERVER_PORT=8080 \
-    TZ=UTC \
-    JAVA_OPTS="" \
-    JAVA_TOOL_OPTIONS="-XX:+UseContainerSupport -XX:MaxRAMPercentage=65 -XX:InitialRAMPercentage=40 -XX:+ExitOnOutOfMemoryError -XX:MetaspaceSize=128m -XX:MaxMetaspaceSize=192m -Djava.security.egd=file:/dev/./urandom"
+# Spring Boot fat jar — single file contains all deps + classes.
+COPY --from=build /workspace/target/*.jar app.jar
 
-# Copiamos el jar ejecutable completo (Spring Boot fat-jar). Arrancamos con
-# `java -jar` para que BOOT-INF/classes y BOOT-INF/lib viajen juntos.
-COPY --from=builder --chown=edushift:edushift /workspace/target/edushift-back-*.jar /app/app.jar
+# Defaults overridable via -e ... at run time. See
+# scripts/sprint-9b-launch.ps1 for the dev-profile env vars; for prod
+# you'll set DB_HOST/DB_USER/DB_PASSWORD via secrets.
+ENV SPRING_PROFILES_ACTIVE=prod \
+    SERVER_PORT=8081 \
+    JAVA_OPTS="-XX:+UseG1GC -XX:MaxRAMPercentage=75.0"
 
 USER edushift
-
-EXPOSE 8080
+EXPOSE 8081
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
-  CMD curl -fsS "http://localhost:${SERVER_PORT}/api/actuator/health" || exit 1
+  CMD wget -qO- http://127.0.0.1:8081/api/actuator/health || exit 1
 
-ENTRYPOINT ["sh", "-c", "exec java $JAVA_OPTS -jar /app/app.jar"]
-
-
+ENTRYPOINT ["sh", "-c", "exec java $JAVA_OPTS -jar app.jar"]
