@@ -7,6 +7,7 @@ import com.edushift.infrastructure.multitenancy.TenantIdResolver;
 import com.edushift.modules.audit.entity.AuditLog;
 import com.edushift.modules.audit.events.AuditAction;
 import com.edushift.modules.audit.repository.AuditLogRepository;
+import com.edushift.modules.admin.plans.PlatformPlanRepository;
 import com.edushift.modules.auth.entity.User;
 import com.edushift.modules.auth.entity.UserRole;
 import com.edushift.modules.auth.entity.UserStatus;
@@ -35,6 +36,7 @@ import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
@@ -72,7 +74,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 class SuperAdminTenantIsolationIT extends IntegrationTest {
 
 	/** Path relative to the servlet context-path. {@code /api} is auto-prepended. */
-	private static final String BASE = "/admin/super-admins";
+	private static final String BASE = "/v1/admin/super-admins";
 
 	private static final String SUPER_ADMIN_PASSWORD = "PassForSuperAdmin-IT-1!";
 
@@ -81,7 +83,9 @@ class SuperAdminTenantIsolationIT extends IntegrationTest {
 	@Autowired private TenantRepository tenantRepository;
 	@Autowired private JwtService jwtService;
 	@Autowired private AuditLogRepository auditLogRepository;
+	@Autowired private PlatformPlanRepository platformPlanRepository;
 	@Autowired private PlatformTransactionManager txManager;
+	@Autowired private JdbcTemplate jdbcTemplate;
 	@Autowired private ObjectMapper objectMapper;
 
 	private TransactionTemplate tx;
@@ -89,6 +93,32 @@ class SuperAdminTenantIsolationIT extends IntegrationTest {
 	@BeforeEach
 	void tx() {
 		tx = new TransactionTemplate(txManager);
+		// DEBT-SUPERADMIN-IT-4 (pre-existing, fixed 2026-07-28): the test
+		// container persists across tests in the same class and JUnit 5
+		// does not guarantee execution order, so SUPER_ADMINs seeded by
+		// earlier tests (e.g. `quorumAllowsDisableIfOtherRemains` leaves
+		// `actor` + `other2` ACTIVE) leak into
+		// `lastSuperAdminCannotBeDisabled` and silently keep `others >= 2`
+		// even after the test disables its own `third` — making the
+		// quorum-check assertion unable to reach the 403 branch. Purge all
+		// SUPER_ADMIN rows in the sentinel tenant before each test so each
+		// scenario starts from a known zero baseline. Hard delete
+		// (bypassing soft-delete) because `User` is shared with other
+		// modules and a soft-delete here would still surface them via
+		// `userRepository.findAll()` (which uses `@SQLRestriction`).
+		// Wrap in TransactionTemplate so the DELETE commits synchronously
+		// and is visible to the next HTTP request hitting the embedded
+		// Tomcat (autocommit on `jdbcTemplate.update` was getting
+		// overridden by Hikari's default transaction isolation in this
+		// container setup).
+		int deleted = tx.execute(s -> jdbcTemplate.update(
+				"DELETE FROM edushift.users "
+						+ "WHERE tenant_id = ? AND 'SUPER_ADMIN' = ANY(roles)",
+				TenantIdResolver.SUPER_ADMIN_SENTINEL));
+		if (deleted > 0) {
+			System.err.println("[IT-cleanup] DELETED " + deleted
+					+ " leaked SUPER_ADMINs from earlier tests in this class");
+		}
 	}
 
 	@AfterEach
@@ -147,6 +177,53 @@ class SuperAdminTenantIsolationIT extends IntegrationTest {
 					BASE + "/" + target.getPublicUuid() + "/disable", bearer);
 
 			assertThat(response.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+		}
+
+		// -----------------------------------------------------------------
+		// DEBT-BE-15.5 regression: assert that the SuperAdminController is
+		// actually wired into the Spring MVC dispatcher. If the controller
+		// were ever dropped (annotation removed, package excluded from
+		// component-scan, /v1 path-prefix rule changed, etc.) the FE would
+		// see "No static resource" / 404 instead of a clean 401 / 403 from
+		// the security chain. The assertion below codifies the contract: the
+		// path IS mapped; an unauthenticated caller is rejected by Spring
+		// Security with 401, not by the dispatcher with 404.
+		// -----------------------------------------------------------------
+		@Test
+		@DisplayName("DEBT-BE-15.5: GET /super-admins is mapped (401 not 404)")
+		void getListIsMappedNotMissing() {
+			ResponseEntity<String> response = doGet(BASE);
+
+			assertThat(response.getStatusCode())
+					.as("Unauthenticated caller must be rejected by Spring Security "
+							+ "(401), NOT by Spring MVC with a 404 'No static resource'. "
+							+ "The latter would mean the controller is no longer mounted.")
+					.isEqualTo(HttpStatus.UNAUTHORIZED);
+		}
+
+		@Test
+		@DisplayName("DEBT-BE-15.5: GET /super-admins/count-active is mapped (401 not 404)")
+		void getCountActiveIsMappedNotMissing() {
+			ResponseEntity<String> response = doGet(BASE + "/count-active");
+
+			assertThat(response.getStatusCode())
+					.as("Unauthenticated caller must be rejected by Spring Security "
+							+ "(401), NOT by Spring MVC with a 404 'No static resource'. "
+							+ "The latter would mean the controller is no longer mounted.")
+					.isEqualTo(HttpStatus.UNAUTHORIZED);
+		}
+
+		@Test
+		@DisplayName("DEBT-BE-15.5: POST /super-admins is mapped (401 not 404)")
+		void postCreateIsMappedNotMissing() {
+			ResponseEntity<String> response = doPost(BASE, """
+					{"email":"new-super@edushift.pe","firstName":"A","lastName":"B"}
+					""");
+
+			assertThat(response.getStatusCode())
+					.as("Unauthenticated caller must be rejected by Spring Security "
+							+ "(401), NOT by Spring MVC with a 404 'No static resource'.")
+					.isEqualTo(HttpStatus.UNAUTHORIZED);
 		}
 	}
 
@@ -240,15 +317,30 @@ class SuperAdminTenantIsolationIT extends IntegrationTest {
 					BASE + "/" + second.getPublicUuid() + "/disable", bearer);
 			assertThat(self.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_ENTITY);
 
-			// Use a different actor for the quorum test: create a third admin
-			// to act as the actor, disable the third, leaving only solo.
+			// DEBT-SUPERADMIN-IT-2 (pre-existing, fixed 2026-07-28): the test was
+			// minting a `bearerThird` for the same user it was disabling, which
+			// triggered the SELF_DISABLE short-circuit (422) BEFORE the quorum
+			// check could run. The correct setup is: an OUTSIDE actor disables
+			// `third` (quorum allows — `second` + `solo` remain), then the
+			// SAME outside actor tries to disable `solo` (now the last active).
 			User third = seedSuperAdmin("third-" + UUID.randomUUID() + "@edushift.pe");
-			String bearerThird = mintBearer(third, sentinelTenant());
+			// Disable `third` using `second` as the actor (NOT `third`).
 			ResponseEntity<String> disableThird = doPatchWithBearer(
-					BASE + "/" + third.getPublicUuid() + "/disable", bearerThird);
-			// Disable of third must be rejected — only `solo` remains active.
-			assertThat(disableThird.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
-			JsonNode err = objectMapper.readTree(disableThird.getBody())
+					BASE + "/" + third.getPublicUuid() + "/disable", bearer);
+			assertThat(disableThird.getStatusCode())
+					.as("disabling `third` must succeed while `second` + `solo` "
+							+ "are still active (quorum = 2)")
+					.isEqualTo(HttpStatus.OK);
+
+			// Now only `solo` and `second` remain. Try to disable `solo` — must
+			// be rejected with QUORUM_REQUIRED (403), NOT 200.
+			ResponseEntity<String> disableSolo = doPatchWithBearer(
+					BASE + "/" + solo.getPublicUuid() + "/disable", bearer);
+			assertThat(disableSolo.getStatusCode())
+					.as("disabling the last active SUPER_ADMIN must be rejected with "
+							+ "QUORUM_REQUIRED (403), not silently succeed")
+					.isEqualTo(HttpStatus.FORBIDDEN);
+			JsonNode err = objectMapper.readTree(disableSolo.getBody())
 					.get("errors").get(0);
 			assertThat(err.get("code").asText()).isEqualTo("QUORUM_REQUIRED");
 
@@ -436,6 +528,12 @@ class SuperAdminTenantIsolationIT extends IntegrationTest {
 		return rest.exchange(path, HttpMethod.GET, HttpEntity.EMPTY, String.class);
 	}
 
+	private ResponseEntity<String> doPost(String path, String body) {
+		HttpHeaders headers = new HttpHeaders();
+		headers.setContentType(MediaType.APPLICATION_JSON);
+		return rest.exchange(path, HttpMethod.POST, new HttpEntity<>(body, headers), String.class);
+	}
+
 	private ResponseEntity<String> doGetWithBearer(String path, String bearer) {
 		HttpHeaders headers = new HttpHeaders();
 		headers.setBearerAuth(bearer);
@@ -467,6 +565,16 @@ class SuperAdminTenantIsolationIT extends IntegrationTest {
 		t.setSlug(slugPrefix + UUID.randomUUID().toString().substring(0, 8));
 		t.setName("IT Tenant " + t.getSlug());
 		t.setStatus(TenantStatus.ACTIVE);
+		// DEBT-SUPERADMIN-IT-1 (pre-existing, fixed 2026-07-28): V54_1 turned
+		// `plan` (string enum) into `plan_id` (NOT NULL FK to platform_plans).
+		// Tests written before V54_1 left `plan_id` unset and silently
+		// violated the FK. Seed the BASIC plan — the cheapest one — so the
+		// INSERT succeeds without affecting the assertions below (quorum,
+		// self-disable, cross-tenant scope, etc. are plan-agnostic).
+		t.setPlanId(platformPlanRepository.findByCode("BASIC")
+				.orElseThrow(() -> new IllegalStateException(
+						"platform_plans.BASIC not seeded — Flyway V54 did not run"))
+				.getId());
 		return tx.execute(s -> tenantRepository.saveAndFlush(t));
 	}
 

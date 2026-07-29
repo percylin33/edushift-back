@@ -28,11 +28,12 @@ import org.springframework.transaction.support.TransactionTemplate;
  *
  * <p>Only SUPER_ADMINs may invoke this service (enforced by
  * {@code @PreAuthorize("hasRole('SUPER_ADMIN')")} on the controller).
- * Quorum: at least one OTHER active SUPER_ADMIN must remain after a
- * disable action; this prevents a single admin from locking the platform
- * out. Future work (H-04 follow-up) will add multi-actor quorum for
- * destructive ops (impersonation start, tenant suspension, payment
- * refund).</p>
+ * Quorum: at least TWO OTHER active SUPER_ADMINs must remain after a
+ * disable action (3-of-N quorum). This prevents a single admin from
+ * locking the platform out AND prevents the platform from running on a
+ * single admin. Future work (H-04 follow-up) will add multi-actor
+ * quorum for destructive ops (impersonation start, tenant suspension,
+ * payment refund).</p>
  */
 @Slf4j
 @Service
@@ -129,9 +130,17 @@ public class SuperAdminService {
 	}
 
 	/**
-	 * Minimum quorum: at least one OTHER active SUPER_ADMIN must remain
-	 * after this action. Prevents a single admin from locking the platform
-	 * out.
+	 * Minimum quorum: at least TWO OTHER active SUPER_ADMINs must remain
+	 * after this action. So the active population can never drop below 3.
+	 * DEBT-SUPERADMIN-IT-3 (pre-existing, fixed 2026-07-28): the rule used
+	 * to read {@code others == 0} (single-admin fallback) which silently
+	 * let the platform run on 1 admin. The IT
+	 * {@code SuperAdminTenantIsolationIT.lastSuperAdminCannotBeDisabled}
+	 * had been failing since the controller was first mounted, because the
+	 * test expected this stricter "≥ 2 others" rule (a 3-of-N quorum).
+	 * Tightening here brings the service in line with the test contract
+	 * and with the operational expectation that there must always be at
+	 * least 3 SUPER_ADMINs available to break-glass each other.
 	 */
 	private void enforceQuorum(UUID excludingUuid) {
 		long others = TenantContext.runAs(TenantIdResolver.SUPER_ADMIN_SENTINEL,
@@ -139,9 +148,10 @@ public class SuperAdminService {
 						.filter(SuperAdminService::isSuperAdminActive)
 						.filter(u -> !u.getPublicUuid().equals(excludingUuid))
 						.count());
-		if (others == 0) {
+		if (others < 2) {
 			throw new ForbiddenException("QUORUM_REQUIRED",
-					"At least one other active SUPER_ADMIN must remain");
+					"At least two other active SUPER_ADMINs must remain "
+							+ "(3-of-N quorum: target+actor+others>=3)");
 		}
 	}
 

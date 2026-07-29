@@ -241,11 +241,15 @@ class SuperAdminServiceTest {
 		@Test
 		@DisplayName("happy path — flips status to INACTIVE, audits UPDATE, returns updated summary")
 		void happyPath() {
+			// DEBT-SUPERADMIN-IT-3 mirror: enforceQuorum requires ≥ 2 OTHER
+			// active SUPER_ADMINs to remain. We seed `target` + 2 others so
+			// disabling `target` leaves 2 others (quorum OK).
 			User target = superAdmin("target@edushift.pe", UserStatus.ACTIVE);
-			User other = superAdmin("other@edushift.pe", UserStatus.ACTIVE);
+			User other1 = superAdmin("other1@edushift.pe", UserStatus.ACTIVE);
+			User other2 = superAdmin("other2@edushift.pe", UserStatus.ACTIVE);
 			when(userRepository.findByPublicUuid(target.getPublicUuid()))
 					.thenReturn(Optional.of(target));
-			when(userRepository.findAll()).thenReturn(List.of(target, other));
+			when(userRepository.findAll()).thenReturn(List.of(target, other1, other2));
 			when(userRepository.saveAndFlush(target)).thenReturn(target);
 
 			SuperAdminSummary out = service.disable(target.getPublicUuid(), actor);
@@ -343,11 +347,14 @@ class SuperAdminServiceTest {
 			// fresh non-null UUID for the actor — the controller path that
 			// would supply null is not currently reachable in production.
 			UUID systemActor = UUID.randomUUID();
+			// DEBT-SUPERADMIN-IT-3 mirror: need ≥ 2 other active SUPER_ADMINs
+			// in addition to `target` so the quorum check passes.
 			User target = superAdmin("target@edushift.pe", UserStatus.ACTIVE);
-			User other = superAdmin("other@edushift.pe", UserStatus.ACTIVE);
+			User other1 = superAdmin("other1@edushift.pe", UserStatus.ACTIVE);
+			User other2 = superAdmin("other2@edushift.pe", UserStatus.ACTIVE);
 			when(userRepository.findByPublicUuid(target.getPublicUuid()))
 					.thenReturn(Optional.of(target));
-			when(userRepository.findAll()).thenReturn(List.of(target, other));
+			when(userRepository.findAll()).thenReturn(List.of(target, other1, other2));
 			when(userRepository.saveAndFlush(target)).thenReturn(target);
 
 			SuperAdminSummary out = service.disable(target.getPublicUuid(), systemActor);
