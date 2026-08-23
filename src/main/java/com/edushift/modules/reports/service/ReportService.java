@@ -8,7 +8,10 @@ import com.edushift.modules.reports.generator.CsvReportGenerator;
 import com.edushift.modules.reports.generator.PdfReportGenerator;
 import com.edushift.modules.reports.generator.XlsxReportGenerator;
 import com.edushift.modules.reports.repository.ReportJobRepository;
+import com.edushift.modules.auth.entity.UserRole;
+import com.edushift.shared.exception.ForbiddenException;
 import com.edushift.shared.multitenancy.TenantContext;
+import com.edushift.shared.security.CurrentUserProvider;
 import java.io.IOException;
 import java.time.Instant;
 import java.util.Optional;
@@ -41,6 +44,7 @@ public class ReportService {
     private final CsvReportGenerator csvGen;
     private final XlsxReportGenerator xlsxGen;
     private final PdfReportGenerator pdfGen;
+    private final CurrentUserProvider currentUserProvider;
 
     @Transactional
     public ReportJob request(UUID userId, ReportType type, Format format,
@@ -68,10 +72,16 @@ public class ReportService {
 
     @Transactional(readOnly = true)
     public ReportJob get(UUID publicUuid) {
-        return jobRepo.findByPublicUuid(publicUuid)
+        ReportJob job = jobRepo.findByPublicUuid(publicUuid)
                 .orElseThrow(() -> new com.edushift.shared.exception.NotFoundException(
                         "REPORT_JOB_NOT_FOUND",
                         "Report job not found in the current tenant"));
+        // DEBT-STUDENT-PRIVACY (Fase 0.5): GET /reports/{uuid} used to
+        // be open to any authenticated caller, which let a STUDENT who
+        // guessed another user's job publicUuid download their report
+        // (PII). The owner-or-privileged gate makes that 403.
+        assertCanRead(job);
+        return job;
     }
 
     /**
@@ -113,5 +123,31 @@ public class ReportService {
             case XLSX -> xlsxGen.generate(job);
             case PDF  -> pdfGen.generate(job);
         };
+    }
+
+    /**
+     * DEBT-STUDENT-PRIVACY (Fase 0.5): owner-or-privileged gate. Owner
+     * is the {@code requested_by_user_id} column on the job row;
+     * privileged callers are admin / super-admin (they have audit
+     * dashboards that need read-all). Teachers / students / staff are
+     * denied unless they own the row.
+     */
+    private void assertCanRead(ReportJob job) {
+        UUID caller = currentUserProvider.currentUserId().orElse(null);
+        if (caller == null) {
+            throw new ForbiddenException("AUTH_REQUIRED",
+                    "Authenticated user is required to read this report");
+        }
+        if (caller.equals(job.getRequestedByUserId())) {
+            return;
+        }
+        UserRole role = currentUserProvider.currentUserRole().orElse(null);
+        if (role == UserRole.TENANT_ADMIN || role == UserRole.SUPER_ADMIN) {
+            return;
+        }
+        log.warn("[reports] ownership denied -- caller={} job={} owner={}",
+                caller, job.getPublicUuid(), job.getRequestedByUserId());
+        throw new ForbiddenException("REPORT_NOT_OWNED",
+                "Caller is neither the owner of this report nor an admin");
     }
 }

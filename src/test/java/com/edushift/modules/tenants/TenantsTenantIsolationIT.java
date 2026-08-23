@@ -3,6 +3,8 @@ package com.edushift.modules.tenants;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.edushift.IntegrationTest;
+import com.edushift.modules.admin.invitations.SchoolInvitation;
+import com.edushift.modules.admin.invitations.SchoolInvitationRepository;
 import com.edushift.modules.auth.dto.AuthResponse;
 import com.edushift.modules.auth.entity.User;
 import com.edushift.modules.auth.entity.UserRole;
@@ -78,6 +80,9 @@ class TenantsTenantIsolationIT extends IntegrationTest {
 
 	@Autowired
 	private TenantRepository tenantRepository;
+
+	@Autowired
+	private SchoolInvitationRepository schoolInvitationRepository;
 
 	@Autowired
 	private UserRepository userRepository;
@@ -249,11 +254,12 @@ class TenantsTenantIsolationIT extends IntegrationTest {
 		void registerCreatesTenantAndAdminWithRole() throws Exception {
 			final String newSlug = "it-signup-" + UUID.randomUUID().toString().substring(0, 8);
 			final String adminEmail = "owner@" + newSlug + ".test";
+			final String inviteToken = seedSchoolInvite(adminEmail);
 
 			ResponseEntity<String> response = rest.exchange(
 					TENANTS_BASE + "/register",
 					HttpMethod.POST,
-					new HttpEntity<>(buildRegisterBody(newSlug, adminEmail), jsonHeaders()),
+					new HttpEntity<>(buildRegisterBody(newSlug, adminEmail, inviteToken), jsonHeaders()),
 					String.class);
 
 			assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CREATED);
@@ -279,7 +285,7 @@ class TenantsTenantIsolationIT extends IntegrationTest {
 			// Verify the persisted state matches the contract.
 			Tenant persistedTenant = tx().execute(s ->
 					tenantRepository.findBySlugIgnoreCase(newSlug).orElseThrow());
-			assertThat(persistedTenant.getStatus()).isEqualTo(TenantStatus.PENDING);
+			assertThat(persistedTenant.getStatus()).isEqualTo(TenantStatus.ACTIVE);
 			assertThat(persistedTenant.getPlan()).isEqualTo(TenantPlan.TRIAL);
 			assertThat(persistedTenant.getTrialEndsAt())
 					.as("self-signup must seed a trial window")
@@ -290,18 +296,18 @@ class TenantsTenantIsolationIT extends IntegrationTest {
 		@DisplayName("rejects a duplicate slug with HTTP 409 TENANT_SLUG_TAKEN")
 		void registerRejectsDuplicateSlug() throws Exception {
 			final String taken = "it-dup-" + UUID.randomUUID().toString().substring(0, 8);
+			final String firstEmail = "first@" + taken + ".test";
+			final String secondEmail = "second@" + taken + ".test";
 
-			// First registration succeeds.
 			ResponseEntity<String> first = rest.exchange(
 					TENANTS_BASE + "/register", HttpMethod.POST,
-					new HttpEntity<>(buildRegisterBody(taken, "first@" + taken + ".test"), jsonHeaders()),
+					new HttpEntity<>(buildRegisterBody(taken, firstEmail, seedSchoolInvite(firstEmail)), jsonHeaders()),
 					String.class);
 			assertThat(first.getStatusCode()).isEqualTo(HttpStatus.CREATED);
 
-			// Second registration with the same slug — must be rejected.
 			ResponseEntity<String> second = rest.exchange(
 					TENANTS_BASE + "/register", HttpMethod.POST,
-					new HttpEntity<>(buildRegisterBody(taken, "second@" + taken + ".test"), jsonHeaders()),
+					new HttpEntity<>(buildRegisterBody(taken, secondEmail, seedSchoolInvite(secondEmail)), jsonHeaders()),
 					String.class);
 
 			assertThat(second.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
@@ -350,14 +356,23 @@ class TenantsTenantIsolationIT extends IntegrationTest {
 				new HttpEntity<>(jsonBody, headers), String.class);
 	}
 
-	private String buildRegisterBody(String slug, String adminEmail) {
+	private String seedSchoolInvite(String email) {
+		SchoolInvitation invitation = new SchoolInvitation();
+		invitation.setEmail(email);
+		invitation.setToken(UUID.randomUUID().toString().replace("-", "") + "aa");
+		invitation.setExpiresAt(java.time.Instant.now().plus(java.time.Duration.ofDays(1)));
+		return tx().execute(s -> schoolInvitationRepository.saveAndFlush(invitation)).getToken();
+	}
+
+	private String buildRegisterBody(String slug, String adminEmail, String inviteToken) {
 		return "{"
 				+ "\"tenantName\":\"IT Tenant " + slug + "\","
 				+ "\"tenantSlug\":\"" + slug + "\","
 				+ "\"adminEmail\":\"" + adminEmail + "\","
 				+ "\"adminPassword\":\"" + PASSWORD_A + "\","
 				+ "\"adminFirstName\":\"It\","
-				+ "\"adminLastName\":\"Owner\""
+				+ "\"adminLastName\":\"Owner\","
+				+ "\"inviteToken\":\"" + inviteToken + "\""
 				+ "}";
 	}
 

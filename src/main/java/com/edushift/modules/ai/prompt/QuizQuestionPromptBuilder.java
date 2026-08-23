@@ -83,7 +83,13 @@ public class QuizQuestionPromptBuilder {
                 Double.valueOf(0.2),
                 Integer.valueOf(2048),
                 null,
-                Map.of("response_format", Map.of("type", "json_object"))
+                // MiniMax-M3 embeds <think>…</think> in content by default,
+                // which breaks our strict JSON parser. Disable thinking for
+                // structured-output quiz generation, and request JSON mode.
+                Map.of(
+                        "response_format", Map.of("type", "json_object"),
+                        "thinking", Map.of("type", "disabled")
+                )
         );
     }
 

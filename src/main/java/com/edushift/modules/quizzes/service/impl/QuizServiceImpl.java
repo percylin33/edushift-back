@@ -237,17 +237,40 @@ private final com.edushift.modules.auth.repository.UserRepository userRepository
 				UUID uid = e.getStudent() == null ? null : e.getStudent().getUserId();
 				if (uid != null) studentUserInternalIds.add(uid);
 			}
-			java.util.Map<UUID, UUID> internalToPublic = new java.util.HashMap<>();
+			java.util.Map<UUID, UUID> linkedToPublic = new java.util.HashMap<>();
+			java.util.Map<UUID, String> publicToEmail = new java.util.HashMap<>();
 			for (com.edushift.modules.auth.entity.User u : userRepository.findAllById(studentUserInternalIds)) {
-				internalToPublic.put(u.getId(), u.getPublicUuid());
+				linkedToPublic.put(u.getId(), u.getPublicUuid());
+				if (u.getEmail() != null && !u.getEmail().isBlank()) {
+					publicToEmail.put(u.getPublicUuid(), u.getEmail());
+				}
+			}
+			for (UUID linkedId : studentUserInternalIds) {
+				if (!linkedToPublic.containsKey(linkedId)) {
+					userRepository.findByPublicUuid(linkedId).ifPresent(u -> {
+						linkedToPublic.put(linkedId, u.getPublicUuid());
+						if (u.getEmail() != null && !u.getEmail().isBlank()) {
+							publicToEmail.put(u.getPublicUuid(), u.getEmail());
+						}
+					});
+				}
 			}
 			List<com.edushift.modules.notifications.event.NotificationEvent.Recipient> recipients = enrolled.stream()
 					.map(e -> {
-						UUID internalId = e.getStudent() == null ? null : e.getStudent().getUserId();
-						UUID publicId = internalId == null ? null : internalToPublic.get(internalId);
-						return publicId == null
-								? null
-								: new com.edushift.modules.notifications.event.NotificationEvent.Recipient(publicId, null);
+						UUID linkedId = e.getStudent() == null ? null : e.getStudent().getUserId();
+						if (linkedId == null) {
+							return null;
+						}
+						UUID publicId = linkedToPublic.get(linkedId);
+						if (publicId == null) {
+							return null;
+						}
+						String email = publicToEmail.get(publicId);
+						if ((email == null || email.isBlank()) && e.getStudent() != null) {
+							email = e.getStudent().getEmail();
+						}
+						return new com.edushift.modules.notifications.event.NotificationEvent.Recipient(
+								publicId, email);
 					})
 					.filter(Objects::nonNull)
 					.toList();

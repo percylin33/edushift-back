@@ -55,7 +55,7 @@ public class AnalyticsService {
 	@PersistenceContext
 	private EntityManager em;
 
-	@Transactional(readOnly = true)
+	@Transactional
 	public KpiSummaryResponse currentSummary() {
 		UUID tenantId = TenantContext.currentRequired();
 		Instant now = Instant.now();

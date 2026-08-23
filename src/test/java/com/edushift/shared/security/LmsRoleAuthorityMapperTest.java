@@ -42,8 +42,9 @@ class LmsRoleAuthorityMapperTest {
 				LmsAuthorities.LMS_QUIZ_SUBMIT,
 				LmsAuthorities.LMS_AI_GENERATE,
 				LmsAuthorities.LMS_PAYMENT_ADMIN,
-				// DEBT-FK-BUGS-2: announcements admin surface (BE-9.4).
-				LmsAuthorities.LMS_ANNOUNCEMENTS_CREATE);
+				LmsAuthorities.LMS_ANNOUNCEMENTS_CREATE,
+				LmsAuthorities.LMS_NOTIFICATIONS_MANAGE,
+				LmsAuthorities.LMS_AI_USAGE);
 	}
 
 	@Test
@@ -80,10 +81,12 @@ class LmsRoleAuthorityMapperTest {
 	}
 
 	@Test
-	@DisplayName("parent has the same set as student (submit on behalf)")
+	@DisplayName("parent can access family, justify attendance and submit on behalf")
 	void parentHasReadAndSubmit() {
 		Set<String> auths = mapper.grantFor(UserRole.PARENT);
 		assertThat(auths).containsExactlyInAnyOrder(
+				LmsAuthorities.LMS_FAMILY_READ,
+				LmsAuthorities.LMS_ATTENDANCE_JUSTIFY,
 				LmsAuthorities.LMS_TASK_READ,
 				LmsAuthorities.LMS_TASK_SUBMIT,
 				LmsAuthorities.LMS_MATERIAL_READ,
@@ -126,16 +129,16 @@ class LmsRoleAuthorityMapperTest {
 				LmsAuthorities.LMS_TASK_SUBMIT,
 				LmsAuthorities.LMS_MATERIAL_READ,
 				LmsAuthorities.LMS_QUIZ_READ,
-				LmsAuthorities.LMS_QUIZ_SUBMIT);
+				LmsAuthorities.LMS_QUIZ_SUBMIT,
+				LmsAuthorities.LMS_FAMILY_READ,
+				LmsAuthorities.LMS_ATTENDANCE_JUSTIFY);
 	}
 
 	@Test
-	@DisplayName("combined tenant_admin + teacher → still all 14 (admin has them all)")
+	@DisplayName("combined tenant_admin + teacher keeps all admin authorities")
 	void tenantAdminAndTeacherStillHasAll() {
-		// DEBT-FK-BUGS-2: +1 authority (LMS_ANNOUNCEMENTS_CREATE) added to
-		// TENANT_ADMIN set, so the union goes from 13 to 14.
 		Set<String> auths = mapper.mapAuthorities(
 				EnumSet.of(UserRole.TENANT_ADMIN, UserRole.TEACHER));
-		assertThat(auths).hasSize(14);
+		assertThat(auths).hasSize(16);
 	}
 }

@@ -1,5 +1,6 @@
 package com.edushift.test;
 
+import com.edushift.config.WebConfiguration;
 import com.edushift.infrastructure.ratelimit.RateLimitConfiguration;
 import com.edushift.infrastructure.ratelimit.SimpleRateLimiter;
 import com.edushift.shared.security.CurrentUserProvider;
@@ -47,7 +48,7 @@ import static org.mockito.Mockito.mock;
  * {@code @WebMvcSlice} meta-annotation, once present).</p>
  */
 @TestConfiguration
-@Import(RateLimitConfiguration.class)
+@Import({RateLimitConfiguration.class, WebConfiguration.class})
 public class EdushiftWebMvcTestConfig {
 
 	/**

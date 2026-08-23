@@ -2,6 +2,8 @@ package com.edushift.modules.students.dto;
 
 import com.edushift.modules.students.entity.DocumentType;
 import com.edushift.modules.students.entity.RelationshipType;
+import com.edushift.shared.validation.IdentityDocumentFields;
+import com.edushift.shared.validation.annotations.ValidIdentityDocument;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
@@ -20,6 +22,7 @@ import jakarta.validation.constraints.Size;
  * etc.) are required: an admin who only knows the document number
  * still has to commit to a name in case the row needs to be created.
  */
+@ValidIdentityDocument
 public record AddGuardianRequest(
 		@NotNull(message = "documentType is required")
 		DocumentType documentType,
@@ -53,5 +56,5 @@ public record AddGuardianRequest(
 
 		boolean isPrimaryContact,
 		boolean canPickupStudent
-) {
+) implements IdentityDocumentFields {
 }

@@ -48,10 +48,19 @@ public class NotificationTemplateEngine {
     private static final Safelist SAFE = Safelist.basicWithImages()
             .addTags("h1", "h2", "h3", "h4", "h5", "h6", "table", "thead", "tbody", "tr", "th", "td",
                     "ul", "ol", "li", "p", "br", "hr", "div", "span", "strong", "em", "u")
-            .addAttributes("a", "href", "title", "rel", "target")
-            .addAttributes("td", "colspan", "rowspan")
-            .addAttributes("th", "colspan", "rowspan", "scope")
+            .addAttributes("a", "href", "title", "rel", "target", "style")
+            .addAttributes("p", "style")
+            .addAttributes("div", "style")
+            .addAttributes("span", "style")
+            .addAttributes("h1", "style")
+            .addAttributes("h2", "style")
+            .addAttributes("h3", "style")
+            .addAttributes("td", "colspan", "rowspan", "style")
+            .addAttributes("th", "colspan", "rowspan", "scope", "style")
+            .addAttributes("table", "role", "width", "cellpadding", "cellspacing", "border", "style")
+            .addAttributes("img", "src", "alt", "width", "height", "style")
             .addProtocols("a", "href", "http", "https", "mailto")
+            .addProtocols("img", "src", "http", "https")
             .preserveRelativeLinks(false);
 
     private final ObjectMapper objectMapper;

@@ -2,6 +2,7 @@ package com.edushift.modules.tasks.dto;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.edushift.modules.tasks.entity.TaskStatus;
 import jakarta.validation.ConstraintViolation;
 import jakarta.validation.Validation;
 import jakarta.validation.Validator;
@@ -137,7 +138,7 @@ class TaskDtoTest {
             var resp = new TaskResponse(
                     task, sec, "title", "desc",
                     now.plus(1, ChronoUnit.DAYS), attach, owner,
-                    true, now, now);
+                    true, TaskStatus.PUBLISHED, now, null, now, now);
 
             assertThat(resp.publicUuid()).isEqualTo(task);
             assertThat(resp.sectionPublicUuid()).isEqualTo(sec);
@@ -147,6 +148,9 @@ class TaskDtoTest {
             assertThat(resp.attachmentPublicUuid()).isEqualTo(attach);
             assertThat(resp.ownerPublicUuid()).isEqualTo(owner);
             assertThat(resp.allowResubmission()).isTrue();
+            assertThat(resp.status()).isEqualTo(TaskStatus.PUBLISHED);
+            assertThat(resp.publishedAt()).isEqualTo(now);
+            assertThat(resp.archivedAt()).isNull();
             assertThat(resp.createdAt()).isEqualTo(now);
         }
 
@@ -155,8 +159,10 @@ class TaskDtoTest {
         void nullSection() {
             var resp = new TaskResponse(
                     UUID.randomUUID(), null, "t", null, null,
-                    null, UUID.randomUUID(), false, Instant.now(), Instant.now());
+                    null, UUID.randomUUID(), false, TaskStatus.DRAFT,
+                    null, null, Instant.now(), Instant.now());
             assertThat(resp.sectionPublicUuid()).isNull();
+            assertThat(resp.status()).isEqualTo(TaskStatus.DRAFT);
         }
     }
 
@@ -173,7 +179,7 @@ class TaskDtoTest {
         void construct() {
             UUID id = UUID.randomUUID();
             Instant due = Instant.parse("2026-06-10T00:00:00Z");
-            var sum = new TaskSummary(id, "T", due, true, UUID.randomUUID(), Instant.now());
+            var sum = new TaskSummary(id, "T", due, true, UUID.randomUUID(), TaskStatus.DRAFT, Instant.now());
             assertThat(sum.publicUuid()).isEqualTo(id);
             assertThat(sum.title()).isEqualTo("T");
             assertThat(sum.dueAt()).isEqualTo(due);
@@ -183,7 +189,7 @@ class TaskDtoTest {
         @Test
         @DisplayName("hasAttachment=false when null")
         void noAttachment() {
-            var sum = new TaskSummary(UUID.randomUUID(), "T", null, false, UUID.randomUUID(), Instant.now());
+            var sum = new TaskSummary(UUID.randomUUID(), "T", null, false, UUID.randomUUID(), TaskStatus.DRAFT, Instant.now());
             assertThat(sum.hasAttachment()).isFalse();
         }
     }

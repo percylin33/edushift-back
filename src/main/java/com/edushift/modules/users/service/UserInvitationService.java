@@ -57,6 +57,16 @@ public interface UserInvitationService {
 	InvitationResponse cancelInvitation(UUID publicUuid);
 
 	/**
+	 * Re-sends a pending invitation: rotates the token, extends TTL,
+	 * and dispatches the activation email again. Returns the projection
+	 * with the new token so the admin can copy the link.
+	 *
+	 * <p>Refuses ACCEPTED / CANCELLED / EXPIRED with a 409. Unknown
+	 * publicUuid → 404.
+	 */
+	InvitationResponse resendInvitation(UUID publicUuid);
+
+	/**
 	 * Public preflight check for the accept page.
 	 *
 	 * <ul>
@@ -64,17 +74,22 @@ public interface UserInvitationService {
 	 *   <li>Token already redeemed → {@code 410 INVITATION_ALREADY_ACCEPTED}.</li>
 	 *   <li>Token cancelled → {@code 410 INVITATION_CANCELLED}.</li>
 	 *   <li>Token expired → {@code 410 INVITATION_EXPIRED}.</li>
+	 *   <li>{@code claimedTenantSlug} present but ≠ invitation tenant →
+	 *       {@code 403 INVITATION_TENANT_MISMATCH} (UAT-CD-11).</li>
 	 *   <li>Token pending → returns a public-safe view of the invitation.</li>
 	 * </ul>
+	 *
+	 * @param claimedTenantSlug optional {@code ?tenant=} from the accept URL;
+	 *                          null/blank skips the check
 	 */
-	InvitationPreflightResponse getPreflight(String token);
+	InvitationPreflightResponse getPreflight(String token, String claimedTenantSlug);
 
 	/**
 	 * Public redemption flow. On success: creates the new user inside
 	 * the invitation's tenant, marks the invitation as accepted, and
 	 * returns a logged-in session — same envelope as
-	 * {@code /v1/auth/login}. Same 410 / 404 mapping as
-	 * {@link #getPreflight(String)} on token failures.
+	 * {@code /v1/auth/login}. Same 410 / 404 / 403 mapping as
+	 * {@link #getPreflight(String, String)} on token failures.
 	 */
 	AuthResponse acceptInvitation(AcceptInvitationRequest request);
 

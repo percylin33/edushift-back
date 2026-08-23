@@ -224,6 +224,20 @@ public class AuthServiceImpl implements AuthService {
 		// We do not run a bcrypt check on a locked account — short-circuit.
 		loginAttemptService.assertNotLocked(user);
 
+		// BUG-2026-08-10-02: seed-data placeholder. V93 et al. seed users with
+		// password_hash = 'SEED_RESET_REQUIRED_v1_<plain>'. BCrypt.matches()
+		// against a non-BCrypt string returns false, so the user can never
+		// log in. DevDataInitializer only runs on a fresh schema; if the
+		// schema was migrated before DevDataInitializer first ran, the
+		// placeholder sticks. We detect it here and re-hash on first login.
+		if (com.edushift.infrastructure.seed.DevDataInitializer
+				.isSeedPasswordResetSentinel(user.getPasswordHash())) {
+			log.info("[auth] resetting seed placeholder for user '{}' on first login",
+					normalizedEmail);
+			user.setPasswordHash(passwordEncoder.encode(request.password()));
+			userRepository.saveAndFlush(user);
+		}
+
 		if (!passwordEncoder.matches(request.password(), user.getPasswordHash())) {
 			log.info("[auth] login failed (bad password) tenant='{}', email='{}'",
 					tenantSlug, normalizedEmail);

@@ -47,11 +47,14 @@ public class AiQuotaService {
 
     private final TenantAiSettingsRepository settingsRepo;
     private final TenantAiUsageRepository usageRepo;
+    private final AiTenantKeyResolver aiTenantKeyResolver;
 
     public AiQuotaService(TenantAiSettingsRepository settingsRepo,
-                          TenantAiUsageRepository usageRepo) {
+                          TenantAiUsageRepository usageRepo,
+                          AiTenantKeyResolver aiTenantKeyResolver) {
         this.settingsRepo = settingsRepo;
         this.usageRepo = usageRepo;
+        this.aiTenantKeyResolver = aiTenantKeyResolver;
     }
 
     /**
@@ -59,16 +62,28 @@ public class AiQuotaService {
      * Throws {@link AiDisabledException} or {@link AiQuotaExceededException}
      * if not. Otherwise returns the {@link TenantAiSettings} (for the
      * caller to read the {@code defaultModel}).
+     *
+     * <p>The tenant id is read from {@link TenantContext} (set by
+     * {@code TenantInterceptor} from the JWT). AI quota tables are keyed by
+     * {@code tenants.public_uuid}, so this method temporarily rebinds the
+     * tenant context to that key for Hibernate {@code @TenantId} filtering.</p>
      */
     @Transactional(readOnly = true)
     public TenantAiSettings verifyCanCall() {
-        TenantAiSettings settings = settingsRepo.findFirstByOrderByIdAsc()
-                .orElseThrow(() -> new AiDisabledException());
+        UUID internalTenantId = TenantContext.currentRequired();
+        UUID aiTenantKey = aiTenantKeyResolver.resolve(internalTenantId);
+
+        TenantAiSettings settings = settingsRepo.findActiveByTenantId(aiTenantKey).orElse(null);
+        if (settings == null) {
+            throw new AiDisabledException();
+        }
         if (!settings.isAiEnabled()) {
             throw new AiDisabledException();
         }
+
         LocalDate today = LocalDate.now();
-        TenantAiUsage usage = usageRepo.findByUsageDay(today).orElse(null);
+        TenantAiUsage usage = TenantContext.runAs(aiTenantKey,
+                () -> usageRepo.findByUsageDay(today).orElse(null));
         int currentRequests = usage == null ? 0 : usage.getRequestCount();
         if (settings.getDailyRequestQuota() != null
                 && currentRequests + 1 > settings.getDailyRequestQuota()) {
@@ -78,8 +93,7 @@ public class AiQuotaService {
                             + "The quota resets at 00:00 UTC.");
         }
         if (settings.getMonthlyTokenQuota() != null) {
-            UUID tenantId = TenantContext.currentRequired();
-            long currentMonthTokens = usageRepo.sumTokensThisMonth(tenantId);
+            long currentMonthTokens = usageRepo.sumTokensThisMonth(aiTenantKey);
             if (currentMonthTokens >= settings.getMonthlyTokenQuota()) {
                 throw new AiQuotaExceededException(
                         "Monthly AI token quota exhausted for this tenant "
@@ -99,15 +113,16 @@ public class AiQuotaService {
      */
     @Transactional
     public void incrementCounters(boolean success, long tokensIn, long tokensOut) {
-        UUID tenantId = TenantContext.currentRequired();
+        UUID internalTenantId = TenantContext.currentRequired();
+        UUID aiTenantKey = aiTenantKeyResolver.resolve(internalTenantId);
         LocalDate today = LocalDate.now();
         int successDelta = success ? 1 : 0;
         int failedDelta  = success ? 0 : 1;
         long tokensInDelta  = success ? tokensIn  : 0L;
         long tokensOutDelta = success ? tokensOut : 0L;
-        usageRepo.incrementCounters(tenantId, today, 1, successDelta, failedDelta,
+        usageRepo.incrementCounters(aiTenantKey, today, 1, successDelta, failedDelta,
                 tokensInDelta, tokensOutDelta);
         log.debug("Incremented AI usage for tenant={} day={} success={} tokensIn={} tokensOut={}",
-                tenantId, today, success, tokensIn, tokensOut);
+                aiTenantKey, today, success, tokensIn, tokensOut);
     }
 }

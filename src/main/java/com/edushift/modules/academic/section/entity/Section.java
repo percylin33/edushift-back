@@ -2,6 +2,7 @@ package com.edushift.modules.academic.section.entity;
 
 import com.edushift.modules.academic.levelgrade.entity.Grade;
 import com.edushift.modules.academic.year.entity.AcademicYear;
+import com.edushift.modules.teachers.entity.Teacher;
 import com.edushift.shared.domain.TenantAwareEntity;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -96,6 +97,15 @@ public class Section extends TenantAwareEntity {
 
 	@Column(name = "display_order", nullable = false)
 	private Integer displayOrder = 1;
+
+	/**
+	 * Optional tutor / profesor de aula (V103). Required soft-warning
+	 * for {@code POLIDOCENTE}/{@code MIXTO} grades when null.
+	 */
+	@ManyToOne(fetch = FetchType.LAZY)
+	@JoinColumn(name = "homeroom_teacher_id", columnDefinition = "uuid",
+			foreignKey = @ForeignKey(name = "fk_sections_homeroom_teacher"))
+	private Teacher homeroomTeacher;
 
 	@Column(name = "deleted_at")
 	private Instant deletedAt;

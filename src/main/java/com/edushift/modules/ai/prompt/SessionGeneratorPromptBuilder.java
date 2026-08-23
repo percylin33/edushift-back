@@ -150,8 +150,8 @@ public class SessionGeneratorPromptBuilder {
                 /* maxTokens    */ 2048,
                 /* stopSeqs     */ null,
                 /* extra        */ Map.of(
-                        // Hint the provider to use JSON mode (MiniMax / OpenAI).
-                        "response_format", Map.of("type", "json_object")
+                        "response_format", Map.of("type", "json_object"),
+                        "thinking", Map.of("type", "disabled")
                 )
         );
     }

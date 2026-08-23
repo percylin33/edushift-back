@@ -131,13 +131,15 @@ public class TenantMapper {
 	 */
 	private BrandingDto toBrandingDto(Map<String, Object> branding) {
 		if (branding == null || branding.isEmpty()) {
-			return new BrandingDto(null, null, null, null);
+			return new BrandingDto(null, null, null, null, null, null);
 		}
 		return new BrandingDto(
 				asString(branding.get("primaryColor")),
 				asString(branding.get("logoUrl")),
 				asString(branding.get("faviconUrl")),
-				asString(branding.get("loginBgUrl"))
+				asString(branding.get("loginBgUrl")),
+				asString(branding.get("loginTitle")),
+				asString(branding.get("loginDescription"))
 		);
 	}
 
@@ -152,6 +154,16 @@ public class TenantMapper {
 		if (patch.logoUrl()      != null) merged.put("logoUrl",      patch.logoUrl());
 		if (patch.faviconUrl()   != null) merged.put("faviconUrl",   patch.faviconUrl());
 		if (patch.loginBgUrl()   != null) merged.put("loginBgUrl",   patch.loginBgUrl());
+		if (patch.loginTitle() != null) {
+			String title = patch.loginTitle().trim();
+			if (title.isEmpty()) merged.remove("loginTitle");
+			else merged.put("loginTitle", title);
+		}
+		if (patch.loginDescription() != null) {
+			String description = patch.loginDescription().trim();
+			if (description.isEmpty()) merged.remove("loginDescription");
+			else merged.put("loginDescription", description);
+		}
 		return merged;
 	}
 

@@ -34,9 +34,10 @@ import org.hibernate.annotations.SQLDelete;
  * {@code evaluation_rubric} (V28).
  *
  * <h3>Token storage (security)</h3>
- * We persist {@link #tokenHash} (SHA-256 hex of the raw JWT), never the
- * JWT itself. A DB leak therefore does NOT enable QR forgery. Same
- * pattern as {@code refresh_tokens} in {@code auth.md}.
+ * We persist {@link #tokenHash} (SHA-256 hex) as the check-in lookup
+ * key, plus {@link #tokenPlain} (V100) so a reprint of the notebook
+ * sheet does not rotate the credential. Rotation stays on
+ * {@code POST .../attendance-qr/rotate} (lost card).
  *
  * <h3>Invariants</h3>
  * <ul>
@@ -82,6 +83,10 @@ public class StudentAttendanceQr extends TenantAwareEntity {
 
 	@Column(name = "token_hash", nullable = false, length = 64)
 	private String tokenHash;
+
+	/** Raw 12-char payload encoded in the printed QR. Null on pre-V100 rows. */
+	@Column(name = "token_plain", length = 12)
+	private String tokenPlain;
 
 	@Column(name = "issued_at", nullable = false)
 	private Instant issuedAt;

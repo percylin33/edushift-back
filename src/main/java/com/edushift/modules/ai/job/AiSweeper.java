@@ -59,6 +59,10 @@ import org.springframework.transaction.annotation.Transactional;
  * </ul>
  */
 @Component
+@org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(
+        name = "app.ai.sweeper.enabled",
+        havingValue = "true",
+        matchIfMissing = true)
 public class AiSweeper {
 
     private static final Logger log = LoggerFactory.getLogger(LoggerNames.AI);

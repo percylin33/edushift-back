@@ -1,6 +1,7 @@
 package com.edushift.modules.schedule.timeslot.service;
 
 import com.edushift.modules.academic.classrooms.repository.ClassroomRepository;
+import com.edushift.modules.schedule.daytemplate.service.NonTeachingBlockResolver;
 import com.edushift.modules.schedule.timeslot.entity.TimeSlot;
 import com.edushift.modules.schedule.timeslot.repository.TimeSlotRepository;
 import com.edushift.modules.teachers.assignments.entity.TeacherAssignment;
@@ -48,6 +49,7 @@ public class ScheduleConflictDetector {
 	private final TimeSlotRepository timeSlotRepository;
 	private final ClassroomRepository classroomRepository;
 	private final TeacherAssignmentRepository teacherAssignmentRepository;
+	private final NonTeachingBlockResolver nonTeachingBlockResolver;
 
 	/**
 	 * Throws {@link ScheduleConflictException} when any of the three
@@ -139,6 +141,10 @@ public class ScheduleConflictDetector {
 						"La sección ya tiene otra clase en ese horario.");
 			}
 		}
+
+		// 4. Recess / lunch / assembly from the section's day template (ADR-SCH-6).
+		nonTeachingBlockResolver.assertNoOverlapWithRecess(
+				assignment.getSection(), dayOfWeek, startTime, endTime);
 	}
 
 	private static boolean overlaps(LocalTime aStart, LocalTime aEnd,

@@ -17,6 +17,7 @@ import com.edushift.modules.students.entity.EnrollmentStatus;
 import com.edushift.modules.students.entity.Student;
 import com.edushift.modules.students.mapper.StudentMapper;
 import com.edushift.modules.students.repository.StudentRepository;
+import com.edushift.modules.users.repository.UserInvitationRepository;
 import com.edushift.shared.exception.ConflictException;
 import com.edushift.shared.exception.ResourceNotFoundException;
 import java.lang.reflect.Field;
@@ -41,6 +42,7 @@ import org.springframework.data.jpa.domain.Specification;
 class StudentServiceImplTest {
 
 	@Mock private StudentRepository studentRepository;
+	@Mock private UserInvitationRepository invitationRepository;
 	@Spy private StudentMapper mapper = new StudentMapper();
 
 	@InjectMocks private StudentServiceImpl service;

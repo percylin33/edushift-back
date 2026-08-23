@@ -1,6 +1,8 @@
 package com.edushift.modules.students.controller;
 
 import com.edushift.modules.students.dto.CreateStudentRequest;
+import com.edushift.modules.students.dto.InviteStudentResponse;
+import com.edushift.modules.students.dto.LinkStudentUserRequest;
 import com.edushift.modules.students.dto.StudentListFilters;
 import com.edushift.modules.students.dto.StudentListItem;
 import com.edushift.modules.students.dto.StudentResponse;
@@ -45,6 +47,8 @@ import org.springframework.web.bind.annotation.RestController;
  *   <tr><td>GET   </td><td>/{publicUuid}          </td><td>TENANT_ADMIN</td><td>{@link StudentResponse}</td></tr>
  *   <tr><td>POST  </td><td>/                      </td><td>TENANT_ADMIN</td><td>{@link StudentResponse} (201)</td></tr>
  *   <tr><td>PUT   </td><td>/{publicUuid}          </td><td>TENANT_ADMIN</td><td>{@link StudentResponse}</td></tr>
+ *   <tr><td>POST  </td><td>/{publicUuid}/link-user</td><td>TENANT_ADMIN</td><td>{@link StudentResponse}</td></tr>
+ *   <tr><td>POST  </td><td>/{publicUuid}/invite   </td><td>TENANT_ADMIN</td><td>{@link InviteStudentResponse}</td></tr>
  *   <tr><td>DELETE</td><td>/{publicUuid}          </td><td>TENANT_ADMIN</td><td>204</td></tr>
  * </table>
  *
@@ -136,6 +140,38 @@ public class StudentController {
 	) {
 		StudentResponse response = service.updateStudent(publicUuid, request);
 		return ResponseEntity.ok(ApiResponse.ok(response));
+	}
+
+	@PostMapping("/{publicUuid}/link-user")
+	@SecurityRequirement(name = "bearerAuth")
+	@PreAuthorize("hasRole('TENANT_ADMIN')")
+	@Operation(
+			summary = "Link a student to an existing user (TENANT_ADMIN)",
+			description = "User must be in the same tenant and have the STUDENT role. "
+					+ "Errors: 409 STUDENT_ALREADY_HAS_USER, 409 USER_NOT_STUDENT_ROLE, "
+					+ "409 USER_ALREADY_LINKED_TO_STUDENT, 404 RESOURCE_NOT_FOUND."
+	)
+	public ResponseEntity<ApiResponse<StudentResponse>> linkUser(
+			@PathVariable UUID publicUuid,
+			@Valid @RequestBody LinkStudentUserRequest request
+	) {
+		return ResponseEntity.ok(ApiResponse.ok(service.linkUser(publicUuid, request)));
+	}
+
+	@PostMapping("/{publicUuid}/invite")
+	@SecurityRequirement(name = "bearerAuth")
+	@PreAuthorize("hasRole('TENANT_ADMIN')")
+	@Operation(
+			summary = "Invite a student to claim a portal account (TENANT_ADMIN)",
+			description = "Creates a user_invitations row with role STUDENT and "
+					+ "metadata.studentId. Returns the invitation token + expiresAt. "
+					+ "Errors: 409 STUDENT_ALREADY_HAS_USER, 422 STUDENT_EMAIL_REQUIRED, "
+					+ "409 INVITATION_ALREADY_PENDING."
+	)
+	public ResponseEntity<ApiResponse<InviteStudentResponse>> invite(
+			@PathVariable UUID publicUuid
+	) {
+		return ResponseEntity.ok(ApiResponse.ok(service.invite(publicUuid)));
 	}
 
 	@DeleteMapping("/{publicUuid}")

@@ -29,6 +29,14 @@ public interface QuizAttemptRepository extends JpaRepository<QuizAttempt, UUID> 
 	List<QuizAttempt> findAllByQuizAndStudentUserIdOrderByAttemptNumberAsc(
 			Quiz quiz, UUID studentUserId);
 
+	/**
+	 * DEBT-STUDENT-PRIVACY (Fase 0.3): paginated variant used to
+	 * serve a STUDENT's own attempts without leaking the rest of the
+	 * class. Mirrors the unpaged variant above.
+	 */
+	Page<QuizAttempt> findAllByQuizAndStudentUserIdOrderByAttemptNumberAsc(
+			Quiz quiz, UUID studentUserId, Pageable pageable);
+
 	/** Latest attempt of one student for one quiz. */
 	Optional<QuizAttempt> findFirstByQuizAndStudentUserIdOrderByAttemptNumberDesc(
 			Quiz quiz, UUID studentUserId);

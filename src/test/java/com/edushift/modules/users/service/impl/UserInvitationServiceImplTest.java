@@ -19,6 +19,8 @@ import com.edushift.modules.auth.service.AuthService;
 import com.edushift.modules.tenants.entity.Tenant;
 import com.edushift.modules.tenants.entity.TenantStatus;
 import com.edushift.modules.tenants.repository.TenantRepository;
+import com.edushift.modules.users.UserInvitationMailer;
+import com.edushift.modules.students.entity.DocumentType;
 import com.edushift.modules.users.dto.AcceptInvitationRequest;
 import com.edushift.modules.users.dto.CreateInvitationRequest;
 import com.edushift.modules.users.dto.InvitationPreflightResponse;
@@ -29,9 +31,11 @@ import com.edushift.modules.users.mapper.UserInvitationMapper;
 import com.edushift.modules.users.repository.UserInvitationRepository;
 import com.edushift.shared.exception.BusinessException;
 import com.edushift.shared.exception.ConflictException;
+import com.edushift.shared.exception.ForbiddenException;
 import com.edushift.shared.exception.GoneException;
 import com.edushift.shared.exception.ResourceNotFoundException;
 import com.edushift.shared.multitenancy.TenantContext;
+import com.edushift.shared.web.FrontendLinks;
 import java.lang.reflect.Field;
 import java.time.Instant;
 import java.util.List;
@@ -62,6 +66,7 @@ class UserInvitationServiceImplTest {
 	@Mock private AuthService authService;
 	@Mock private PasswordEncoder passwordEncoder;
 	@Mock private org.springframework.context.ApplicationEventPublisher eventPublisher;
+	@Mock private UserInvitationMailer invitationMailer;
 	@Mock private PlatformTransactionManager txManager;
 
 	private UserInvitationServiceImpl service;
@@ -73,7 +78,8 @@ class UserInvitationServiceImplTest {
 		service = new UserInvitationServiceImpl(
 				invitationRepository, new UserInvitationMapper(),
 				userRepository, tenantRepository, authService,
-				passwordEncoder, eventPublisher, txManager);
+				passwordEncoder, eventPublisher, invitationMailer,
+				new FrontendLinks("http://localhost:4201"), txManager);
 		TenantContext.set(TENANT_ID);
 	}
 
@@ -91,7 +97,7 @@ class UserInvitationServiceImplTest {
 	class CreateInvitation {
 
 		@Test
-		@DisplayName("happy path — persists, generates a token, returns full projection")
+		@DisplayName("happy path â€” persists, generates a token, returns full projection")
 		void happyPath() {
 			when(invitationRepository.findActivePendingByEmail(eq("teach@acme.test"), any(Instant.class)))
 					.thenReturn(Optional.empty());
@@ -99,7 +105,8 @@ class UserInvitationServiceImplTest {
 					.thenAnswer(inv -> inv.getArgument(0));
 
 			CreateInvitationRequest request = new CreateInvitationRequest(
-					"  Teach@acme.test  ", "Teach", "Doe", Set.of("TEACHER"));
+					"  Teach@acme.test  ", "Teach", "Doe", Set.of("TEACHER"),
+					DocumentType.DNI, "87654321");
 
 			InvitationResponse response = service.createInvitation(request);
 
@@ -112,19 +119,22 @@ class UserInvitationServiceImplTest {
 			verify(invitationRepository).save(captor.capture());
 			UserInvitation persisted = captor.getValue();
 			assertThat(persisted.getEmail()).isEqualTo("teach@acme.test");
+			assertThat(persisted.getDocumentType()).isEqualTo(DocumentType.DNI);
+			assertThat(persisted.getDocumentNumber()).isEqualTo("87654321");
 			assertThat(persisted.getExpiresAt()).isAfter(Instant.now());
 			assertThat(persisted.getToken()).hasSize(32); // url-safe base64 of 24 bytes
 		}
 
 		@Test
-		@DisplayName("email already has active pending → ConflictException(INVITATION_ALREADY_PENDING)")
+		@DisplayName("email already has active pending â†’ ConflictException(INVITATION_ALREADY_PENDING)")
 		void duplicatePending() {
 			UserInvitation existing = newPendingInvitation("dup@acme.test");
 			when(invitationRepository.findActivePendingByEmail(eq("dup@acme.test"), any(Instant.class)))
 					.thenReturn(Optional.of(existing));
 
 			CreateInvitationRequest request = new CreateInvitationRequest(
-					"dup@acme.test", "Dup", "User", Set.of("TEACHER"));
+					"dup@acme.test", "Dup", "User", Set.of("TEACHER"),
+					DocumentType.DNI, "87654321");
 
 			assertThatThrownBy(() -> service.createInvitation(request))
 					.isInstanceOfSatisfying(ConflictException.class,
@@ -134,13 +144,14 @@ class UserInvitationServiceImplTest {
 		}
 
 		@Test
-		@DisplayName("unknown role → BusinessException(INVALID_ROLE), validated before duplicate-check")
+		@DisplayName("unknown role â†’ BusinessException(INVALID_ROLE), validated before duplicate-check")
 		void unknownRoleRejected() {
 			// parseRoles runs before the email duplicate check, so we never
-			// hit the repository — assert that explicitly with `verifyNoInteractions`
+			// hit the repository â€” assert that explicitly with `verifyNoInteractions`
 			// (this also documents the intentional ordering).
 			CreateInvitationRequest request = new CreateInvitationRequest(
-					"new@acme.test", "New", "User", Set.of("WIZARD"));
+					"new@acme.test", "New", "User", Set.of("WIZARD"),
+					DocumentType.DNI, "87654321");
 
 			assertThatThrownBy(() -> service.createInvitation(request))
 					.isInstanceOfSatisfying(BusinessException.class,
@@ -184,7 +195,7 @@ class UserInvitationServiceImplTest {
 	class CancelInvitation {
 
 		@Test
-		@DisplayName("happy path — sets cancelledAt and persists")
+		@DisplayName("happy path â€” sets cancelledAt and persists")
 		void happyPath() {
 			UUID publicUuid = UUID.randomUUID();
 			UserInvitation invitation = newPendingInvitation("teach@acme.test");
@@ -200,7 +211,7 @@ class UserInvitationServiceImplTest {
 		}
 
 		@Test
-		@DisplayName("already accepted → ConflictException(INVITATION_ALREADY_ACCEPTED)")
+		@DisplayName("already accepted â†’ ConflictException(INVITATION_ALREADY_ACCEPTED)")
 		void alreadyAcceptedRefuses() {
 			UUID publicUuid = UUID.randomUUID();
 			UserInvitation invitation = newPendingInvitation("teach@acme.test");
@@ -214,7 +225,7 @@ class UserInvitationServiceImplTest {
 		}
 
 		@Test
-		@DisplayName("already cancelled → idempotent no-op (no save)")
+		@DisplayName("already cancelled â†’ idempotent no-op (no save)")
 		void alreadyCancelledIsIdempotent() {
 			UUID publicUuid = UUID.randomUUID();
 			UserInvitation invitation = newPendingInvitation("teach@acme.test");
@@ -228,7 +239,7 @@ class UserInvitationServiceImplTest {
 		}
 
 		@Test
-		@DisplayName("unknown publicUuid → ResourceNotFoundException")
+		@DisplayName("unknown publicUuid â†’ ResourceNotFoundException")
 		void unknownThrows() {
 			UUID publicUuid = UUID.randomUUID();
 			when(invitationRepository.findByPublicUuid(publicUuid)).thenReturn(Optional.empty());
@@ -247,63 +258,89 @@ class UserInvitationServiceImplTest {
 	class GetPreflight {
 
 		@Test
-		@DisplayName("happy path — returns recipient + tenant name")
+		@DisplayName("happy path â€” returns recipient + tenant name")
 		void happyPath() {
 			UserInvitation invitation = newPendingInvitation("ada@acme.test");
 			Tenant tenant = newTenant("Acme Corp");
 			when(invitationRepository.findActiveByToken("tok123")).thenReturn(Optional.of(invitation));
 			when(tenantRepository.findById(invitation.getTenantId())).thenReturn(Optional.of(tenant));
 
-			InvitationPreflightResponse response = service.getPreflight("tok123");
+			InvitationPreflightResponse response = service.getPreflight("tok123", null);
 
 			assertThat(response.email()).isEqualTo("ada@acme.test");
 			assertThat(response.firstName()).isEqualTo("Ada");
 			assertThat(response.tenantName()).isEqualTo("Acme Corp");
+			assertThat(response.tenantSlug()).isEqualTo("acme");
 		}
 
 		@Test
-		@DisplayName("unknown token → ResourceNotFoundException (404)")
+		@DisplayName("unknown token â†’ ResourceNotFoundException (404)")
 		void unknownToken() {
 			when(invitationRepository.findActiveByToken("missing")).thenReturn(Optional.empty());
 
-			assertThatThrownBy(() -> service.getPreflight("missing"))
+			assertThatThrownBy(() -> service.getPreflight("missing", null))
 					.isInstanceOf(ResourceNotFoundException.class);
 		}
 
 		@Test
-		@DisplayName("accepted token → GoneException(INVITATION_ALREADY_ACCEPTED)")
+		@DisplayName("accepted token â†’ GoneException(INVITATION_ALREADY_ACCEPTED)")
 		void acceptedToken() {
 			UserInvitation invitation = newPendingInvitation("ada@acme.test");
 			invitation.markAccepted(Instant.now().minusSeconds(60));
 			when(invitationRepository.findActiveByToken("tok")).thenReturn(Optional.of(invitation));
 
-			assertThatThrownBy(() -> service.getPreflight("tok"))
+			assertThatThrownBy(() -> service.getPreflight("tok", null))
 					.isInstanceOfSatisfying(GoneException.class,
 							ex -> assertThat(ex.getCode()).isEqualTo("INVITATION_ALREADY_ACCEPTED"));
 		}
 
 		@Test
-		@DisplayName("cancelled token → GoneException(INVITATION_CANCELLED)")
+		@DisplayName("cancelled token â†’ GoneException(INVITATION_CANCELLED)")
 		void cancelledToken() {
 			UserInvitation invitation = newPendingInvitation("ada@acme.test");
 			invitation.markCancelled(Instant.now().minusSeconds(30));
 			when(invitationRepository.findActiveByToken("tok")).thenReturn(Optional.of(invitation));
 
-			assertThatThrownBy(() -> service.getPreflight("tok"))
+			assertThatThrownBy(() -> service.getPreflight("tok", null))
 					.isInstanceOfSatisfying(GoneException.class,
 							ex -> assertThat(ex.getCode()).isEqualTo("INVITATION_CANCELLED"));
 		}
 
 		@Test
-		@DisplayName("expired token → GoneException(INVITATION_EXPIRED)")
+		@DisplayName("expired token â†’ GoneException(INVITATION_EXPIRED)")
 		void expiredToken() {
 			UserInvitation invitation = newPendingInvitation("ada@acme.test");
 			invitation.setExpiresAt(Instant.now().minusSeconds(1));
 			when(invitationRepository.findActiveByToken("tok")).thenReturn(Optional.of(invitation));
 
-			assertThatThrownBy(() -> service.getPreflight("tok"))
+			assertThatThrownBy(() -> service.getPreflight("tok", null))
 					.isInstanceOfSatisfying(GoneException.class,
 							ex -> assertThat(ex.getCode()).isEqualTo("INVITATION_EXPIRED"));
+		}
+
+		@Test
+		@DisplayName("claimed tenant != invitation tenant -> ForbiddenException(INVITATION_TENANT_MISMATCH)")
+		void tenantMismatchRejected() {
+			UserInvitation invitation = newPendingInvitation("ada@acme.test");
+			Tenant tenant = newTenant("Acme Corp");
+			when(invitationRepository.findActiveByToken("tok123")).thenReturn(Optional.of(invitation));
+			when(tenantRepository.findById(invitation.getTenantId())).thenReturn(Optional.of(tenant));
+
+			assertThatThrownBy(() -> service.getPreflight("tok123", "demo"))
+					.isInstanceOfSatisfying(ForbiddenException.class,
+							ex -> assertThat(ex.getCode()).isEqualTo("INVITATION_TENANT_MISMATCH"));
+		}
+
+		@Test
+		@DisplayName("claimed tenant matches invitation -> OK")
+		void tenantClaimMatches() {
+			UserInvitation invitation = newPendingInvitation("ada@acme.test");
+			Tenant tenant = newTenant("Acme Corp");
+			when(invitationRepository.findActiveByToken("tok123")).thenReturn(Optional.of(invitation));
+			when(tenantRepository.findById(invitation.getTenantId())).thenReturn(Optional.of(tenant));
+
+			InvitationPreflightResponse response = service.getPreflight("tok123", "Acme");
+			assertThat(response.tenantSlug()).isEqualTo("acme");
 		}
 	}
 
@@ -316,7 +353,7 @@ class UserInvitationServiceImplTest {
 	class AcceptInvitation {
 
 		@Test
-		@DisplayName("happy path — creates user with invited roles + marks invitation accepted + issues session")
+		@DisplayName("happy path â€” creates user with invited roles + marks invitation accepted + issues session")
 		void happyPath() {
 			UUID invitationId = UUID.randomUUID();
 			UserInvitation invitation = newPendingInvitation("teach@acme.test");
@@ -351,7 +388,7 @@ class UserInvitationServiceImplTest {
 		}
 
 		@Test
-		@DisplayName("expired token → GoneException, no user created")
+		@DisplayName("expired token â†’ GoneException, no user created")
 		void expiredTokenRejected() {
 			UserInvitation invitation = newPendingInvitation("teach@acme.test");
 			invitation.setExpiresAt(Instant.now().minusSeconds(1));
@@ -366,7 +403,7 @@ class UserInvitationServiceImplTest {
 		}
 
 		@Test
-		@DisplayName("unknown token → ResourceNotFoundException, no DB writes")
+		@DisplayName("unknown token â†’ ResourceNotFoundException, no DB writes")
 		void unknownTokenRejected() {
 			when(invitationRepository.findActiveByToken("missing")).thenReturn(Optional.empty());
 
@@ -375,6 +412,23 @@ class UserInvitationServiceImplTest {
 					.isInstanceOf(ResourceNotFoundException.class);
 
 			verify(userRepository, never()).saveAndFlush(any(User.class));
+		}
+
+		@Test
+		@DisplayName("tenantSlug mismatch -> ForbiddenException, no user created")
+		void tenantMismatchRejected() {
+			UserInvitation invitation = newPendingInvitation("teach@acme.test");
+			Tenant tenant = newTenant("Acme Corp");
+			when(invitationRepository.findActiveByToken("tok")).thenReturn(Optional.of(invitation));
+			when(tenantRepository.findById(invitation.getTenantId())).thenReturn(Optional.of(tenant));
+
+			assertThatThrownBy(() -> service.acceptInvitation(
+					new AcceptInvitationRequest("tok", "Sup3rSecret!", "demo")))
+					.isInstanceOfSatisfying(ForbiddenException.class,
+							ex -> assertThat(ex.getCode()).isEqualTo("INVITATION_TENANT_MISMATCH"));
+
+			verify(userRepository, never()).saveAndFlush(any(User.class));
+			verify(authService, never()).issueSession(any(), any());
 		}
 	}
 

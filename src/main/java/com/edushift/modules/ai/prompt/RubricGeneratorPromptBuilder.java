@@ -111,7 +111,8 @@ public class RubricGeneratorPromptBuilder {
                 /* maxTokens    */ 2048,
                 /* stopSeqs     */ null,
                 /* extra        */ Map.of(
-                        "response_format", Map.of("type", "json_object")
+                        "response_format", Map.of("type", "json_object"),
+                        "thinking", Map.of("type", "disabled")
                 )
         );
     }

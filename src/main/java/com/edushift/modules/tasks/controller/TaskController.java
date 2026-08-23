@@ -50,11 +50,21 @@ import org.springframework.web.bind.annotation.RestController;
  *       <td>/tasks/{publicUuid}</td>
  *       <td>LMS_TASK_CREATE (owner / admin)</td>
  *       <td>{@link TaskResponse} (200)</td></tr>
+ *   <tr><td>POST</td>
+ *       <td>/tasks/{publicUuid}/publish</td>
+ *       <td>LMS_TASK_CREATE</td>
+ *       <td>{@link TaskResponse} (200)</td></tr>
+ *   <tr><td>POST</td>
+ *       <td>/tasks/{publicUuid}/archive</td>
+ *       <td>LMS_TASK_CREATE</td>
+ *       <td>{@link TaskResponse} (200)</td></tr>
  *   <tr><td>DELETE</td>
  *       <td>/tasks/{publicUuid}</td>
  *       <td>LMS_TASK_CREATE (owner / admin)</td>
  *       <td>(204)</td></tr>
  * </table>
+ *
+ * <p>Publish/archive added as part of BUG-2026-07-31-04.
  */
 @RestController
 @RequiredArgsConstructor
@@ -93,11 +103,25 @@ public class TaskController {
 
 	@PatchMapping("/tasks/{publicUuid}")
 	@PreAuthorize("hasAuthority('LMS_TASK_CREATE')")
-	@Operation(summary = "Patch a task (title, description, dueAt, attachment, allowResubmission)")
+	@Operation(summary = "Patch a task (title, description, dueAt, attachment, allowResubmission). Only allowed in DRAFT.")
 	public ApiResponse<TaskResponse> patch(
 			@PathVariable UUID publicUuid,
 			@Valid @RequestBody UpdateTaskRequest request) {
 		return ApiResponse.ok(taskService.patch(publicUuid, request));
+	}
+
+	@PostMapping("/tasks/{publicUuid}/publish")
+	@PreAuthorize("hasAuthority('LMS_TASK_CREATE')")
+	@Operation(summary = "Publish a DRAFT task (sets status=PUBLISHED, publishedAt=now). BUG-2026-07-31-04.")
+	public ApiResponse<TaskResponse> publish(@PathVariable UUID publicUuid) {
+		return ApiResponse.ok(taskService.publish(publicUuid));
+	}
+
+	@PostMapping("/tasks/{publicUuid}/archive")
+	@PreAuthorize("hasAuthority('LMS_TASK_CREATE')")
+	@Operation(summary = "Archive a PUBLISHED task (sets status=ARCHIVED, archivedAt=now). BUG-2026-07-31-04.")
+	public ApiResponse<TaskResponse> archive(@PathVariable UUID publicUuid) {
+		return ApiResponse.ok(taskService.archive(publicUuid));
 	}
 
 	@DeleteMapping("/tasks/{publicUuid}")

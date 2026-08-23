@@ -33,6 +33,10 @@ import org.springframework.transaction.annotation.Transactional;
  * documented).</p>
  */
 @Component
+@org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(
+        name = "app.reports.processor.enabled",
+        havingValue = "true",
+        matchIfMissing = true)
 @RequiredArgsConstructor
 @Slf4j
 public class ReportJobProcessor {
@@ -46,6 +50,8 @@ public class ReportJobProcessor {
     /**
      * Run every 15s. Tighter than the email outbox (reports are
      * user-initiated, not volume-driven, so a faster loop is friendlier).
+     * Set {@code app.reports.processor.enabled=false} to pause the worker
+     * without losing the bean from the context (no-op tick).
      */
     @Scheduled(fixedDelayString = "${app.reports.process-interval:15000}",
                initialDelay = 10_000)

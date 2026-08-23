@@ -250,9 +250,8 @@ class AnnouncementAudienceResolverIT extends IntegrationTest {
         });
 
         // SECTION audience: student (via student_enrollments) + teacher
-        // (via teacher_assignments). The V75 SECTION query referenced a
-        // non-existent s.section_id — V77 fixes that via the pivot
-        // tables.
+        // (via teacher_assignments). audienceIds are sections.public_uuid
+        // (FE contract); the resolver JOINs sections to map to internal PK.
         Announcement bySection = new Announcement();
         bySection.setTenantId(b.tenant.getId());
         bySection.setAuthorUserId(b.admin.getPublicUuid());
@@ -277,9 +276,8 @@ class AnnouncementAudienceResolverIT extends IntegrationTest {
         });
 
         // COURSE audience: only the teacher (no direct student→course
-        // enrollment; students are enrolled in sections). The V75
-        // COURSE query referenced t.course_id (also non-existent) —
-        // V77 fixes via teacher_assignments.course_id.
+        // enrollment; students are enrolled in sections). audienceIds
+        // are courses.public_uuid (FE contract); resolver JOINs courses.
         Announcement byCourse = new Announcement();
         byCourse.setTenantId(b.tenant.getId());
         byCourse.setAuthorUserId(b.admin.getPublicUuid());

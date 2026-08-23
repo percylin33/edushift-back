@@ -6,6 +6,7 @@ import com.edushift.modules.tasks.dto.CreateTaskRequest;
 import com.edushift.modules.tasks.dto.TaskResponse;
 import com.edushift.modules.tasks.dto.TaskSummary;
 import com.edushift.modules.tasks.dto.UpdateTaskRequest;
+import com.edushift.modules.tasks.entity.TaskStatus;
 import java.lang.reflect.Method;
 import java.time.Instant;
 import java.util.UUID;
@@ -43,7 +44,7 @@ class TaskServiceTest {
 
         // Reference for compile-time type assertions
         TaskSummary ts = new TaskSummary(UUID.randomUUID(), "t",
-                Instant.now(), false, UUID.randomUUID(), Instant.now());
+                Instant.now(), false, UUID.randomUUID(), TaskStatus.DRAFT, Instant.now());
         assertThat(ts.title()).isEqualTo("t");
     }
 }

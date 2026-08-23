@@ -1,7 +1,9 @@
 package com.edushift.modules.notifications.controller;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.BDDMockito.given;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -30,7 +32,13 @@ class NotificationControllerTest {
     @MockitoBean TenantResolver tenantResolver;
     @MockitoBean JwtService jwtService; @MockitoBean LmsRoleAuthorityMapper roleAuthorityMapper;
     private static JwtAuthenticationToken auth() { return new JwtAuthenticationToken(new JwtAuthenticatedPrincipal(UUID.randomUUID(), UUID.randomUUID(), "a", "a@t"), "t", List.of(new SimpleGrantedAuthority("ROLE_STUDENT"))); }
-    @Test void list() throws Exception { given(currentUserProvider.currentUserId()).willReturn(Optional.of(UUID.randomUUID())); mockMvc.perform(get("/v1/notifications").with(authentication(auth()))).andExpect(status().isOk()); }
+    @Test void list() throws Exception {
+        given(currentUserProvider.currentUserId()).willReturn(Optional.of(UUID.randomUUID()));
+        given(notificationService.listForUser(any(), anyBoolean(), any()))
+                .willReturn(org.springframework.data.domain.Page.empty());
+        mockMvc.perform(get("/v1/notifications").with(authentication(auth())))
+                .andExpect(status().isOk());
+    }
     @Test void unreadCount() throws Exception { given(currentUserProvider.currentUserId()).willReturn(Optional.of(UUID.randomUUID())); given(notificationService.countUnread(any())).willReturn(5L); mockMvc.perform(get("/v1/notifications/unread-count").with(authentication(auth()))).andExpect(status().isOk()); }
-    @Test void markRead() throws Exception { given(currentUserProvider.currentUserId()).willReturn(Optional.of(UUID.randomUUID())); given(notificationService.markRead(any(), any())).willReturn(true); mockMvc.perform(patch("/v1/notifications/{id}/read", UUID.randomUUID()).with(authentication(auth()))).andExpect(status().isOk()); }
+    @Test void markRead() throws Exception { given(currentUserProvider.currentUserId()).willReturn(Optional.of(UUID.randomUUID())); given(notificationService.markRead(any(), any())).willReturn(true); mockMvc.perform(patch("/v1/notifications/{id}/read", UUID.randomUUID()).with(csrf()).with(authentication(auth()))).andExpect(status().isOk()); }
 }

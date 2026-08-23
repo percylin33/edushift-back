@@ -37,9 +37,15 @@ public class MiniMaxProperties {
     /** API key. Provide via MINIMAX_API_KEY (never hardcoded). */
     private String apiKey;
 
-    private String baseUrl = "https://api.minimax.chat/v1";
+    /**
+     * OpenAI-compatible chat completions base URL (oficial, según
+     * docs https://platform.minimax.io/docs/guides/quickstart-preparation.md).
+     * Anthropic-compatible alternativo: {@code https://api.minimax.io/anthropic}.
+     */
+    private String baseUrl = "https://api.minimax.io/v1";
 
-    /** Default model identifier (e.g. {@code MiniMax-M3}). */
+    /** Default model identifier (per docs oficiales: {@code MiniMax-M3},
+     *  otros válidos: MiniMax-M2.7, MiniMax-M2.7-highspeed, MiniMax-M2.5, etc). */
     private String defaultModel = "MiniMax-M3";
 
     private Duration timeout = Duration.ofSeconds(30);

@@ -35,7 +35,7 @@ import org.springframework.web.bind.annotation.RestController;
  * {@link UnsubscribePageRenderer}.
  */
 @RestController
-@RequestMapping("/api/v1/unsubscribe")
+@RequestMapping("/unsubscribe")
 @RequiredArgsConstructor
 public class UnsubscribeController {
 

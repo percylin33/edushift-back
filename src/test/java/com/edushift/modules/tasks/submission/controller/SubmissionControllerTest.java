@@ -1,5 +1,7 @@
 package com.edushift.modules.tasks.submission.controller;
 
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.BDDMockito.given;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -10,11 +12,15 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.edushift.modules.auth.security.JwtAuthenticatedPrincipal;
 import com.edushift.modules.auth.security.JwtAuthenticationToken;
 import com.edushift.modules.auth.service.JwtService;
+import com.edushift.modules.tasks.submission.dto.SubmissionResponse;
+import com.edushift.modules.tasks.submission.entity.SubmissionStatus;
 import com.edushift.modules.tasks.submission.service.SubmissionService;
 import com.edushift.shared.security.CurrentUserProvider;
 import com.edushift.shared.security.LmsRoleAuthorityMapper;
 import com.edushift.shared.multitenancy.TenantResolver;
+import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -26,7 +32,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.context.annotation.Import;
 
 @WebMvcTest(SubmissionController.class)
-@Import(com.edushift.test.EdushiftWebMvcTestConfig.class)
+@Import({com.edushift.test.EdushiftWebMvcTestConfig.class, com.edushift.test.TestSecurityConfig.class})
 class SubmissionControllerTest {
     @Autowired MockMvc mockMvc;
     @MockitoBean SubmissionService submissionService;
@@ -51,6 +57,12 @@ class SubmissionControllerTest {
 
     @Test
     void submitHappyPath() throws Exception {
+        given(currentUserProvider.currentUserId()).willReturn(Optional.of(UUID.randomUUID()));
+        given(submissionService.submit(any(), any(), any())).willReturn(
+                new SubmissionResponse(
+                        UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(),
+                        null, null, SubmissionStatus.SUBMITTED, null, null, null, null,
+                        false, Instant.now(), Instant.now()));
         mockMvc.perform(post("/v1/tasks/{tid}/submissions", UUID.randomUUID())
                         .with(csrf()).with(authentication(submitter()))
                         .content("{\"studentPublicUuid\":\"" + UUID.randomUUID() + "\"}")
@@ -89,7 +101,7 @@ class SubmissionControllerTest {
                                 new JwtAuthenticatedPrincipal(
                                         UUID.randomUUID(), UUID.randomUUID(), "a", "a@t"),
                                 "t", List.<SimpleGrantedAuthority>of())))
-                        .content("{}")
+                        .content("{\"studentPublicUuid\":\"" + UUID.randomUUID() + "\"}")
                         .contentType(MediaType.APPLICATION_JSON))
                 .andExpect(status().isForbidden());
     }

@@ -40,6 +40,18 @@ class AiChatSessionEntityTest {
     }
 
     @Test
+    @DisplayName("markDeleted sets deletedAt; restore clears it")
+    void markDeletedLifecycle() {
+        var s = new AiChatSession();
+        s.markDeleted();
+        assertThat(s.isDeleted()).isTrue();
+        assertThat(s.getDeletedAt()).isNotNull();
+        s.restore();
+        assertThat(s.isDeleted()).isFalse();
+        assertThat(s.getDeletedAt()).isNull();
+    }
+
+    @Test
     @DisplayName("publicUuid populated on first save")
     void publicUuid() {
         var s = new AiChatSession();

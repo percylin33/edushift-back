@@ -1,9 +1,13 @@
 package com.edushift.modules.users.dto;
 
+import com.edushift.modules.students.entity.DocumentType;
+import com.edushift.shared.validation.IdentityDocumentFields;
+import com.edushift.shared.validation.annotations.ValidIdentityDocument;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 import java.util.Map;
 import java.util.Set;
@@ -22,7 +26,13 @@ import java.util.Set;
  * domain modules (e.g. teachers) attach ids to be reacted on at accept
  * time. The public {@code POST /v1/users/invitations} controller does
  * NOT bind this field — only internal callers may set it.</p>
+ *
+ * <p>{@code documentType}/{@code documentNumber} are required so the
+ * admin commits to a legal identity at invite time — the manual lists
+ * document as a basic profile field and nameless/id-less accounts are
+ * an antipattern in K-12 audit trails.</p>
  */
+@ValidIdentityDocument
 public record CreateInvitationRequest(
 		@NotBlank(message = "email is required")
 		@Email(message = "email must be a valid address")
@@ -41,20 +51,30 @@ public record CreateInvitationRequest(
 		@NotEmpty(message = "roles must contain at least one role")
 		Set<String> roles,
 
+		@NotNull(message = "documentType is required")
+		DocumentType documentType,
+
+		@NotBlank(message = "documentNumber is required")
+		@Size(min = 4, max = 20, message = "documentNumber length out of range")
+		@Pattern(regexp = "^[A-Za-z0-9-]+$",
+				message = "documentNumber must contain only letters, digits, and dashes")
+		String documentNumber,
+
 		/**
 		 * Optional. Internal-only side-channel; the public REST
 		 * controller binds {@code null} for this field — see
 		 * {@code UserInvitationController.create}.
 		 */
 		Map<String, Object> metadata
-) {
+) implements IdentityDocumentFields {
 
 	/**
 	 * Convenience constructor for the common case where there is no
-	 * metadata payload (Sprint 3 callers and the public API).
+	 * metadata payload (public API and admin UI).
 	 */
 	public CreateInvitationRequest(String email, String firstName,
-			String lastName, Set<String> roles) {
-		this(email, firstName, lastName, roles, null);
+			String lastName, Set<String> roles,
+			DocumentType documentType, String documentNumber) {
+		this(email, firstName, lastName, roles, documentType, documentNumber, null);
 	}
 }

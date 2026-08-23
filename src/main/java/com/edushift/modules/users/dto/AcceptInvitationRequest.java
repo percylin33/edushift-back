@@ -15,6 +15,11 @@ import jakarta.validation.constraints.Size;
  * attacker cannot bypass the {@code @StrongPassword} composite rule by
  * picking a weak password during invitation acceptance.
  *
+ * <p>{@code tenantSlug} is the school claim from the accept URL
+ * ({@code ?tenant=}). When present it <em>must</em> match the
+ * invitation's tenant (UAT-CD-11). When omitted, the invitation token
+ * alone remains the source of truth (legacy / email clients).
+ *
  * <p>Closes DEBT-USR-2: the previous {@code @Size(min=8)} only enforced
  * length, allowing trivial passwords like {@code "12345678"} on
  * invitation-accept.
@@ -25,6 +30,14 @@ public record AcceptInvitationRequest(
 		String token,
 
 		@ValidPassword
-		String password
+		String password,
+
+		@Size(max = 80, message = "tenantSlug must not exceed 80 characters")
+		String tenantSlug
 ) {
+	/** Backward-compatible ctor for callers that only send token + password. */
+	public AcceptInvitationRequest(String token, String password) {
+		this(token, password, null);
+	}
 }
+

@@ -21,6 +21,44 @@ public interface AnnouncementRepository extends JpaRepository<Announcement, UUID
             """)
     Page<Announcement> findPublished(Pageable pageable);
 
+    /**
+     * DEBT-STUDENT-PRIVACY (Fase 0.1): list PUBLISHED announcements that are
+     * actually targeted at the given user (and tenant).
+     *
+     * <p>Visibility logic:</p>
+     * <ul>
+     *   <li>{@code audience_type = SCHOOL} → visible to every authenticated
+     *       user in the tenant.</li>
+     *   <li>any other audience → visible only if a row exists in
+     *       {@code announcement_recipients} for the user. The
+     *       {@code publish()} path already inserts one row per
+     *       resolved user (via {@code AnnouncementAudienceResolver}), so
+     *       this JOIN is the canonical audience filter.</li>
+     * </ul>
+     *
+     * <p>Both predicates include the manual {@code tenant_id} check as
+     * defence-in-depth even though Hibernate's {@code @TenantId} filter
+     * is applied automatically.</p>
+     */
+    @Query("""
+            SELECT DISTINCT a FROM Announcement a
+            WHERE a.status = com.edushift.modules.notifications.entity.Announcement.Status.PUBLISHED
+              AND a.tenantId = :tenantId
+              AND (
+                a.audienceType = com.edushift.modules.notifications.entity.Announcement.AudienceType.SCHOOL
+                OR EXISTS (
+                  SELECT 1 FROM AnnouncementRecipient r
+                  WHERE r.announcementId = a.id
+                    AND r.userId = :userId
+                )
+              )
+            ORDER BY a.publishedAt DESC
+            """)
+    Page<Announcement> findPublishedForUser(
+            @Param("tenantId") UUID tenantId,
+            @Param("userId") UUID userId,
+            Pageable pageable);
+
     @Query("""
             SELECT a FROM Announcement a
             ORDER BY a.createdAt DESC

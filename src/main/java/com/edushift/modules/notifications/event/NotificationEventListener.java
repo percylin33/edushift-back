@@ -5,6 +5,7 @@ import com.edushift.modules.notifications.entity.Notification.Channel;
 import com.edushift.modules.notifications.realtime.RealtimeService;
 import com.edushift.modules.notifications.service.NotificationService;
 import com.edushift.modules.notifications.service.NotificationService.NotifyCommand;
+import com.edushift.modules.notifications.service.RecipientEmailResolver;
 import com.edushift.shared.multitenancy.TenantContext;
 import java.util.List;
 import java.util.function.Supplier;
@@ -56,6 +57,7 @@ public class NotificationEventListener {
 
 	private final NotificationService notificationService;
 	private final RealtimeService realtime;
+	private final RecipientEmailResolver recipientEmailResolver;
 
 	@Async
 	@TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
@@ -81,7 +83,7 @@ public class NotificationEventListener {
 								// resolver was removed. Recipient.userId is
 								// users(public_uuid), the FK target.
 								.recipient(r.userId())
-								.email(r.email())
+								.email(recipientEmailResolver.resolveOrFallback(r.userId(), r.email()))
 								.template(event.templateKey())
 								.category(event.category())
 								.channel(Channel.BOTH)

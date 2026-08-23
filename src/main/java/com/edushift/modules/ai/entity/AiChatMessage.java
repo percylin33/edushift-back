@@ -2,6 +2,7 @@ package com.edushift.modules.ai.entity;
 
 import com.edushift.shared.domain.TenantAwareEntity;
 import jakarta.persistence.Column;
+import jakarta.persistence.Convert;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
@@ -65,7 +66,7 @@ public class AiChatMessage extends TenantAwareEntity {
     @Column(name = "chat_session_id", nullable = false)
     private UUID chatSessionId;
 
-    @Enumerated(EnumType.STRING)
+    @Convert(converter = AiChatRoleConverter.class)
     @Column(name = "role", nullable = false, length = 20)
     private Role role;
 

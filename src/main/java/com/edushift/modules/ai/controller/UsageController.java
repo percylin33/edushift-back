@@ -7,7 +7,7 @@ import com.edushift.modules.ai.entity.TenantAiSettings;
 import com.edushift.modules.ai.repository.TenantAiSettingsRepository;
 import com.edushift.modules.ai.repository.TenantAiUsageRepository;
 import com.edushift.modules.ai.repository.TenantAiUsageRepository.DailyUsageRow;
-import com.edushift.modules.ai.repository.TenantAiUsageRepository.FeatureUsageRow;
+import com.edushift.modules.ai.service.AiTenantKeyResolver;
 import com.edushift.shared.multitenancy.TenantContext;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -54,20 +54,21 @@ import org.springframework.web.bind.annotation.RestController;
  * {@code @TenantId} — no cross-tenant leak possible.
  */
 @RestController
-@RequestMapping("/v1/ai/usage")
+@RequestMapping({"/ai/usage", "/lms/ai/v1/ai/usage"})
 @RequiredArgsConstructor
 @Tag(name = "AI usage", description = "TENANT_ADMIN dashboard for AI quota + history (Sprint 8 / BE-8.4)")
 public class UsageController {
 
     private final TenantAiUsageRepository usageRepo;
     private final TenantAiSettingsRepository settingsRepo;
+    private final AiTenantKeyResolver aiTenantKeyResolver;
 
     @GetMapping("/summary")
     @PreAuthorize("hasAuthority('LMS_AI_USAGE')")
     @Operation(summary = "One-shot summary: quota meter + by-feature + daily history for the current UTC month")
     public ResponseEntity<UsageSummaryResponse> summary() {
-        UUID tenantId = TenantContext.currentRequired();
-        TenantAiSettings settings = settingsRepo.findFirstByOrderByIdAsc().orElse(null);
+        UUID tenantId = aiTenantKeyResolver.resolve(TenantContext.currentRequired());
+        TenantAiSettings settings = settingsRepo.findActiveByTenantId(tenantId).orElse(null);
 
         // Period bounds: first day of the UTC month .. day after the last.
         LocalDate periodStart = LocalDate.now(java.time.ZoneOffset.UTC).withDayOfMonth(1);
@@ -116,7 +117,7 @@ public class UsageController {
     public ResponseEntity<Page<DailyUsage>> daily(
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "31") int size) {
-        UUID tenantId = TenantContext.currentRequired();
+        UUID tenantId = aiTenantKeyResolver.resolve(TenantContext.currentRequired());
         int safeSize = Math.min(Math.max(size, 1), 90);
         Page<DailyUsageRow> raw = usageRepo.findDailyUsageThisMonth(tenantId,
                 PageRequest.of(page, safeSize));
@@ -136,7 +137,7 @@ public class UsageController {
     public ResponseEntity<String> exportCsv(
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "90") int size) {
-        UUID tenantId = TenantContext.currentRequired();
+        UUID tenantId = aiTenantKeyResolver.resolve(TenantContext.currentRequired());
         int safeSize = Math.min(Math.max(size, 1), 365);
         Page<DailyUsageRow> raw = usageRepo.findDailyUsageThisMonth(tenantId,
                 PageRequest.of(page, safeSize));

@@ -39,7 +39,7 @@ class StudentDtoTest {
                 "Ana Diaz Perez", LocalDate.of(2015, 3, 1), Gender.FEMALE,
                 "ana@acme.test", "+51 999", "Av. Test",
                 EnrollmentStatus.ENROLLED, LocalDate.of(2026, 1, 1),
-                userId, Map.of("bloodType", "O+"),
+                userId, null, Map.of("bloodType", "O+"),
                 Instant.now(), Instant.now());
         assertThat(r.publicUuid()).isEqualTo(id);
         assertThat(r.secondLastName()).isEqualTo("Perez");
@@ -104,7 +104,7 @@ class StudentDtoTest {
         UUID guardId = UUID.randomUUID();
         var r = new GuardianResponse(linkId, guardId, DocumentType.DNI, "12345678",
                 "Ana", "Diaz", "Ana Diaz", "ana@acme.test", "+51 999", "Engineer",
-                RelationshipType.MOTHER, true, false);
+                RelationshipType.MOTHER, true, false, null, null);
         assertThat(r.linkPublicUuid()).isEqualTo(linkId);
         assertThat(r.guardianPublicUuid()).isEqualTo(guardId);
         assertThat(r.isPrimaryContact()).isTrue();

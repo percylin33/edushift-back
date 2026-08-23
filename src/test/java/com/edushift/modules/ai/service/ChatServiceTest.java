@@ -1,11 +1,16 @@
 package com.edushift.modules.ai.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.edushift.modules.ai.config.MiniMaxProperties;
 import com.edushift.modules.ai.entity.AiChatSession;
+import com.edushift.modules.ai.entity.TenantAiSettings;
+import com.edushift.modules.ai.exception.ChatSessionNotFoundException;
 import com.edushift.modules.ai.llm.LlmClient;
 import com.edushift.modules.ai.llm.LlmClient.LlmRequest;
 import com.edushift.modules.ai.llm.LlmClient.LlmResponse;
@@ -39,6 +44,7 @@ class ChatServiceTest {
     private RateLimitService rateLimitService;
     private PiiSafetyFilter piiFilter;
     private LlmClient llmClient;
+    private MiniMaxProperties miniMaxProperties;
     private ChatService service;
 
     private final UUID tenantId = UUID.randomUUID();
@@ -52,8 +58,10 @@ class ChatServiceTest {
         rateLimitService = mock(RateLimitService.class);
         piiFilter = new PiiSafetyFilter();
         llmClient = mock(LlmClient.class);
+        miniMaxProperties = new MiniMaxProperties();
+        miniMaxProperties.setDefaultModel("MiniMax-M3");
         service = new ChatService(sessionRepo, messageRepo, tenantCtx, quotaService,
-                rateLimitService, piiFilter, llmClient);
+                rateLimitService, piiFilter, llmClient, miniMaxProperties);
         TenantContext.set(tenantId);
     }
 
@@ -111,5 +119,49 @@ class ChatServiceTest {
 
         Optional<AiChatSession> out = service.getSession(pub);
         assertThat(out).isPresent().get().isSameAs(s);
+    }
+
+    @Test
+    @DisplayName("deleteSession: soft-deletes with deletedAt populated (chk_chat_sessions_deleted_at)")
+    void deleteSession_setsDeletedAt() {
+        UUID pub = UUID.randomUUID();
+        UUID userId = UUID.randomUUID();
+        AiChatSession s = new AiChatSession();
+        s.setPublicUuid(pub);
+        s.setUserId(userId);
+        when(sessionRepo.findByPublicUuid(pub)).thenReturn(Optional.of(s));
+        when(sessionRepo.save(any(AiChatSession.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        service.deleteSession(pub, userId);
+
+        ArgumentCaptor<AiChatSession> captor = ArgumentCaptor.forClass(AiChatSession.class);
+        verify(sessionRepo).save(captor.capture());
+        AiChatSession saved = captor.getValue();
+        assertThat(saved.isDeleted()).isTrue();
+        assertThat(saved.getDeletedAt()).isNotNull();
+        assertThat(saved.getStatus()).isEqualTo(AiChatSession.Status.DELETED);
+    }
+
+    @Test
+    @DisplayName("resolveChatModel: usa tenant default_model o fallback MiniMax-M3")
+    void resolveChatModel_usesTenantOrGlobalDefault() {
+        TenantAiSettings settings = new TenantAiSettings();
+        settings.setDefaultModel("MiniMax-M3");
+        assertThat(service.resolveChatModel(settings)).isEqualTo("MiniMax-M3");
+
+        settings.setDefaultModel("anthropic/claude-3.5-sonnet");
+        assertThat(service.resolveChatModel(settings)).isEqualTo("MiniMax-M3");
+    }
+
+    @Test
+    void deleteSession_wrongUserThrowsNotFound() {
+        UUID pub = UUID.randomUUID();
+        AiChatSession s = new AiChatSession();
+        s.setPublicUuid(pub);
+        s.setUserId(UUID.randomUUID());
+        when(sessionRepo.findByPublicUuid(pub)).thenReturn(Optional.of(s));
+
+        assertThatThrownBy(() -> service.deleteSession(pub, UUID.randomUUID()))
+                .isInstanceOf(ChatSessionNotFoundException.class);
     }
 }

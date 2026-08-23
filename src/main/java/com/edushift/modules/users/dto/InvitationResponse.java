@@ -1,5 +1,6 @@
 package com.edushift.modules.users.dto;
 
+import com.edushift.modules.students.entity.DocumentType;
 import com.edushift.modules.users.entity.InvitationStatus;
 import java.time.Instant;
 import java.util.Set;
@@ -25,6 +26,8 @@ public record InvitationResponse(
 		String email,
 		String firstName,
 		String lastName,
+		DocumentType documentType,
+		String documentNumber,
 		Set<String> roles,
 		InvitationStatus status,
 		String token,
@@ -40,7 +43,7 @@ public record InvitationResponse(
 	 */
 	public InvitationResponse withoutToken() {
 		return new InvitationResponse(
-				publicUuid, email, firstName, lastName, roles,
+				publicUuid, email, firstName, lastName, documentType, documentNumber, roles,
 				status, null, expiresAt, acceptedAt, cancelledAt, createdAt);
 	}
 }

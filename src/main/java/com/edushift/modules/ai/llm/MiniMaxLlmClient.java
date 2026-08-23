@@ -43,6 +43,8 @@ import org.springframework.stereotype.Component;
  */
 @Component
 @ConditionalOnProperty(prefix = "app.llm.minimax", name = "enabled", havingValue = "true")
+@org.springframework.boot.autoconfigure.condition.ConditionalOnExpression(
+        "!'${app.llm.minimax.api-key:}'.isEmpty()")
 public class MiniMaxLlmClient implements LlmClient {
 
     private static final Logger log = LoggerFactory.getLogger(LoggerNames.AI);
@@ -57,9 +59,16 @@ public class MiniMaxLlmClient implements LlmClient {
     public MiniMaxLlmClient(MiniMaxProperties props, ObjectMapper objectMapper) {
         this.props = props;
         if (props.getApiKey() == null || props.getApiKey().isBlank()) {
+            // Degradación defensiva: @ConditionalOnExpression arriba debería
+            // prevenir esto, pero si por algún motivo pasa, fallamos loud.
             throw new IllegalStateException(
-                    "app.llm.minimax.enabled=true but app.llm.minimax.api-key is empty");
+                    "app.llm.minimax.enabled=true pero app.llm.minimax.api-key está vacía. "
+                  + "Seteá MINIMAX_API_KEY en el environment o "
+                  + "MINIMAX_ENABLED=false para usar MockLlmClient.");
         }
+        log.info("[llm-config] Initializing MiniMaxLlmClient "
+                + "(model={}, base={}, timeout={})",
+                props.getDefaultModel(), props.getBaseUrl(), props.getTimeout());
         this.helper = new OpenAiHttpHelper(
                 objectMapper,
                 props.getBaseUrl(),

@@ -69,4 +69,20 @@ public interface StudentRepository extends JpaRepository<Student, UUID>,
 	 */
 	long countByTenantId(UUID tenantId);
 
+	/**
+	 * DEBT-STUDENT-PRIVACY (Fase 0.2): resolve the {@code Student.publicUuid}
+	 * linked to a given {@code users.publicUuid}. Used by the payments module
+	 * to widen the ownership check from
+	 * {@code invoices.guardian_user_id = me} to
+	 * {@code (invoices.guardian_user_id = me OR invoices.student_id = me.studentPublicUuid)},
+	 * so a STUDENT whose parents pay their invoices can still see them
+	 * in their personal "Mis pagos" view.
+	 *
+	 * <p>Returns empty if the user has no student record (PARENT, TEACHER,
+	 * etc.) — callers should treat that as "no student-side invoices".</p>
+	 */
+	default Optional<UUID> findPublicUuidByUserId(UUID userId) {
+		return findByUserId(userId).map(com.edushift.modules.students.entity.Student::getPublicUuid);
+	}
+
 }

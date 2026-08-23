@@ -40,7 +40,7 @@ class UserServicesInterfaceTest {
         var cancel = iface.getMethod("cancelInvitation", UUID.class);
         assertThat(cancel.getReturnType()).isEqualTo(InvitationResponse.class);
 
-        assertThat(iface.getMethod("getPreflight", String.class)
+        assertThat(iface.getMethod("getPreflight", String.class, String.class)
                 .getReturnType()).isEqualTo(InvitationPreflightResponse.class);
         assertThat(iface.getMethod("acceptInvitation", AcceptInvitationRequest.class)
                 .getReturnType()).isEqualTo(AuthResponse.class);

@@ -8,13 +8,16 @@ import com.edushift.modules.students.entity.DocumentType;
 import com.edushift.modules.students.entity.Guardian;
 import com.edushift.modules.students.entity.RelationshipType;
 import com.edushift.modules.students.entity.StudentGuardian;
+import com.edushift.modules.users.repository.UserInvitationRepository;
 import java.util.UUID;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.mockito.Mockito;
 
 class StudentGuardianMapperTest {
 
-	private final StudentGuardianMapper mapper = new StudentGuardianMapper();
+	private final StudentGuardianMapper mapper =
+			new StudentGuardianMapper(Mockito.mock(UserInvitationRepository.class));
 
 	@Test
 	@DisplayName("toResponse — collapses guardian + link into a single DTO")
@@ -51,6 +54,30 @@ class StudentGuardianMapperTest {
 		assertThat(response.relationship()).isEqualTo(RelationshipType.MOTHER);
 		assertThat(response.isPrimaryContact()).isTrue();
 		assertThat(response.canPickupStudent()).isTrue();
+		assertThat(response.userId()).isNull();
+		assertThat(response.pendingInvitationPublicUuid()).isNull();
+	}
+
+	@Test
+	@DisplayName("toProfileResponse — maps guardian identity without link fields")
+	void toProfileResponseMapsIdentity() {
+		Guardian g = new Guardian();
+		g.setPublicUuid(UUID.randomUUID());
+		g.setDocumentType(DocumentType.DNI);
+		g.setDocumentNumber("87654321");
+		g.setFirstName("Percy");
+		g.setLastName("Valderrama Arias");
+		g.setEmail("percy@test.com");
+		g.setPhone("+51 999");
+		g.setOccupation("Engineer");
+
+		var profile = mapper.toProfileResponse(g);
+
+		assertThat(profile.guardianPublicUuid()).isEqualTo(g.getPublicUuid());
+		assertThat(profile.documentNumber()).isEqualTo("87654321");
+		assertThat(profile.firstName()).isEqualTo("Percy");
+		assertThat(profile.lastName()).isEqualTo("Valderrama Arias");
+		assertThat(profile.fullName()).isEqualTo("Percy Valderrama Arias");
 	}
 
 	@Test

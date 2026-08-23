@@ -179,7 +179,8 @@ public interface AttendanceService {
 	 * @throws ResourceNotFoundException record not found or not in tenant
 	 * @throws BadRequestException record already has a non-null justification_status
 	 */
-	AttendanceRecordResponse justify(UUID recordPublicUuid, String justificationText);
+	AttendanceRecordResponse justify(
+			UUID recordPublicUuid, String justificationText, UUID attachmentPublicUuid);
 
 	/**
 	 * Approve or reject a pending justification (Sprint 18 / BE-18.5).

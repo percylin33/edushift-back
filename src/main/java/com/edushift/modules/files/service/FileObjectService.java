@@ -142,6 +142,13 @@ public class FileObjectService {
 		repository.delete(entity);
 	}
 
+	@Transactional(readOnly = true)
+	public FileObject getByPublicUuid(UUID publicUuid) {
+		return repository.findByPublicUuid(publicUuid)
+				.orElseThrow(() -> new com.edushift.modules.files.exception.FileNotFoundException(
+						publicUuid.toString()));
+	}
+
 	/**
 	 * Increment {@code reference_count} atomically. Called by
 	 * {@code lms_materials} and {@code lms_submissions} (BE-7a.1+)

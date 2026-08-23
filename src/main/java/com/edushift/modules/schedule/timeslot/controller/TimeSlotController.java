@@ -2,6 +2,7 @@ package com.edushift.modules.schedule.timeslot.controller;
 
 import com.edushift.modules.schedule.timeslot.dto.CreateTimeSlotRequest;
 import com.edushift.modules.schedule.timeslot.dto.ScheduleSlotItem;
+import com.edushift.modules.schedule.timeslot.dto.ScheduleWeekView;
 import com.edushift.modules.schedule.timeslot.dto.TimeSlotListItem;
 import com.edushift.modules.schedule.timeslot.dto.TimeSlotResponse;
 import com.edushift.modules.schedule.timeslot.dto.UpdateTimeSlotRequest;
@@ -178,5 +179,29 @@ public class TimeSlotController {
 			@RequestParam(name = "periodId", required = false) UUID periodId
 	) {
 		return ResponseEntity.ok(service.getSectionSchedule(sectionUuid, periodId));
+	}
+
+	@GetMapping("/teachers/{teacherUuid}/schedule/week")
+	@SecurityRequirement(name = "bearerAuth")
+	@PreAuthorize("hasAnyRole('TENANT_ADMIN','TEACHER')")
+	@Operation(summary = "Teacher weekly schedule with non-teaching blocks")
+	public ResponseEntity<ApiResponse<ScheduleWeekView>> teacherScheduleWeek(
+			@PathVariable UUID teacherUuid,
+			@RequestParam(name = "periodId", required = false) UUID periodId
+	) {
+		return ResponseEntity.ok(ApiResponse.ok(
+				service.getTeacherScheduleWeek(teacherUuid, periodId)));
+	}
+
+	@GetMapping("/academic/sections/{sectionUuid}/schedule/week")
+	@SecurityRequirement(name = "bearerAuth")
+	@PreAuthorize("hasRole('TENANT_ADMIN')")
+	@Operation(summary = "Section weekly schedule with non-teaching blocks")
+	public ResponseEntity<ApiResponse<ScheduleWeekView>> sectionScheduleWeek(
+			@PathVariable UUID sectionUuid,
+			@RequestParam(name = "periodId", required = false) UUID periodId
+	) {
+		return ResponseEntity.ok(ApiResponse.ok(
+				service.getSectionScheduleWeek(sectionUuid, periodId)));
 	}
 }

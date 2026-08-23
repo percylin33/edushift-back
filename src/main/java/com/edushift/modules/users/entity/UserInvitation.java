@@ -1,8 +1,11 @@
 package com.edushift.modules.users.entity;
 
 import com.edushift.shared.domain.TenantAwareEntity;
+import com.edushift.modules.students.entity.DocumentType;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import jakarta.persistence.Index;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.Table;
@@ -92,6 +95,13 @@ public class UserInvitation extends TenantAwareEntity {
 	@Column(name = "last_name", nullable = false, length = 100)
 	private String lastName;
 
+	@Enumerated(EnumType.STRING)
+	@Column(name = "document_type", length = 20)
+	private DocumentType documentType;
+
+	@Column(name = "document_number", length = 20)
+	private String documentNumber;
+
 	/** Roles to grant when this invitation is accepted. Mirrors {@code users.roles}. */
 	@JdbcTypeCode(SqlTypes.ARRAY)
 	@Column(name = "roles", nullable = false, columnDefinition = "varchar[]")
@@ -101,7 +111,7 @@ public class UserInvitation extends TenantAwareEntity {
 	 * Globally-unique opaque secret. Treat as a credential: never log it,
 	 * never include it in {@link #toString()}.
 	 */
-	@Column(name = "token", nullable = false, updatable = false, length = 64)
+	@Column(name = "token", nullable = false, length = 64)
 	private String token;
 
 	@Column(name = "expires_at", nullable = false)

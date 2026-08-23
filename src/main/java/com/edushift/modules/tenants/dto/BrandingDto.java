@@ -57,7 +57,17 @@ public record BrandingDto(
 				regexp = "^(https?://).+",
 				message = "loginBgUrl must start with http:// or https://"
 		)
-		String loginBgUrl
+		String loginBgUrl,
+
+		@Size(max = 120, message = "loginTitle exceeds 120 chars")
+		String loginTitle,
+
+		@Size(max = 500, message = "loginDescription exceeds 500 chars")
+		String loginDescription
 
 ) {
+	/** Compatibility ctor used by tests and older callers without login copy. */
+	public BrandingDto(String primaryColor, String logoUrl, String faviconUrl, String loginBgUrl) {
+		this(primaryColor, logoUrl, faviconUrl, loginBgUrl, null, null);
+	}
 }

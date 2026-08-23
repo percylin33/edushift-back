@@ -81,6 +81,25 @@ public final class LmsAuthorities {
 	// referenced the literal silently and always returned 403.
 	public static final String LMS_AI_USAGE = "LMS_AI_USAGE";
 
+	// Family portal permissions
+	public static final String LMS_FAMILY_READ = "LMS_FAMILY_READ";
+	public static final String LMS_ATTENDANCE_JUSTIFY = "LMS_ATTENDANCE_JUSTIFY";
+
+	// Student workspace (DEBT-STUDENT-PRIVACY / Fase 1-3): the
+	// /api/v1/me/* endpoints are the canonical STUDENT-facing surface
+	// (Mis cursos, Mis notas, Mi asistencia, Mi QR, Mis pagos, Mis
+	// justificaciones). Each sub-section has a fine-grained authority so
+	// tenants can disable access per-module via PermissionOverrideService
+	// (e.g. disable payments for K-6 segments) without affecting the
+	// rest of the LMS. Mirrored in
+	// edushift-front/.../core/enums/permission.enum.ts.
+	public static final String ME_READ = "ME_READ";
+	public static final String ME_ATTENDANCE_READ = "ME_ATTENDANCE_READ";
+	public static final String ME_ATTENDANCE_JUSTIFY = "ME_ATTENDANCE_JUSTIFY";
+	public static final String ME_QR_READ = "ME_QR_READ";
+	public static final String ME_PAYMENTS_READ = "ME_PAYMENTS_READ";
+	public static final String ME_PAYMENTS_CHECKOUT = "ME_PAYMENTS_CHECKOUT";
+
 	private LmsAuthorities() {
 		// utility class
 	}

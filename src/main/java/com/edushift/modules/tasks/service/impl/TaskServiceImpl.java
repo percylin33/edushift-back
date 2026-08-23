@@ -9,7 +9,9 @@ import com.edushift.modules.tasks.dto.TaskResponse;
 import com.edushift.modules.tasks.dto.TaskSummary;
 import com.edushift.modules.tasks.dto.UpdateTaskRequest;
 import com.edushift.modules.tasks.entity.Task;
+import com.edushift.modules.tasks.entity.TaskStatus;
 import com.edushift.modules.tasks.exception.DueAtInPastException;
+import com.edushift.modules.tasks.exception.InvalidTaskStateException;
 import com.edushift.modules.tasks.exception.RecordEmptyPatchException;
 import com.edushift.modules.tasks.exception.SectionNotFoundException;
 import com.edushift.modules.tasks.exception.TaskNotFoundException;
@@ -33,6 +35,16 @@ import org.springframework.transaction.annotation.Transactional;
  * All reads & writes go through {@code @TenantId}-filtered
  * repository methods; cross-tenant lookups resolve as 404
  * (anti-enumeration).
+ *
+ * <h3>Lifecycle</h3>
+ * <pre>
+ *   DRAFT ──publish──▶ PUBLISHED ──archive──▶ ARCHIVED
+ *     │                     │
+ *     │                     └── soft-delete (admin only)
+ *     └── soft-delete (owner / admin)
+ * </pre>
+ *
+ * <p>Lifecycle methods added as part of BUG-2026-07-31-04.
  */
 @Slf4j
 @Service
@@ -75,6 +87,7 @@ public class TaskServiceImpl implements TaskService {
 		entity.setAttachmentPublicUuid(attachmentPublicUuid);
 		entity.setOwnerUserId(ownerUserId);
 		entity.setAllowResubmission(true);
+		// status defaults to DRAFT in @PrePersist.
 		Task saved = taskRepository.save(entity);
 
 		// The task is the first consumer of the attached file.
@@ -115,6 +128,11 @@ public class TaskServiceImpl implements TaskService {
 		}
 		Task entity = requireTask(publicUuid);
 
+		// Lifecycle guard: PATCH is only allowed in DRAFT. Once
+		// PUBLISHED, the task is "frozen" for students and only
+		// archive is acceptable. (Same pattern as QuizServiceImpl.)
+		requireDraft(entity);
+
 		if (request.title() != null) {
 			entity.setTitle(request.title());
 		}
@@ -152,6 +170,39 @@ public class TaskServiceImpl implements TaskService {
 
 	@Override
 	@Transactional
+	public TaskResponse publish(UUID publicUuid) {
+		Task entity = requireTask(publicUuid);
+		if (entity.getStatus() != TaskStatus.DRAFT) {
+			throw InvalidTaskStateException.notDraft(
+					entity.getStatus() == null ? "null" : entity.getStatus().name());
+		}
+		entity.setStatus(TaskStatus.PUBLISHED);
+		entity.setPublishedAt(Instant.now());
+		Task saved = taskRepository.save(entity);
+		log.info("Task published publicUuid={}", publicUuid);
+		return taskMapper.toResponse(saved);
+	}
+
+	@Override
+	@Transactional
+	public TaskResponse archive(UUID publicUuid) {
+		Task entity = requireTask(publicUuid);
+		if (entity.getStatus() == TaskStatus.ARCHIVED) {
+			throw InvalidTaskStateException.alreadyArchived();
+		}
+		if (entity.getStatus() == TaskStatus.DRAFT) {
+			throw InvalidTaskStateException.notPublished(
+					entity.getStatus() == null ? "null" : entity.getStatus().name());
+		}
+		entity.setStatus(TaskStatus.ARCHIVED);
+		entity.setArchivedAt(Instant.now());
+		Task saved = taskRepository.save(entity);
+		log.info("Task archived publicUuid={}", publicUuid);
+		return taskMapper.toResponse(saved);
+	}
+
+	@Override
+	@Transactional
 	public void delete(UUID publicUuid) {
 		Task entity = requireTask(publicUuid);
 		UUID attachmentPublicUuid = entity.getAttachmentPublicUuid();
@@ -182,6 +233,13 @@ public class TaskServiceImpl implements TaskService {
 	private Section requireSection(UUID sectionPublicUuid) {
 		return sectionRepository.findByPublicUuid(sectionPublicUuid)
 				.orElseThrow(() -> new SectionNotFoundException(sectionPublicUuid.toString()));
+	}
+
+	private static void requireDraft(Task task) {
+		if (task.getStatus() != TaskStatus.DRAFT) {
+			throw InvalidTaskStateException.notDraft(
+					task.getStatus() == null ? "null" : task.getStatus().name());
+		}
 	}
 
 	private static void validateDueAt(Instant dueAt) {

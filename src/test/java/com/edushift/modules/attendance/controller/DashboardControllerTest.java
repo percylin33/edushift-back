@@ -1,4 +1,6 @@
 package com.edushift.modules.attendance.controller;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.BDDMockito.given;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -26,5 +28,10 @@ class DashboardControllerTest {
     @MockitoBean CurrentUserProvider currentUserProvider; @MockitoBean TenantResolver tenantResolver;
     @MockitoBean JwtService jwtService; @MockitoBean LmsRoleAuthorityMapper roleAuthorityMapper;
     private static JwtAuthenticationToken admin() { return new JwtAuthenticationToken(new JwtAuthenticatedPrincipal(UUID.randomUUID(), UUID.randomUUID(), "a", "a@t"), "t", List.of(new SimpleGrantedAuthority("ROLE_TENANT_ADMIN"))); }
-    @Test void overview() throws Exception { mockMvc.perform(get("/v1/attendance/dashboard/overview").with(authentication(admin()))).andExpect(status().isOk()); }
+    @Test void overview() throws Exception {
+        given(dashboardService.getOverview())
+                .willReturn(com.edushift.modules.attendance.dto.DashboardOverviewResponse.empty());
+        mockMvc.perform(get("/v1/attendance/dashboard/overview").with(authentication(admin())))
+                .andExpect(status().isOk());
+    }
 }

@@ -1,6 +1,8 @@
 package com.edushift.modules.students.service;
 
 import com.edushift.modules.students.dto.CreateStudentRequest;
+import com.edushift.modules.students.dto.InviteStudentResponse;
+import com.edushift.modules.students.dto.LinkStudentUserRequest;
 import com.edushift.modules.students.dto.StudentListFilters;
 import com.edushift.modules.students.dto.StudentListItem;
 import com.edushift.modules.students.dto.StudentResponse;
@@ -44,5 +46,11 @@ public interface StudentService {
 
 	/** Soft-deletes a student. Idempotent — already-deleted students surface as 404. */
 	void deleteStudent(UUID publicUuid);
+
+	/** Rescue: bind an existing STUDENT user to this ficha. */
+	StudentResponse linkUser(UUID publicUuid, LinkStudentUserRequest request);
+
+	/** Invite the student to claim a portal account (role STUDENT + metadata.studentId). */
+	InviteStudentResponse invite(UUID publicUuid);
 
 }

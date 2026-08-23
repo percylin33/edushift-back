@@ -225,6 +225,59 @@ class RubricGeneratorServiceTest {
             assertThat(completed.getResponseParsed().get("name"))
                     .isEqualTo("Rúbrica de Ensayo Argumentativo");
         }
+
+        @Test
+        @DisplayName("MiniMax-style <think> prefix → sanitized and parsed")
+        void redactedThinkingPrefixParsed() {
+            when(quotaService.verifyCanCall()).thenReturn(stubSettings());
+
+            String coreJson = """
+                    {
+                      "name": "Rúbrica de Ensayo Argumentativo",
+                      "description": "Evalúa ensayos.",
+                      "criteria": [
+                        {
+                          "key": "thesis_clarity",
+                          "name": "Claridad de tesis",
+                          "description": "d",
+                          "weight": 30.0,
+                          "descriptors": [
+                            { "level": "EN_INICIO", "text": "t1" },
+                            { "level": "EN_PROCESO", "text": "t2" },
+                            { "level": "LOGRO_ESPERADO", "text": "t3" },
+                            { "level": "LOGRO_DESTACADO", "text": "t4" }
+                          ]
+                        },
+                        {
+                          "key": "argument_quality",
+                          "name": "Calidad de argumentos",
+                          "description": "d",
+                          "weight": 70.0,
+                          "descriptors": [
+                            { "level": "EN_INICIO", "text": "t1" },
+                            { "level": "EN_PROCESO", "text": "t2" },
+                            { "level": "LOGRO_ESPERADO", "text": "t3" },
+                            { "level": "LOGRO_DESTACADO", "text": "t4" }
+                          ]
+                        }
+                      ],
+                      "levels": [
+                        { "code": "EN_INICIO",       "name": "En inicio",       "order": 0 },
+                        { "code": "EN_PROCESO",      "name": "En proceso",      "order": 1 },
+                        { "code": "LOGRO_ESPERADO",  "name": "Logro esperado",  "order": 2 },
+                        { "code": "LOGRO_DESTACADO", "name": "Logro destacado", "order": 3 }
+                      ]
+                    }
+                    """;
+            String llmJson = "<think>planning rubric levels...</think>\n" + coreJson;
+            when(llmClient.complete(any())).thenReturn(
+                    new LlmResponse(llmJson, "MiniMax-M3", 200, 400, 1500L));
+
+            RubricGeneratorService.RubricGeneratorResult result = service.generateRubric(baseRequest());
+
+            assertThat(result.rubric().name()).isEqualTo("Rúbrica de Ensayo Argumentativo");
+            assertThat(result.model()).isEqualTo("MiniMax-M3");
+        }
     }
 
     @Nested

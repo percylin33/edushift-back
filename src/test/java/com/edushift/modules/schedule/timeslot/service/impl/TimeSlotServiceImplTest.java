@@ -23,6 +23,9 @@ import com.edushift.modules.schedule.timeslot.dto.UpdateTimeSlotRequest;
 import com.edushift.modules.schedule.timeslot.entity.TimeSlot;
 import com.edushift.modules.schedule.timeslot.mapper.TimeSlotMapper;
 import com.edushift.modules.schedule.timeslot.repository.TimeSlotRepository;
+import com.edushift.modules.students.enrollments.entity.StudentEnrollment;
+import com.edushift.modules.students.enrollments.repository.StudentEnrollmentRepository;
+import com.edushift.modules.students.entity.Student;
 import com.edushift.modules.teachers.assignments.entity.TeacherAssignment;
 import com.edushift.modules.teachers.assignments.repository.TeacherAssignmentRepository;
 import com.edushift.modules.teachers.entity.Teacher;
@@ -67,6 +70,7 @@ class TimeSlotServiceImplTest {
 	@Mock private SectionRepository sectionRepository;
 	@Mock private AcademicPeriodRepository periodRepository;
 	@Mock private CurrentUserProvider currentUserProvider;
+	@Mock private StudentEnrollmentRepository enrollmentRepository;
 	@Spy private TimeSlotMapper mapper = new TimeSlotMapper();
 
 	@InjectMocks private TimeSlotServiceImpl service;
@@ -519,6 +523,49 @@ class TimeSlotServiceImplTest {
 			assertThat(result.get(0).section()).as(
 					"section block is null on section-centric view").isNull();
 			assertThat(result.get(0).teacher()).isNotNull();
+		}
+	}
+
+	@Nested
+	@DisplayName("getScheduleForStudent")
+	class PortalSchedule {
+
+		@Test
+		@DisplayName("returns 200-style empty list when the student has no enrollments")
+		void emptyEnrollments() {
+			Student student = new Student();
+			when(enrollmentRepository.findActiveByStudentFetchSection(student))
+					.thenReturn(List.of());
+
+			assertThat(service.getScheduleForStudent(student, null)).isEmpty();
+			verify(timeSlotRepository, never()).findAllByAssignmentInOrdered(any());
+		}
+
+		@Test
+		@DisplayName("maps teacher and section for portal slots")
+		void happyPathPopulatesTeacherAndSection() {
+			Student student = new Student();
+			Section section = newSection();
+			StudentEnrollment enrollment = new StudentEnrollment();
+			enrollment.setSection(section);
+			TeacherAssignment assignment = newAssignment(true);
+			assignment.setSection(section);
+			TimeSlot slot = newSlot(assignment, (short) 1,
+					LocalTime.of(8, 0), LocalTime.of(9, 0), "A-1");
+
+			when(enrollmentRepository.findActiveByStudentFetchSection(student))
+					.thenReturn(List.of(enrollment));
+			when(assignmentRepository.findAllBySectionActive(section, null))
+					.thenReturn(List.of(assignment));
+			when(timeSlotRepository.findAllByAssignmentInOrdered(List.of(assignment)))
+					.thenReturn(List.of(slot));
+
+			List<ScheduleSlotItem> result = service.getScheduleForStudent(student, null);
+
+			assertThat(result).hasSize(1);
+			assertThat(result.get(0).teacher()).isNotNull();
+			assertThat(result.get(0).section()).isNotNull();
+			assertThat(result.get(0).section().name()).isEqualTo("1ro A");
 		}
 	}
 

@@ -3,6 +3,8 @@ package com.edushift.modules.academic.levelgrade.entity;
 import com.edushift.shared.domain.TenantAwareEntity;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import jakarta.persistence.FetchType;
 import jakarta.persistence.Index;
 import jakarta.persistence.JoinColumn;
@@ -64,6 +66,15 @@ public class Grade extends TenantAwareEntity {
 	@Column(name = "ordinal", nullable = false)
 	private Integer ordinal;
 
+	/**
+	 * Assignment policy for sections of this grade (V103).
+	 * Defaults to {@link TeachingMode#POLIDOCENTE}; seed backfill sets
+	 * INICIAL/early PRIMARIA to {@link TeachingMode#MONODOCENTE}.
+	 */
+	@Enumerated(EnumType.STRING)
+	@Column(name = "teaching_mode", nullable = false, length = 20)
+	private TeachingMode teachingMode = TeachingMode.POLIDOCENTE;
+
 	@Column(name = "deleted_at")
 	private Instant deletedAt;
 
@@ -74,6 +85,9 @@ public class Grade extends TenantAwareEntity {
 		}
 		if (name != null) {
 			name = name.trim();
+		}
+		if (teachingMode == null) {
+			teachingMode = TeachingMode.POLIDOCENTE;
 		}
 	}
 

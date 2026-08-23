@@ -1,10 +1,13 @@
 package com.edushift.modules.attendance.controller;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.BDDMockito.given;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+import com.edushift.modules.attendance.dto.AttendanceSessionResponse;
 import com.edushift.modules.attendance.service.AttendanceService;
 import com.edushift.modules.auth.security.JwtAuthenticatedPrincipal;
 import com.edushift.modules.auth.security.JwtAuthenticationToken;
@@ -15,6 +18,7 @@ import com.edushift.shared.multitenancy.TenantResolver;
 import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
+import org.mockito.Mockito;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
@@ -31,7 +35,16 @@ class AttendanceControllerTest {
     @MockitoBean CurrentUserProvider currentUserProvider; @MockitoBean TenantResolver tenantResolver;
     @MockitoBean JwtService jwtService; @MockitoBean LmsRoleAuthorityMapper roleAuthorityMapper;
     private static JwtAuthenticationToken admin() { return new JwtAuthenticationToken(new JwtAuthenticatedPrincipal(UUID.randomUUID(), UUID.randomUUID(), "a", "a@t"), "t", List.of(new SimpleGrantedAuthority("ROLE_TENANT_ADMIN"))); }
-    @Test void openSession() throws Exception { mockMvc.perform(post("/v1/attendance/sessions").with(csrf()).with(authentication(admin())).content("{}")).andExpect(status().isCreated()); }
+    @Test void openSession() throws Exception {
+        AttendanceSessionResponse response = Mockito.mock(AttendanceSessionResponse.class);
+        given(response.wasIdempotent()).willReturn(false);
+        given(response.publicUuid()).willReturn(UUID.randomUUID());
+        given(attendanceService.openSession(any())).willReturn(response);
+        mockMvc.perform(post("/v1/attendance/sessions").with(csrf()).with(authentication(admin()))
+                        .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+                        .content("{\"sectionPublicUuid\":\"" + UUID.randomUUID() + "\",\"occurredOn\":\"2026-06-15\"}"))
+                .andExpect(status().isCreated());
+    }
     @Test void closeSession() throws Exception { mockMvc.perform(patch("/v1/attendance/sessions/{id}/close", UUID.randomUUID()).with(csrf()).with(authentication(admin()))).andExpect(status().isOk()); }
     @Test void listSessions() throws Exception { mockMvc.perform(get("/v1/attendance/sessions").with(authentication(admin()))).andExpect(status().isOk()); }
 }

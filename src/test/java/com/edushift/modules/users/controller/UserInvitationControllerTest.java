@@ -1,6 +1,8 @@
 package com.edushift.modules.users.controller;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.then;
 import static org.mockito.Mockito.never;
@@ -20,6 +22,7 @@ import com.edushift.modules.auth.entity.UserStatus;
 import com.edushift.modules.auth.security.JwtAuthenticatedPrincipal;
 import com.edushift.modules.auth.security.JwtAuthenticationToken;
 import com.edushift.modules.auth.service.JwtService;
+import com.edushift.modules.students.entity.DocumentType;
 import com.edushift.modules.users.dto.AcceptInvitationRequest;
 import com.edushift.modules.users.dto.CreateInvitationRequest;
 import com.edushift.modules.users.dto.InvitationPreflightResponse;
@@ -100,6 +103,8 @@ private static final String BASE = "/v1/users/invitations";
 				"teach@acme.test",
 				"Teach",
 				"Doe",
+				DocumentType.DNI,
+				"87654321",
 				Set.of("TEACHER"),
 				status,
 				token,
@@ -117,13 +122,14 @@ private static final String BASE = "/v1/users/invitations";
 	class Create {
 
 		@Test
-		@DisplayName("TENANT_ADMIN → 201 with token in the envelope")
+		@DisplayName("TENANT_ADMIN â†’ 201 with token in the envelope")
 		void happyPath() throws Exception {
 			given(service.createInvitation(any(CreateInvitationRequest.class)))
 					.willReturn(stubInvitation(InvitationStatus.PENDING, "secret-token-1"));
 
 			CreateInvitationRequest body = new CreateInvitationRequest(
-					"teach@acme.test", "Teach", "Doe", Set.of("TEACHER"));
+					"teach@acme.test", "Teach", "Doe", Set.of("TEACHER"),
+					DocumentType.DNI, "87654321");
 
 			mockMvc.perform(post(BASE)
 							.with(csrf())
@@ -137,14 +143,15 @@ private static final String BASE = "/v1/users/invitations";
 		}
 
 		@Test
-		@DisplayName("duplicate pending → 409 INVITATION_ALREADY_PENDING")
+		@DisplayName("duplicate pending â†’ 409 INVITATION_ALREADY_PENDING")
 		void duplicatePendingSurfacesAs409() throws Exception {
 			given(service.createInvitation(any()))
 					.willThrow(new ConflictException("INVITATION_ALREADY_PENDING",
 							"already pending"));
 
 			CreateInvitationRequest body = new CreateInvitationRequest(
-					"dup@acme.test", "Dup", "User", Set.of("TEACHER"));
+					"dup@acme.test", "Dup", "User", Set.of("TEACHER"),
+					DocumentType.DNI, "87654321");
 
 			mockMvc.perform(post(BASE)
 							.with(csrf())
@@ -156,10 +163,11 @@ private static final String BASE = "/v1/users/invitations";
 		}
 
 		@Test
-		@DisplayName("invalid email → 400 (validation, never reaches service)")
+		@DisplayName("invalid email â†’ 400 (validation, never reaches service)")
 		void invalidEmailRejected() throws Exception {
 			CreateInvitationRequest body = new CreateInvitationRequest(
-					"not-an-email", "Teach", "Doe", Set.of("TEACHER"));
+					"not-an-email", "Teach", "Doe", Set.of("TEACHER"),
+					DocumentType.DNI, "87654321");
 
 			mockMvc.perform(post(BASE)
 							.with(csrf())
@@ -172,10 +180,11 @@ private static final String BASE = "/v1/users/invitations";
 		}
 
 		@Test
-		@DisplayName("missing role → 403 FORBIDDEN")
+		@DisplayName("missing role â†’ 403 FORBIDDEN")
 		void forbiddenWithoutRole() throws Exception {
 			CreateInvitationRequest body = new CreateInvitationRequest(
-					"teach@acme.test", "Teach", "Doe", Set.of("TEACHER"));
+					"teach@acme.test", "Teach", "Doe", Set.of("TEACHER"),
+					DocumentType.DNI, "87654321");
 
 			mockMvc.perform(post(BASE)
 							.with(csrf())
@@ -195,7 +204,7 @@ private static final String BASE = "/v1/users/invitations";
 	class ListPending {
 
 		@Test
-		@DisplayName("TENANT_ADMIN → 200 with a page of token-stripped invitations")
+		@DisplayName("TENANT_ADMIN â†’ 200 with a page of token-stripped invitations")
 		void happyPath() throws Exception {
 			Page<InvitationResponse> page = new PageImpl<>(List.of(
 					stubInvitation(InvitationStatus.PENDING, null),
@@ -209,7 +218,7 @@ private static final String BASE = "/v1/users/invitations";
 		}
 
 		@Test
-		@DisplayName("anonymous → 401")
+		@DisplayName("anonymous â†’ 401")
 		void anonymousRejected() throws Exception {
 			mockMvc.perform(get(BASE)).andExpect(status().isUnauthorized());
 		}
@@ -224,7 +233,7 @@ private static final String BASE = "/v1/users/invitations";
 	class Cancel {
 
 		@Test
-		@DisplayName("happy path — 200 with status=CANCELLED")
+		@DisplayName("happy path â€” 200 with status=CANCELLED")
 		void happyPath() throws Exception {
 			UUID id = UUID.randomUUID();
 			given(service.cancelInvitation(id))
@@ -238,7 +247,7 @@ private static final String BASE = "/v1/users/invitations";
 		}
 
 		@Test
-		@DisplayName("already accepted → 409 INVITATION_ALREADY_ACCEPTED")
+		@DisplayName("already accepted â†’ 409 INVITATION_ALREADY_ACCEPTED")
 		void alreadyAcceptedSurfacesAs409() throws Exception {
 			UUID id = UUID.randomUUID();
 			given(service.cancelInvitation(id))
@@ -262,24 +271,25 @@ private static final String BASE = "/v1/users/invitations";
 	class Preflight {
 
 		@Test
-		@DisplayName("public + valid token → 200 with preflight payload (no auth required)")
+		@DisplayName("public + valid token â†’ 200 with preflight payload (no auth required)")
 		void happyPath() throws Exception {
 			String token = "valid-token-1234567890abcdef";
-			given(service.getPreflight(token))
+			given(service.getPreflight(eq(token), nullable(String.class)))
 					.willReturn(new InvitationPreflightResponse(
-							"teach@acme.test", "Teach", "Doe", "Acme Corp"));
+							"teach@acme.test", "Teach", "Doe", "Acme Corp", "acme"));
 
 			mockMvc.perform(get(BASE + "/by-token/" + token))
 					.andExpect(status().isOk())
 					.andExpect(jsonPath("$.data.email").value("teach@acme.test"))
-					.andExpect(jsonPath("$.data.tenantName").value("Acme Corp"));
+					.andExpect(jsonPath("$.data.tenantName").value("Acme Corp"))
+					.andExpect(jsonPath("$.data.tenantSlug").value("acme"));
 		}
 
 		@Test
-		@DisplayName("unknown token → 404 RESOURCE_NOT_FOUND")
+		@DisplayName("unknown token â†’ 404 RESOURCE_NOT_FOUND")
 		void unknownTokenSurfacesAs404() throws Exception {
 			String token = "missing-token-1234567890abcdef";
-			given(service.getPreflight(token))
+			given(service.getPreflight(eq(token), nullable(String.class)))
 					.willThrow(new ResourceNotFoundException("Invitation", "<by token>"));
 
 			mockMvc.perform(get(BASE + "/by-token/" + token))
@@ -288,10 +298,10 @@ private static final String BASE = "/v1/users/invitations";
 		}
 
 		@Test
-		@DisplayName("expired token → 410 INVITATION_EXPIRED")
+		@DisplayName("expired token â†’ 410 INVITATION_EXPIRED")
 		void expiredTokenSurfacesAs410() throws Exception {
 			String token = "expired-token-1234567890abcdef";
-			given(service.getPreflight(token))
+			given(service.getPreflight(eq(token), nullable(String.class)))
 					.willThrow(new GoneException("INVITATION_EXPIRED", "expired"));
 
 			mockMvc.perform(get(BASE + "/by-token/" + token))
@@ -300,12 +310,12 @@ private static final String BASE = "/v1/users/invitations";
 		}
 
 		@Test
-		@DisplayName("token shorter than 16 chars → 400 (validation, service never invoked)")
+		@DisplayName("token shorter than 16 chars â†’ 400 (validation, service never invoked)")
 		void shortTokenRejected() throws Exception {
 			mockMvc.perform(get(BASE + "/by-token/short"))
 					.andExpect(status().isBadRequest());
 
-			then(service).should(never()).getPreflight(any());
+			then(service).should(never()).getPreflight(any(), any());
 		}
 	}
 
@@ -318,7 +328,7 @@ private static final String BASE = "/v1/users/invitations";
 	class Accept {
 
 		@Test
-		@DisplayName("public + valid token + valid password → 201 with raw AuthResponse")
+		@DisplayName("public + valid token + valid password â†’ 201 with raw AuthResponse")
 		void happyPath() throws Exception {
 			AuthResponse session = new AuthResponse(
 					"access.token", "refresh.token", "Bearer", 900L,
@@ -339,7 +349,7 @@ private static final String BASE = "/v1/users/invitations";
 		}
 
 		@Test
-		@DisplayName("expired token → 410 INVITATION_EXPIRED")
+		@DisplayName("expired token â†’ 410 INVITATION_EXPIRED")
 		void expiredTokenSurfacesAs410() throws Exception {
 			given(service.acceptInvitation(any()))
 					.willThrow(new GoneException("INVITATION_EXPIRED", "expired"));
@@ -356,7 +366,7 @@ private static final String BASE = "/v1/users/invitations";
 		}
 
 		@Test
-		@DisplayName("password too short → 400 validation, service never invoked")
+		@DisplayName("password too short â†’ 400 validation, service never invoked")
 		void shortPasswordRejected() throws Exception {
 			AcceptInvitationRequest body = new AcceptInvitationRequest(
 					"valid-token-1234567890abcdef", "short");

@@ -8,12 +8,6 @@ import java.util.UUID;
 
 /**
  * Payload of {@code POST /v1/academic/sections}.
- *
- * <p>Both parent ids ({@code academicYearPublicUuid},
- * {@code gradePublicUuid}) MUST belong to the current tenant. The
- * service runs an explicit triple-check (tenant of year, grade, current
- * context) on top of Hibernate's discriminator filter for defense in
- * depth.</p>
  */
 public record CreateSectionRequest(
 
@@ -31,6 +25,8 @@ public record CreateSectionRequest(
 		Integer capacity,
 
 		@Positive(message = "displayOrder must be >= 1")
-		Integer displayOrder
+		Integer displayOrder,
+
+		UUID homeroomTeacherPublicUuid
 ) {
 }

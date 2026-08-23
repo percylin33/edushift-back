@@ -8,6 +8,10 @@ import org.springframework.stereotype.Component;
 
 @Slf4j
 @Component
+@org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(
+        name = "app.dashboard.mv-refresh.enabled",
+        havingValue = "true",
+        matchIfMissing = true)
 @RequiredArgsConstructor
 public class DashboardMvRefreshJob {
 

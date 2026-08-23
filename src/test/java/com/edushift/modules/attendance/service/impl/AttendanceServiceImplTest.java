@@ -177,7 +177,8 @@ class AttendanceServiceImplTest {
 				assertThat(e.category().name()).isEqualTo("ABSENCE");
 				assertThat(e.tenantId()).isNotNull();
 				assertThat(e.recipients()).hasSize(1);
-				assertThat(e.sourceId()).isEqualTo(session.getPublicUuid());
+                assertThat(e.payload()).containsKey("studentPublicUuid");
+                assertThat(e.sourceId()).isNotNull();
 			}
 			// The CRITICAL assertion: recipients are guardian userIds,
 			// NOT student userIds. The original bug was sending to

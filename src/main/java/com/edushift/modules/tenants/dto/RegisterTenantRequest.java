@@ -7,7 +7,9 @@ import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 
 /**
- * Public self-signup payload submitted to {@code POST /v1/tenants/register}.
+ * The founder must redeem a Super-Admin school invitation: {@code inviteToken}
+ * is required. The admin email is taken from the invitation (the body value
+ * is still validated and must match).
  *
  * <h3>What the request creates atomically</h3>
  * One {@code tenants} row (status {@code PENDING}, plan {@code TRIAL},
@@ -65,7 +67,11 @@ public record RegisterTenantRequest(
 
 		@NotBlank(message = "adminLastName is required")
 		@Size(min = 1, max = 100, message = "adminLastName length out of range")
-		String adminLastName
+		String adminLastName,
+
+		@NotBlank(message = "inviteToken is required")
+		@Size(min = 16, max = 128, message = "inviteToken length out of range")
+		String inviteToken
 
 ) {
 
@@ -74,7 +80,7 @@ public record RegisterTenantRequest(
 	public String toString() {
 		return "RegisterTenantRequest[tenantSlug=" + tenantSlug
 				+ ", adminEmail=" + adminEmail
-				+ ", adminFirstName=***, adminLastName=***, adminPassword=***]";
+				+ ", inviteToken=***, adminFirstName=***, adminLastName=***, adminPassword=***]";
 	}
 
 }

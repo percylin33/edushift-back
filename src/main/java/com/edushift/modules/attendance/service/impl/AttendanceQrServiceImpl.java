@@ -7,8 +7,10 @@ import com.edushift.modules.attendance.entity.StudentAttendanceQr;
 import com.edushift.modules.attendance.repository.StudentAttendanceQrRepository;
 import com.edushift.modules.attendance.service.AttendanceQrService;
 import com.edushift.modules.attendance.service.QrTokenService;
+import com.edushift.modules.auth.entity.UserRole;
 import com.edushift.modules.students.entity.Student;
 import com.edushift.modules.students.repository.StudentRepository;
+import com.edushift.shared.exception.ForbiddenException;
 import com.edushift.shared.exception.ResourceNotFoundException;
 import com.edushift.shared.exception.UnauthorizedException;
 import com.edushift.shared.security.CurrentUserProvider;
@@ -44,7 +46,7 @@ public class AttendanceQrServiceImpl implements AttendanceQrService {
 	@Override
 	@Transactional
 	public IssuedQr getOrIssueQr(UUID studentPublicUuid) {
-		return issueAndRevokePrevious(studentPublicUuid, QrRevokedReason.ROTATED);
+		return getExistingOrIssue(studentPublicUuid);
 	}
 
 	@Override
@@ -66,6 +68,78 @@ public class AttendanceQrServiceImpl implements AttendanceQrService {
 				.orElse(null);
 	}
 
+	// -----------------------------------------------------------------
+	// DEBT-STUDENT-PRIVACY (Fase 0.4) — caller-bound entry points
+	// -----------------------------------------------------------------
+
+	@Override
+	@Transactional
+	public IssuedQr getOrIssueQrForCaller(UUID studentPublicUuid) {
+		Student student = loadStudent(studentPublicUuid);
+		assertCallerOwnsStudent(student);
+		return getExistingOrIssue(studentPublicUuid);
+	}
+
+	@Override
+	@Transactional(readOnly = true)
+	public String peekActiveTokenForCaller(UUID studentPublicUuid) {
+		Student student = loadStudent(studentPublicUuid);
+		assertCallerOwnsStudent(student);
+		return qrRepository.findActiveByStudent(student)
+				.map(StudentAttendanceQr::getTokenPlain)
+				.filter(token -> token != null && !token.isBlank())
+				.orElse(null);
+	}
+
+	@Override
+	@Transactional(readOnly = true)
+	public AttendanceQrInfo getInfoForCaller(UUID studentPublicUuid) {
+		Student student = loadStudent(studentPublicUuid);
+		assertCallerOwnsStudent(student);
+		Optional<StudentAttendanceQr> active = qrRepository.findActiveByStudent(student);
+		return active.map(qr -> new AttendanceQrInfo(
+						student.getPublicUuid(),
+						qr.getIssuedAt(),
+						null,
+						null))
+				.orElse(null);
+	}
+
+	/**
+	 * Allows the operation when the caller is ADMIN/TEACHER
+	 * (unrestricted — their routes don't go through this method) or
+	 * when the caller is the STUDENT linked to the student row.
+	 * Surfaces a {@link ForbiddenException} (403) on mismatch.
+	 */
+	private void assertCallerOwnsStudent(Student student) {
+		UUID caller = currentUserProvider.currentUserId().orElseThrow(
+				() -> new UnauthorizedException(
+                        "Authenticated user is required to manage QR credentials"));
+		UserRole role = currentUserProvider.currentUserRole().orElse(null);
+		boolean privileged = role == UserRole.TENANT_ADMIN
+                || role == UserRole.TEACHER
+                || role == UserRole.SUPER_ADMIN;
+		if (privileged) {
+			return;
+		}
+		// Students and parents must match the row. We only enforce the
+		// student-side branch here; parents continue to be blocked at
+		// the controller layer (AttendanceQrController @PreAuthorize).
+		if (role == UserRole.STUDENT) {
+			UUID studentUserPublicUuid = student.getUserId();
+			if (studentUserPublicUuid == null || !studentUserPublicUuid.equals(caller)) {
+				log.warn("[attendance-qr] ownership denied -- caller={} student={}",
+						caller, student.getPublicUuid());
+				throw new ForbiddenException("STUDENT_QR_NOT_OWNED",
+						"Caller may only request their own QR credential");
+			}
+			return;
+		}
+		// Unknown / unprivileged role: refuse to be safe.
+		throw new ForbiddenException("STUDENT_QR_ROLE_NOT_ALLOWED",
+				"Caller role is not allowed to manage QR credentials");
+	}
+
 	// =====================================================================
 	// Helpers
 	// =====================================================================
@@ -74,6 +148,23 @@ public class AttendanceQrServiceImpl implements AttendanceQrService {
 	 * Persist a fresh QR row and revoke the previous active one (if
 	 * any). Returns the raw JWT plus the post-mutation info envelope.
 	 */
+	private IssuedQr getExistingOrIssue(UUID studentPublicUuid) {
+		Student student = loadStudent(studentPublicUuid);
+		Optional<StudentAttendanceQr> active = qrRepository.findActiveByStudent(student);
+		if (active.isPresent()) {
+			String token = active.get().getTokenPlain();
+			if (token != null && !token.isBlank()) {
+				AttendanceQrInfo info = new AttendanceQrInfo(
+						student.getPublicUuid(),
+						active.get().getIssuedAt(),
+						null,
+						null);
+				return new IssuedQr(token, info);
+			}
+		}
+		return issueAndRevokePrevious(studentPublicUuid, QrRevokedReason.ROTATED);
+	}
+
 	private IssuedQr issueAndRevokePrevious(
 			UUID studentPublicUuid, QrRevokedReason reason) {
 		// Force-resolve the bearer up-front. We don't propagate it down
@@ -111,6 +202,7 @@ public class AttendanceQrServiceImpl implements AttendanceQrService {
 		StudentAttendanceQr fresh = new StudentAttendanceQr();
 		fresh.setStudent(student);
 		fresh.setTokenHash(issued.tokenHash());
+		fresh.setTokenPlain(issued.token());
 		fresh.setIssuedAt(Instant.now());
 		StudentAttendanceQr saved = qrRepository.saveAndFlush(fresh);
 

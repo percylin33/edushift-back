@@ -19,11 +19,14 @@ import org.springframework.stereotype.Component;
  * <p>Strategy:</p>
  * <ul>
  *   <li><b>SCHOOL</b> — all users in the current tenant.</li>
- *   <li><b>GRADE</b> — students in any section of the given grades.</li>
- *   <li><b>SECTION</b> — students + teachers of the given sections.</li>
- *   <li><b>COURSE</b> — teacher(s) of the course + students enrolled.</li>
+ *   <li><b>GRADE</b> — students in any section of the given grades
+ *       ({@code audienceIds} = grade {@code name} strings).</li>
+ *   <li><b>SECTION</b> — students + teachers of the given sections
+ *       ({@code audienceIds} = {@code sections.public_uuid}).</li>
+ *   <li><b>COURSE</b> — teachers assigned to the course
+ *       ({@code audienceIds} = {@code courses.public_uuid}).</li>
  *   <li><b>ROLE</b> — users with the given role (e.g. {@code TEACHER}).</li>
- *   <li><b>USER</b> — explicit user ids (no resolution needed).</li>
+ *   <li><b>USER</b> — explicit {@code users.public_uuid} values.</li>
  * </ul>
  *
  * <h3>Critical: returned UUIDs are {@code users.public_uuid}, not {@code users.id}</h3>
@@ -128,22 +131,19 @@ public class AnnouncementAudienceResolver {
             case SECTION -> {
                 List<UUID> ids = parseUuids(a.getAudienceIds());
                 if (ids.isEmpty()) yield List.of();
-                // Students are linked to sections through
-                // student_enrollments (per Sprint 4 / BE-4.8); teachers
-                // are linked through teacher_assignments (BE-4.7).
-                // Neither table has a direct section_id on students /
-                // teachers — the V75 fix used `s.section_id = ANY(?)`
-                // which was a bug (column does not exist). This is
-                // the correct path via the enrollment / assignment
-                // pivot tables. Manual tenant_id filters required for
-                // raw JdbcTemplate.
+                // audienceIds are sections.public_uuid (FE contract).
+                // Enrollments/assignments store the internal section PK,
+                // so we JOIN sections and filter by public_uuid.
                 yield jdbc.queryForList(
                         "SELECT DISTINCT user_id FROM ("
                         + "  SELECT s.user_id FROM edushift.students s "
                         + "   JOIN edushift.student_enrollments se "
                         + "     ON se.student_id = s.id "
-                        + "   WHERE s.tenant_id = ? AND se.tenant_id = ? "
-                        + "     AND se.section_id = ANY(?) "
+                        + "   JOIN edushift.sections sec "
+                        + "     ON sec.id = se.section_id "
+                        + "   WHERE s.tenant_id = ? AND se.tenant_id = ? AND sec.tenant_id = ? "
+                        + "     AND sec.public_uuid = ANY(?) "
+                        + "     AND sec.deleted = false "
                         + "     AND se.deleted = false "
                         + "     AND se.status = 'ACTIVE' "
                         + "     AND s.deleted = false AND s.user_id IS NOT NULL "
@@ -151,36 +151,39 @@ public class AnnouncementAudienceResolver {
                         + "  SELECT t.user_id FROM edushift.teachers t "
                         + "   JOIN edushift.teacher_assignments ta "
                         + "     ON ta.teacher_id = t.id "
-                        + "   WHERE t.tenant_id = ? AND ta.tenant_id = ? "
-                        + "     AND ta.section_id = ANY(?) "
+                        + "   JOIN edushift.sections sec "
+                        + "     ON sec.id = ta.section_id "
+                        + "   WHERE t.tenant_id = ? AND ta.tenant_id = ? AND sec.tenant_id = ? "
+                        + "     AND sec.public_uuid = ANY(?) "
+                        + "     AND sec.deleted = false "
                         + "     AND ta.deleted = false "
                         + "     AND ta.unassigned_at IS NULL "
                         + "     AND t.deleted = false AND t.user_id IS NOT NULL"
                         + ") AS u",
                         UUID.class,
-                        tenantId, tenantId, ids.toArray(),
-                        tenantId, tenantId, ids.toArray());
+                        tenantId, tenantId, tenantId, ids.toArray(),
+                        tenantId, tenantId, tenantId, ids.toArray());
             }
             case COURSE -> {
                 List<UUID> ids = parseUuids(a.getAudienceIds());
                 if (ids.isEmpty()) yield List.of();
+                // audienceIds are courses.public_uuid (FE contract).
                 // Course audience = teachers assigned to that course
-                // (via teacher_assignments.course_id). Students are
-                // enrolled in sections, not courses directly, so a
-                // COURSE announcement targets the teaching staff. If
-                // we ever need students-of-course, we extend with a
-                // JOIN through student_enrollments × teacher_assignments.
+                // (via teacher_assignments → courses).
                 yield jdbc.queryForList(
                         "SELECT DISTINCT t.user_id FROM edushift.teachers t "
                         + "JOIN edushift.teacher_assignments ta "
                         + "  ON ta.teacher_id = t.id "
-                        + "WHERE t.tenant_id = ? AND ta.tenant_id = ? "
-                        + "  AND ta.course_id = ANY(?) "
+                        + "JOIN edushift.courses c "
+                        + "  ON c.id = ta.course_id "
+                        + "WHERE t.tenant_id = ? AND ta.tenant_id = ? AND c.tenant_id = ? "
+                        + "  AND c.public_uuid = ANY(?) "
+                        + "  AND c.deleted = false "
                         + "  AND ta.deleted = false "
                         + "  AND ta.unassigned_at IS NULL "
                         + "  AND t.deleted = false "
                         + "  AND t.user_id IS NOT NULL",
-                        UUID.class, tenantId, tenantId, ids.toArray());
+                        UUID.class, tenantId, tenantId, tenantId, ids.toArray());
             }
         };
     }

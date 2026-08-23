@@ -1,5 +1,6 @@
 package com.edushift.modules.auth.service;
 
+import com.edushift.modules.auth.PasswordResetMailer;
 import com.edushift.modules.auth.dto.ResetPasswordValidateResponse;
 import com.edushift.modules.auth.entity.PasswordResetToken;
 import com.edushift.modules.auth.entity.RefreshToken;
@@ -16,6 +17,7 @@ import com.edushift.modules.tenants.entity.TenantStatus;
 import com.edushift.modules.tenants.repository.TenantRepository;
 import com.edushift.shared.exception.UnauthorizedException;
 import com.edushift.shared.multitenancy.TenantContext;
+import com.edushift.shared.web.FrontendLinks;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import java.time.Instant;
@@ -76,7 +78,9 @@ public class PasswordResetService {
 	private final RefreshTokenRepository refreshTokenRepository;
 	private final JwtService jwtService;
 	private final NotificationService notificationService;
+	private final PasswordResetMailer passwordResetMailer;
 	private final PasswordEncoder passwordEncoder;
+	private final FrontendLinks frontendLinks;
 	private final TransactionTemplate transactionTemplate;
 	private final Counter resetRequestedCounter;
 	private final Counter resetConsumedCounter;
@@ -90,7 +94,9 @@ public class PasswordResetService {
 			RefreshTokenRepository refreshTokenRepository,
 			JwtService jwtService,
 			NotificationService notificationService,
+			PasswordResetMailer passwordResetMailer,
 			PasswordEncoder passwordEncoder,
+			FrontendLinks frontendLinks,
 			PlatformTransactionManager txManager,
 			MeterRegistry meterRegistry) {
 		this.userRepository = userRepository;
@@ -99,7 +105,9 @@ public class PasswordResetService {
 		this.refreshTokenRepository = refreshTokenRepository;
 		this.jwtService = jwtService;
 		this.notificationService = notificationService;
+		this.passwordResetMailer = passwordResetMailer;
 		this.passwordEncoder = passwordEncoder;
+		this.frontendLinks = frontendLinks;
 		this.transactionTemplate = new TransactionTemplate(txManager);
 		this.resetRequestedCounter = Counter.builder("edushift.auth.password_reset.requested")
 				.description("Forgot-password requests received")
@@ -172,23 +180,34 @@ public class PasswordResetService {
 				row.setRequestIp(requestIp);
 				resetTokenRepository.save(row);
 
-				// Queue the email via the existing NotificationService template
-				// engine (PASSWORD_RESET template, payload includes the link).
+				String resetLink = frontendLinks.passwordReset(token, tenant.getSlug());
+				long ttlMinutes = jwtService.resetTokenTtl().toMinutes();
+				String firstName = user.getFirstName() == null ? "" : user.getFirstName();
+
+				// Direct SMTP (same flags as invitations). Outbox via NotificationService
+				// is skipped when app.notifications.email.enabled=false (default in dev).
+				boolean emailSent = passwordResetMailer.send(
+						user.getEmail(), tenant.getName(), resetLink, ttlMinutes, firstName);
+
+				// In-app history (bell). IN_APP — email is dispatched above, not via outbox.
 				notificationService.notify(
 						NotificationService.NotifyCommand.builder()
-								.recipient(user.getId())
+								.recipient(user.getPublicUuid())
 								.email(user.getEmail())
 								.template(TEMPLATE_KEY_PASSWORD_RESET)
 								.category(Notification.Category.SYSTEM)
 								.payload(java.util.Map.of(
 										"resetToken", token,
-										"ttlMinutes", jwtService.resetTokenTtl().toMinutes(),
+										"resetLink", resetLink,
+										"ttlMinutes", ttlMinutes,
 										"tenantName", tenant.getName(),
-										"userFirstName", user.getFirstName() == null ? "" : user.getFirstName()))
-								.channel(Notification.Channel.EMAIL)
+										"tenantSlug", tenant.getSlug() == null ? "" : tenant.getSlug(),
+										"userFirstName", firstName))
+								.channel(Notification.Channel.IN_APP)
 								.build());
 
-				log.info("[auth] password reset email queued -- userId={}, jti={}", user.getId(), jti);
+				log.info("[auth] password reset dispatched -- userId={}, jti={}, emailSent={}",
+						user.getId(), jti, emailSent);
 			});
 			return null;
 		});

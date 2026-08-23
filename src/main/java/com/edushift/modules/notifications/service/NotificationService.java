@@ -7,6 +7,7 @@ import com.edushift.modules.notifications.entity.Notification.Channel;
 import com.edushift.modules.notifications.entity.Notification.Status;
 import com.edushift.modules.notifications.entity.NotificationPreference;
 import com.edushift.modules.notifications.entity.NotificationTemplate;
+import com.edushift.modules.notifications.email.EmailLayoutRenderer;
 import com.edushift.modules.notifications.fcm.FcmSender;
 import com.edushift.modules.notifications.repository.EmailOutboxRepository;
 import com.edushift.modules.notifications.repository.NotificationPreferenceRepository;
@@ -72,6 +73,12 @@ public class NotificationService {
     @Autowired(required = false)
     private FcmSender fcmSender;
 
+    @Autowired(required = false)
+    private EmailLayoutRenderer emailLayoutRenderer;
+
+    @org.springframework.beans.factory.annotation.Value("${app.notifications.email.enabled:false}")
+    private boolean emailEnabled;
+
     /**
      * Notify a single recipient about an event. Returns the
      * {@link Notification#getPublicUuid()} (so the caller can audit),
@@ -121,17 +128,29 @@ public class NotificationService {
         n = notificationRepo.save(n);
 
         // 5) If the channel includes EMAIL (and not opted-out), enqueue.
+        //    Skip when SMTP is disabled — otherwise rows stay PENDING forever
+        //    because EmailOutboxProcessor is @ConditionalOnProperty.
         if ((channel == Channel.EMAIL || channel == Channel.BOTH)
                 && !isOptedOut(cmd.recipientUserId(), Channel.EMAIL, cmd.category())) {
             String toEmail = cmd.recipientEmail();
             if (toEmail != null && !toEmail.isBlank()) {
-                EmailOutbox row = new EmailOutbox();
-                row.setTenantId(tenantId);
-                row.setNotificationId(n.getId());
-                row.setToEmail(toEmail);
-                row.setSubject(rendered.subject());
-                row.setBodyHtml(rendered.bodyHtml());
-                outboxRepo.save(row);
+                if (!emailEnabled) {
+                    log.warn("[Notify] SMTP disabled (app.notifications.email.enabled=false) — "
+                                    + "skipping email_outbox for template={} to={}",
+                            cmd.templateKey(), toEmail);
+                } else {
+                    String bodyHtml = rendered.bodyHtml();
+                    if (emailLayoutRenderer != null) {
+                        bodyHtml = emailLayoutRenderer.wrapBody(bodyHtml, null);
+                    }
+                    EmailOutbox row = new EmailOutbox();
+                    row.setTenantId(tenantId);
+                    row.setNotificationId(n.getId());
+                    row.setToEmail(toEmail);
+                    row.setSubject(rendered.subject());
+                    row.setBodyHtml(bodyHtml);
+                    outboxRepo.save(row);
+                }
             }
         }
 
@@ -244,6 +263,18 @@ public class NotificationService {
         return engine.render(template, n.getPayload()).subject();
     }
 
+    @Transactional(readOnly = true)
+    public String renderBody(Notification n) {
+        if (n == null) return "";
+        NotificationTemplate template = templateRepo
+                .findByKeyAndLocale(n.getTemplateKey(), "es-PE")
+                .orElse(null);
+        if (template == null) {
+            return "";
+        }
+        return engine.render(template, n.getPayload()).bodyHtml();
+    }
+
     // ------------------------------------------------------------------
     // Templates
     // ------------------------------------------------------------------
@@ -281,6 +312,16 @@ public class NotificationService {
     private Channel resolveChannel(UUID userId, Category category, Channel preferred) {
         boolean inApp = !isOptedOut(userId, Channel.IN_APP, category);
         boolean email = !isOptedOut(userId, Channel.EMAIL, category);
+
+        // Honour an explicit single-channel preference (e.g. announcements
+        // force IN_APP to avoid Gmail fan-out rate-limits).
+        if (preferred == Channel.IN_APP) {
+            return inApp ? Channel.IN_APP : Channel.IN_APP;
+        }
+        if (preferred == Channel.EMAIL) {
+            return email ? Channel.EMAIL : Channel.EMAIL;
+        }
+
         if (inApp && email) return Channel.BOTH;
         if (inApp) return Channel.IN_APP;
         if (email) return Channel.EMAIL;

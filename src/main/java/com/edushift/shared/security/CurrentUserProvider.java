@@ -24,4 +24,27 @@ public interface CurrentUserProvider {
 
     /** Tenant id of the current authenticated user, empty if anonymous. */
     Optional<UUID> currentTenantId();
+
+    /**
+     * Role of the current authenticated user, empty if anonymous.
+     * Used by services that need fine-grained ownership checks (e.g.
+     * STUDENT-only branches) without re-reading the JWT authorities.
+     */
+    default Optional<com.edushift.modules.auth.entity.UserRole> currentUserRole() {
+        return Optional.empty();
+    }
+
+    /**
+     * DEBT-STUDENT-PRIVACY (Fase 0.7): {@code students.publicUuid} for
+     * the caller, if the caller is a STUDENT. Empty for non-students
+     * (parents, teachers, admins). Used by the {@code /me/*} endpoints
+     * to derive the caller's student row without accepting a
+     * {@code studentUuid} parameter from the request body.
+     *
+     * <p>The default impl returns empty; concrete wiring lives in
+     * {@code SecurityContextCurrentUserProvider} (BE-phase-6).</p>
+     */
+    default Optional<UUID> currentStudentPublicUuid() {
+        return Optional.empty();
+    }
 }

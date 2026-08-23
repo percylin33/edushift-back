@@ -3,8 +3,10 @@ package com.edushift.modules.ai.controller;
 import com.edushift.modules.ai.entity.AiChatMessage;
 import com.edushift.modules.ai.entity.AiChatSession;
 import com.edushift.modules.ai.llm.LlmClient;
+import com.edushift.modules.ai.llm.LlmException;
 import com.edushift.modules.ai.service.ChatService;
 import com.edushift.modules.ai.service.ChatService.StreamHandle;
+import com.edushift.shared.api.ApiResponse;
 import com.edushift.shared.security.CurrentUserProvider;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -14,7 +16,10 @@ import jakarta.validation.constraints.Size;
 import java.io.IOException;
 import java.util.List;
 import java.util.UUID;
-import lombok.RequiredArgsConstructor;
+import java.util.concurrent.Executor;
+import java.util.concurrent.atomic.AtomicReference;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.http.MediaType;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -66,13 +71,23 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
  * discriminator. Cross-tenant access returns 404 (anti-enumeration).
  */
 @RestController
-@RequestMapping("/v1/ai/chat")
-@RequiredArgsConstructor
+@RequestMapping({"/ai/chat", "/lms/ai/v1/ai/chat"})
 @Tag(name = "AI chat", description = "Conversational AI assistant (Sprint 8)")
+@Slf4j
 public class ChatController {
 
     private final ChatService chatService;
     private final CurrentUserProvider currentUserProvider;
+    private final Executor aiJobExecutor;
+
+    public ChatController(
+            ChatService chatService,
+            CurrentUserProvider currentUserProvider,
+            @Qualifier("aiJobExecutor") Executor aiJobExecutor) {
+        this.chatService = chatService;
+        this.currentUserProvider = currentUserProvider;
+        this.aiJobExecutor = aiJobExecutor;
+    }
 
     // ------------------------------------------------------------------
     // Session CRUD
@@ -81,34 +96,35 @@ public class ChatController {
     @PostMapping("/sessions")
     @PreAuthorize("hasAuthority('LMS_AI_GENERATE')")
     @Operation(summary = "Create a new chat session")
-    public org.springframework.http.ResponseEntity<AiChatSession> createSession() {
+    public org.springframework.http.ResponseEntity<ApiResponse<AiChatSession>> createSession() {
         UUID userId = currentUserProvider.currentUserId()
                 .orElseThrow(() -> new IllegalStateException("authenticated user required"));
         AiChatSession s = chatService.createSession(userId);
         return org.springframework.http.ResponseEntity
-                .status(org.springframework.http.HttpStatus.CREATED).body(s);
+                .status(org.springframework.http.HttpStatus.CREATED)
+                .body(ApiResponse.ok(s));
     }
 
     @GetMapping("/sessions")
     @PreAuthorize("hasAuthority('LMS_AI_GENERATE')")
     @Operation(summary = "List the caller's active chat sessions")
-    public List<AiChatSession> listSessions(
+    public ApiResponse<List<AiChatSession>> listSessions(
             @org.springframework.web.bind.annotation.RequestParam(defaultValue = "20") int limit) {
         UUID userId = currentUserProvider.currentUserId()
                 .orElseThrow(() -> new IllegalStateException("authenticated user required"));
-        return chatService.listSessions(userId, Math.min(Math.max(limit, 1), 100));
+        return ApiResponse.ok(chatService.listSessions(userId, Math.min(Math.max(limit, 1), 100)));
     }
 
     @GetMapping("/sessions/{publicUuid}/messages")
     @PreAuthorize("hasAuthority('LMS_AI_GENERATE')")
     @Operation(summary = "List all messages of a session in chronological order")
-    public List<AiChatMessage> listMessages(@PathVariable UUID publicUuid) {
+    public ApiResponse<List<AiChatMessage>> listMessages(@PathVariable UUID publicUuid) {
         UUID userId = currentUserProvider.currentUserId()
                 .orElseThrow(() -> new IllegalStateException("authenticated user required"));
         AiChatSession s = chatService.getSession(publicUuid)
                 .filter(x -> x.getUserId().equals(userId))
                 .orElseThrow(com.edushift.modules.ai.exception.ChatSessionNotFoundException::new);
-        return chatService.findVisibleMessages(s.getId());
+        return ApiResponse.ok(chatService.findVisibleMessages(s.getId()));
     }
 
     @DeleteMapping("/sessions/{publicUuid}")
@@ -175,11 +191,11 @@ public class ChatController {
             }
         };
 
-        // Run the LLM call in a separate thread so the controller can return
-        // the emitter immediately (Spring's SSE contract). On completion,
-        // emit the "done" event with the assistant message publicUuid and
-        // close the emitter.
-        Thread worker = new Thread(() -> {
+        // Run on aiJobExecutor so TenantContext + MDC propagate from the request
+        // thread (ContextPropagatingTaskDecorator). Raw Thread would lose tenant.
+        AtomicReference<Thread> workerThread = new AtomicReference<>();
+        aiJobExecutor.execute(() -> {
+            workerThread.set(Thread.currentThread());
             try {
                 StreamHandle handle = chatService.sendMessage(publicUuid, userId, body.text(), observer);
                 emitter.send(SseEmitter.event().name("done")
@@ -192,24 +208,33 @@ public class ChatController {
                     emitter.send(SseEmitter.event().name("error").data(ex.getMessage()));
                 } catch (IOException ignored) { /* client gone */ }
                 emitter.complete();
+            } catch (LlmException ex) {
+                try {
+                    emitter.send(SseEmitter.event().name("error").data(ex.getMessage()));
+                } catch (IOException ignored) { /* client gone */ }
+                emitter.complete();
             } catch (Exception ex) {
                 try {
                     emitter.send(SseEmitter.event().name("error")
                             .data(ex.getMessage() == null ? ex.getClass().getSimpleName() : ex.getMessage()));
                 } catch (IOException ignored) { /* client gone */ }
-                emitter.completeWithError(ex);
+                emitter.complete();
             }
-        }, "ai-chat-stream");
-        worker.setDaemon(true);
-        worker.start();
+        });
 
         // Hook the emitter's completion to interrupt the worker if the
         // client disconnects mid-stream.
-        emitter.onCompletion(() -> { if (worker.isAlive()) worker.interrupt(); });
-        emitter.onTimeout(() -> { if (worker.isAlive()) worker.interrupt(); emitter.complete(); });
-        emitter.onError(ex -> { if (worker.isAlive()) worker.interrupt(); });
+        emitter.onCompletion(() -> interruptWorker(workerThread.get()));
+        emitter.onTimeout(() -> { interruptWorker(workerThread.get()); emitter.complete(); });
+        emitter.onError(ex -> interruptWorker(workerThread.get()));
 
         return emitter;
+    }
+
+    private static void interruptWorker(Thread worker) {
+        if (worker != null && worker.isAlive()) {
+            worker.interrupt();
+        }
     }
 
     /**

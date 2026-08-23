@@ -2,9 +2,11 @@ package com.edushift.modules.schedule.timeslot.service;
 
 import com.edushift.modules.schedule.timeslot.dto.CreateTimeSlotRequest;
 import com.edushift.modules.schedule.timeslot.dto.ScheduleSlotItem;
+import com.edushift.modules.schedule.timeslot.dto.ScheduleWeekView;
 import com.edushift.modules.schedule.timeslot.dto.TimeSlotListItem;
 import com.edushift.modules.schedule.timeslot.dto.TimeSlotResponse;
 import com.edushift.modules.schedule.timeslot.dto.UpdateTimeSlotRequest;
+import com.edushift.modules.students.entity.Student;
 import java.util.List;
 import java.util.UUID;
 
@@ -48,4 +50,12 @@ public interface TimeSlotService {
 	List<ScheduleSlotItem> getTeacherSchedule(UUID teacherUuid, UUID periodUuid);
 
 	List<ScheduleSlotItem> getSectionSchedule(UUID sectionUuid, UUID periodUuid);
+
+	List<ScheduleSlotItem> getScheduleForStudent(Student student, UUID periodUuid);
+
+	ScheduleWeekView getTeacherScheduleWeek(UUID teacherUuid, UUID periodUuid);
+
+	ScheduleWeekView getSectionScheduleWeek(UUID sectionUuid, UUID periodUuid);
+
+	ScheduleWeekView getScheduleWeekForStudent(Student student, UUID periodUuid);
 }

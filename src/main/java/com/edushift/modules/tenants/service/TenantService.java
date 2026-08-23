@@ -69,7 +69,8 @@ public interface TenantService {
 	 * <h3>Flow</h3>
 	 * <ol>
 	 *   <li>Reject duplicate slugs early ({@code 409 TENANT_SLUG_TAKEN}).</li>
-	 *   <li>Insert the {@code tenants} row in {@code PENDING / TRIAL}.</li>
+	 *   <li>Insert the {@code tenants} row in {@code ACTIVE / TRIAL}
+	 *       (invitation already authorized the school).</li>
 	 *   <li>Bind {@link com.edushift.shared.multitenancy.TenantContext} to
 	 *       the new id, then create the admin {@code users} row inside
 	 *       that scope.</li>

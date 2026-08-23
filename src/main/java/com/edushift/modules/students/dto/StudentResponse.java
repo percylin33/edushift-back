@@ -32,6 +32,7 @@ public record StudentResponse(
 		EnrollmentStatus enrollmentStatus,
 		LocalDate enrollmentDate,
 		UUID userId,
+		UUID pendingInvitationPublicUuid,
 		Map<String, Object> metadata,
 		Instant createdAt,
 		Instant updatedAt

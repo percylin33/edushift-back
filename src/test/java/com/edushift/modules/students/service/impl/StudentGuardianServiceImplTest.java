@@ -21,8 +21,10 @@ import com.edushift.modules.students.mapper.StudentGuardianMapper;
 import com.edushift.modules.students.repository.GuardianRepository;
 import com.edushift.modules.students.repository.StudentGuardianRepository;
 import com.edushift.modules.students.repository.StudentRepository;
+import com.edushift.modules.users.repository.UserInvitationRepository;
 import com.edushift.shared.exception.BusinessException;
 import com.edushift.shared.exception.ConflictException;
+import com.edushift.shared.exception.ForbiddenException;
 import com.edushift.shared.exception.ResourceNotFoundException;
 import java.lang.reflect.Field;
 import java.util.HashMap;
@@ -36,6 +38,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import org.mockito.Mockito;
 import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -45,7 +48,8 @@ class StudentGuardianServiceImplTest {
 	@Mock private StudentRepository studentRepository;
 	@Mock private GuardianRepository guardianRepository;
 	@Mock private StudentGuardianRepository linkRepository;
-	@Spy private StudentGuardianMapper mapper = new StudentGuardianMapper();
+	@Spy private StudentGuardianMapper mapper =
+			new StudentGuardianMapper(Mockito.mock(UserInvitationRepository.class));
 
 	@InjectMocks private StudentGuardianServiceImpl service;
 
@@ -349,6 +353,50 @@ class StudentGuardianServiceImplTest {
 			assertThatThrownBy(() -> service.unlinkGuardian(
 					student.getPublicUuid(), guardian.getPublicUuid()))
 					.isInstanceOf(ResourceNotFoundException.class);
+		}
+	}
+
+	@Nested
+	@DisplayName("assertParentLinkedToStudent")
+	class AssertParentLinkedToStudent {
+		@Test
+		void acceptsActiveRelationship() {
+			Student student = newStudent();
+			UUID parentUserId = UUID.randomUUID();
+			when(studentRepository.findByPublicUuid(student.getPublicUuid()))
+					.thenReturn(Optional.of(student));
+			when(linkRepository.existsActiveLinkForParent(student.getId(), parentUserId))
+					.thenReturn(true);
+
+			service.assertParentLinkedToStudent(parentUserId, student.getPublicUuid());
+
+			verify(linkRepository).existsActiveLinkForParent(student.getId(), parentUserId);
+		}
+
+		@Test
+		void rejectsParentWithoutRelationship() {
+			Student student = newStudent();
+			UUID parentUserId = UUID.randomUUID();
+			when(studentRepository.findByPublicUuid(student.getPublicUuid()))
+					.thenReturn(Optional.of(student));
+			when(linkRepository.existsActiveLinkForParent(student.getId(), parentUserId))
+					.thenReturn(false);
+
+			assertThatThrownBy(() -> service.assertParentLinkedToStudent(
+					parentUserId, student.getPublicUuid()))
+					.isInstanceOf(ForbiddenException.class)
+					.hasMessageContaining("not linked");
+		}
+
+		@Test
+		void hidesUnknownOrCrossTenantStudentAsNotFound() {
+			UUID studentPublicUuid = UUID.randomUUID();
+			when(studentRepository.findByPublicUuid(studentPublicUuid)).thenReturn(Optional.empty());
+
+			assertThatThrownBy(() -> service.assertParentLinkedToStudent(
+					UUID.randomUUID(), studentPublicUuid))
+					.isInstanceOf(ResourceNotFoundException.class);
+			verify(linkRepository, never()).existsActiveLinkForParent(any(), any());
 		}
 	}
 

@@ -40,6 +40,24 @@ public interface StudentGuardianRepository extends JpaRepository<StudentGuardian
 			@Param("guardianId") UUID guardianId);
 
 	@Query("""
+			select case when count(sg) > 0 then true else false end
+			from StudentGuardian sg
+			where sg.student.id = :studentId
+			  and sg.guardian.userId = :parentUserId
+			""")
+	boolean existsActiveLinkForParent(
+			@Param("studentId") UUID studentId,
+			@Param("parentUserId") UUID parentUserId);
+
+	@Query("""
+			select sg from StudentGuardian sg
+			join fetch sg.student s
+			where sg.guardian.userId = :parentUserId
+			order by s.lastName asc, s.firstName asc
+			""")
+	List<StudentGuardian> findActiveByGuardianUserId(@Param("parentUserId") UUID parentUserId);
+
+	@Query("""
 			select count(sg) from StudentGuardian sg
 			where sg.student.id = :studentId
 			  and sg.isPrimaryContact = true

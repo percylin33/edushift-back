@@ -10,7 +10,13 @@ import com.edushift.modules.payments.exception.InvoiceNotFoundException;
 import com.edushift.modules.payments.repository.InvoiceItemRepository;
 import com.edushift.modules.payments.repository.InvoiceRepository;
 import com.edushift.modules.payments.repository.PaymentRepository;
+import com.edushift.modules.students.repository.StudentGuardianRepository;
+import com.edushift.modules.students.repository.StudentRepository;
+import com.edushift.modules.tenants.repository.TenantRepository;
+import com.edushift.shared.exception.ForbiddenException;
+import com.edushift.shared.exception.ResourceNotFoundException;
 import com.edushift.shared.multitenancy.TenantContext;
+import com.edushift.shared.security.CurrentUserProvider;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Instant;
@@ -66,12 +72,20 @@ public class PaymentService {
     private final PaymentRepository paymentRepo;
     private final MercadoPagoClient mpClient;
     private final ObjectMapper objectMapper;
+    private final StudentRepository studentRepository;
+    private final StudentGuardianRepository studentGuardianRepository;
+    private final TenantRepository tenantRepository;
+    private final InvoiceReceiptPdfGenerator receiptPdfGenerator;
+    private final CurrentUserProvider currentUserProvider;
 
     // ----------------------------------------------------------------- read
 
     @Transactional(readOnly = true)
     public InvoiceResponse getInvoice(UUID publicUuid) {
         Invoice i = mustFindInvoice(publicUuid);
+        // DEBT-STUDENT-PRIVACY (Fase 0.2): refuse to expose invoices that
+        // don't belong to the caller (neither as guardian nor as student).
+        assertOwnership(i);
         List<InvoiceItemResponse> items = itemRepo.findByInvoiceIdOrderByCreatedAtAsc(i.getId())
                 .stream().map(InvoiceItemResponse::from).toList();
         return InvoiceResponse.from(i, items);
@@ -83,9 +97,41 @@ public class PaymentService {
                 .map(i -> InvoiceResponse.from(i, List.of())); // items lazy-loaded in detail endpoint
     }
 
+    /**
+     * DEBT-STUDENT-PRIVACY (Fase 0.2): list invoices visible to the
+     * given user — covers both the guardian-ownership case and the
+     * student-ownership case so a STUDENT who isn't a portal-guardian
+     * can still see invoices attached to their {@code student_id}.
+     *
+     * <p>For users who are neither (e.g. TEACHER), returns an empty
+     * page.</p>
+     */
+    @Transactional(readOnly = true)
+    public Page<InvoiceResponse> listInvoicesForCaller(UUID userId, Pageable pageable) {
+        UUID studentPublicUuid = studentRepository.findPublicUuidByUserId(userId).orElse(null);
+        if (studentPublicUuid != null) {
+            return invoiceRepo
+                    .findByGuardianOrStudentOrderByIssuedAtDesc(userId, studentPublicUuid, pageable)
+                    .map(i -> InvoiceResponse.from(i, List.of()));
+        }
+        List<UUID> linkedStudents = studentGuardianRepository
+                .findActiveByGuardianUserId(userId)
+                .stream()
+                .map(link -> link.getStudent().getPublicUuid())
+                .toList();
+        if (linkedStudents.isEmpty()) {
+            return listInvoicesForGuardian(userId, pageable);
+        }
+        return invoiceRepo
+                .findByGuardianOrStudentsOrderByIssuedAtDesc(userId, linkedStudents, pageable)
+                .map(i -> InvoiceResponse.from(i, List.of()));
+    }
+
     @Transactional(readOnly = true)
     public List<PaymentResponse> listPaymentsForInvoice(UUID invoicePublicUuid) {
         Invoice i = mustFindInvoice(invoicePublicUuid);
+        // DEBT-STUDENT-PRIVACY (Fase 0.2): same ownership gate.
+        assertOwnership(i);
         return paymentRepo.findByInvoiceIdOrderByCreatedAtDesc(i.getId())
                 .stream().map(PaymentResponse::from).toList();
     }
@@ -100,6 +146,11 @@ public class PaymentService {
     @Transactional
     public CheckoutResponse startCheckout(UUID invoicePublicUuid, String guardianEmail) {
         Invoice i = mustFindInvoice(invoicePublicUuid);
+        // DEBT-STUDENT-PRIVACY (Fase 0.2): the previous implementation
+        // accepted any authenticated caller, letting a STUDENT who
+        // happened to know another tenant's invoice publicUuid start
+        // a checkout. The ownership gate short-circuits that.
+        assertOwnership(i);
         if (i.getStatus() == Invoice.Status.PAID) {
             throw new com.edushift.shared.exception.BusinessException(
                     "INVOICE_ALREADY_PAID", "This invoice is already paid");
@@ -128,6 +179,22 @@ public class PaymentService {
         payment = paymentRepo.save(payment);
 
         return new CheckoutResponse(payment.getPublicUuid(), initPoint, initPoint);
+    }
+
+    @Transactional(readOnly = true)
+    public byte[] getReceiptPdf(UUID invoicePublicUuid) {
+        Invoice invoice = mustFindInvoice(invoicePublicUuid);
+        assertOwnership(invoice);
+        if (invoice.getStatus() != Invoice.Status.PAID) {
+            throw new ResourceNotFoundException("InvoiceReceipt", invoicePublicUuid);
+        }
+        String schoolName = tenantRepository.findById(TenantContext.currentRequired())
+                .map(tenant -> tenant.getName())
+                .orElse("EduShift");
+        String studentName = studentRepository.findByPublicUuid(invoice.getStudentId())
+                .map(student -> student.fullName())
+                .orElse("—");
+        return receiptPdfGenerator.generate(schoolName, studentName, invoice);
     }
 
     // --------------------------------------------------------- webhook
@@ -221,5 +288,46 @@ public class PaymentService {
         return invoiceRepo.findByPublicUuid(publicUuid)
                 .orElseThrow(() -> new InvoiceNotFoundException(
                         "Invoice not found in the current tenant: " + publicUuid));
+    }
+
+    /**
+     * DEBT-STUDENT-PRIVACY (Fase 0.2): refuses read/start-checkout
+     * access to invoices that don't belong to the caller (neither as
+     * guardian nor as student). Cross-tenant is already filtered by
+     * {@code @TenantId}; this is defence-in-depth at the row level.
+     *
+     * <p>Throws {@link ForbiddenException} (403) — same shape as
+     * other ownership checks in the codebase (family-link, etc.).
+     * Returning 404 would be a more aggressive anti-enumeration stance
+     * but the FE already distinguishes the two codes on the
+     * "Mis pagos" page.</p>
+     */
+    private void assertOwnership(Invoice invoice) {
+        UUID caller = currentUserProvider.currentUserId().orElse(null);
+        if (caller == null) {
+            throw new ForbiddenException("AUTH_REQUIRED",
+                    "Authenticated user is required to access this invoice");
+        }
+        boolean ownsAsGuardian = caller.equals(invoice.getGuardianUserId());
+        boolean ownsAsStudent = false;
+        if (!ownsAsGuardian) {
+            UUID studentPublicUuid = studentRepository.findPublicUuidByUserId(caller).orElse(null);
+            ownsAsStudent = studentPublicUuid != null
+                    && studentPublicUuid.equals(invoice.getStudentId());
+        }
+        boolean ownsAsLinkedParent = false;
+        if (!ownsAsGuardian && !ownsAsStudent && invoice.getStudentId() != null) {
+            ownsAsLinkedParent = studentRepository.findByPublicUuid(invoice.getStudentId())
+                    .map(student -> studentGuardianRepository
+                            .existsActiveLinkForParent(student.getId(), caller))
+                    .orElse(false);
+        }
+        if (!ownsAsGuardian && !ownsAsStudent && !ownsAsLinkedParent) {
+            log.warn("[payments] ownership denied -- caller={} invoice={} student={} guardian={}",
+                    caller, invoice.getPublicUuid(),
+                    invoice.getStudentId(), invoice.getGuardianUserId());
+            throw new ForbiddenException("INVOICE_NOT_OWNED",
+                    "Caller is neither the guardian nor the student of this invoice");
+        }
     }
 }

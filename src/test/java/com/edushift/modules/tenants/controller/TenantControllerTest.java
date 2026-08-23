@@ -14,6 +14,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.edushift.infrastructure.multitenancy.MultiTenancyConfiguration;
 import com.edushift.infrastructure.multitenancy.TenantInterceptor;
+import com.edushift.modules.admin.invitations.SchoolInvitationService;
 import com.edushift.modules.auth.dto.AuthResponse;
 import com.edushift.modules.auth.dto.UserSummary;
 import com.edushift.modules.auth.entity.UserStatus;
@@ -90,6 +91,7 @@ class TenantControllerTest {
 	@Autowired private ObjectMapper objectMapper;
 
 	@MockitoBean private TenantService tenantService;
+	@MockitoBean private SchoolInvitationService schoolInvitationService;
 
 	/** Filter dependency — never invoked in this slice (auth is simulated). */
 	@MockitoBean private JwtService jwtService;
@@ -125,7 +127,7 @@ private static final String BASE = "/v1/tenants";
 				"Acme Corp",
 				SLUG,
 				TenantStatus.ACTIVE,
-				new BrandingDto("#0F62FE", null, null, null));
+				new BrandingDto("#0F62FE", null, null, null, null, null));
 	}
 
 	private TenantResponse stubResponse(TenantStatus status) {
@@ -137,7 +139,7 @@ private static final String BASE = "/v1/tenants";
 				status,
 				TenantPlan.TRIAL,
 				Instant.parse("2030-01-01T00:00:00Z"),
-				new BrandingDto("#0F62FE", null, null, null),
+				new BrandingDto("#0F62FE", null, null, null, null, null),
 				new HashMap<>(),
 				new HashMap<>(),
 				500,
@@ -283,7 +285,7 @@ private static final String BASE = "/v1/tenants";
 		void invalidBrandingRejected() throws Exception {
 			UpdateTenantRequest patch = new UpdateTenantRequest(
 					null, null,
-					new BrandingDto("not-a-color", null, null, null),
+					new BrandingDto("not-a-color", null, null, null, null, null),
 					null, null, null, null);
 
 			mockMvc.perform(patch(BASE + "/me")
@@ -305,6 +307,8 @@ private static final String BASE = "/v1/tenants";
 	@DisplayName("POST /v1/tenants/register")
 	class RegisterTenant {
 
+		private static final String INVITE_TOKEN = "tokentokentoken12";
+
 		private RegisterTenantRequest validBody() {
 			return new RegisterTenantRequest(
 					"Acme Corp",
@@ -312,7 +316,8 @@ private static final String BASE = "/v1/tenants";
 					"founder@acme.test",
 					"Sup3rSecret!",
 					"Founder",
-					"Doe");
+					"Doe",
+					INVITE_TOKEN);
 		}
 
 		@Test
@@ -353,7 +358,7 @@ private static final String BASE = "/v1/tenants";
 		void malformedSlugRejected() throws Exception {
 			RegisterTenantRequest body = new RegisterTenantRequest(
 					"Acme Corp", "BAD slug!!!", "founder@acme.test",
-					"Sup3rSecret!", "Founder", "Doe");
+					"Sup3rSecret!", "Founder", "Doe", INVITE_TOKEN);
 
 			mockMvc.perform(post(BASE + "/register")
 							.with(csrf())
@@ -369,7 +374,7 @@ private static final String BASE = "/v1/tenants";
 		void shortPasswordRejected() throws Exception {
 			RegisterTenantRequest body = new RegisterTenantRequest(
 					"Acme Corp", "acme-co", "founder@acme.test",
-					"short", "Founder", "Doe");
+					"short", "Founder", "Doe", INVITE_TOKEN);
 
 			mockMvc.perform(post(BASE + "/register")
 							.with(csrf())

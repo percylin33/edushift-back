@@ -3,6 +3,8 @@ package com.edushift.modules.tasks.entity;
 import com.edushift.shared.domain.TenantAwareEntity;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import jakarta.persistence.FetchType;
 import jakarta.persistence.ForeignKey;
 import jakarta.persistence.Index;
@@ -45,7 +47,7 @@ import org.hibernate.annotations.SQLDelete;
 @Getter
 @Setter
 @NoArgsConstructor
-@ToString(callSuper = true, of = {"publicUuid", "title", "dueAt"})
+@ToString(callSuper = true, of = {"publicUuid", "title", "status", "dueAt"})
 @SQLDelete(sql = "UPDATE edushift.lms_tasks "
 		+ "SET deleted = true, deleted_at = NOW(), updated_at = NOW() "
 		+ "WHERE id = ?")
@@ -79,6 +81,21 @@ public class Task extends TenantAwareEntity {
 	@Column(name = "allow_resubmission", nullable = false)
 	private boolean allowResubmission = true;
 
+	/**
+	 * Lifecycle status (BUG-2026-07-31-04).
+	 * <p>DRAFT → PUBLISHED → ARCHIVED. Defaults to DRAFT in
+	 * {@link #onPrePersist()}.
+	 */
+	@Enumerated(EnumType.STRING)
+	@Column(name = "status", nullable = false, length = 16)
+	private TaskStatus status;
+
+	@Column(name = "published_at")
+	private Instant publishedAt;
+
+	@Column(name = "archived_at")
+	private Instant archivedAt;
+
 	@Column(name = "deleted_at")
 	private Instant deletedAt;
 
@@ -86,6 +103,9 @@ public class Task extends TenantAwareEntity {
 	private void onPrePersist() {
 		if (publicUuid == null) {
 			publicUuid = UUID.randomUUID();
+		}
+		if (status == null) {
+			status = TaskStatus.DRAFT;
 		}
 	}
 }

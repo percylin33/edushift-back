@@ -3,6 +3,7 @@ package com.edushift.modules.users.dto;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.edushift.modules.auth.entity.UserStatus;
+import com.edushift.modules.students.entity.DocumentType;
 import com.edushift.modules.users.entity.InvitationStatus;
 import java.time.Instant;
 import java.util.Set;
@@ -66,11 +67,12 @@ class UserDtoTest {
     }
 
     @Test
-    @DisplayName("CreateInvitationRequest has a 4-arg convenience constructor")
+    @DisplayName("CreateInvitationRequest has a 6-arg convenience constructor")
     void createInvitationConvenience() {
         var req = new CreateInvitationRequest("ana@acme.test", "Ana", "Diaz",
-                Set.of("TEACHER"));
+                Set.of("TEACHER"), DocumentType.DNI, "87654321");
         assertThat(req.email()).isEqualTo("ana@acme.test");
+        assertThat(req.documentType()).isEqualTo(DocumentType.DNI);
         assertThat(req.metadata()).isNull();
     }
 
@@ -78,7 +80,8 @@ class UserDtoTest {
     @DisplayName("CreateInvitationRequest with full constructor stores metadata")
     void createInvitationFull() {
         var req = new CreateInvitationRequest("ana@acme.test", "Ana", "Diaz",
-                Set.of("TEACHER"), java.util.Map.of("teacherId", "019e"));
+                Set.of("TEACHER"), DocumentType.DNI, "87654321",
+                java.util.Map.of("teacherId", "019e"));
         assertThat(req.metadata()).containsEntry("teacherId", "019e");
     }
 
@@ -93,9 +96,10 @@ class UserDtoTest {
     @Test
     @DisplayName("InvitationPreflightResponse stores public fields only")
     void preflight() {
-        var p = new InvitationPreflightResponse("ana@acme.test", "Ana", "Diaz", "Acme School");
+        var p = new InvitationPreflightResponse("ana@acme.test", "Ana", "Diaz", "Acme School", "acme");
         assertThat(p.email()).isEqualTo("ana@acme.test");
         assertThat(p.tenantName()).isEqualTo("Acme School");
+        assertThat(p.tenantSlug()).isEqualTo("acme");
     }
 
     @Test
@@ -103,6 +107,7 @@ class UserDtoTest {
     void invitationWithoutToken() {
         UUID id = UUID.randomUUID();
         var full = new InvitationResponse(id, "ana@acme.test", "Ana", "Diaz",
+                DocumentType.DNI, "87654321",
                 Set.of("TEACHER"), InvitationStatus.PENDING, "secret.token.value",
                 Instant.now(), null, null, Instant.now());
         var stripped = full.withoutToken();

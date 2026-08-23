@@ -48,105 +48,96 @@ public final class NotificationTemplateSeed {
                 build("WELCOME_TENANT", "SYSTEM",
                         "Bienvenido a {{tenantName}}",
                         """
-                        <h1>¡Bienvenido a {{tenantName}}!</h1>
-                        <p>Tu cuenta EduShift está activa. Accede con tu correo <b>{{userEmail}}</b>.</p>
-                        <p>Si tienes dudas, contacta al administrador.</p>
+                        <h1 style="margin:0 0 16px;font-size:22px;color:#0f172a">¡Bienvenido a {{tenantName}}!</h1>
+                        <p style="margin:0 0 12px;font-size:15px;line-height:1.55;color:#334155">Tu cuenta EduShift está activa. Accede con tu correo <strong>{{userEmail}}</strong>.</p>
+                        <p style="margin:0;font-size:14px;color:#64748b">Si tienes dudas, contacta al administrador de tu colegio.</p>
                         """),
                 build("STUDENT_ABSENT", "ABSENCE",
                         "Ausencia registrada — {{studentName}}",
                         """
-                        <h2>Ausencia registrada</h2>
-                        <p>Estimado/a {{parentName}},</p>
-                        <p>Le informamos que <b>{{studentName}}</b> no asistió a la sesión de <b>{{courseName}}</b>
-                           el día <b>{{date}}</b>.</p>
-                        <p>Motivo registrado: {{reason}}</p>
-                        <p>Si requiere justificación, por favor responder este correo.</p>
+                        <h1 style="margin:0 0 16px;font-size:20px;color:#0f172a">Ausencia registrada</h1>
+                        <p style="margin:0 0 12px;font-size:15px;line-height:1.55;color:#334155">Estimado/a {{parentName}},</p>
+                        <p style="margin:0 0 12px;font-size:15px;line-height:1.55;color:#334155">Le informamos que <strong>{{studentName}}</strong> no asistió a la sesión de <strong>{{courseName}}</strong>
+                           el día <strong>{{date}}</strong>.</p>
+                        <p style="margin:0 0 12px;font-size:15px;color:#334155">Motivo registrado: {{reason}}</p>
+                        <p style="margin:0;font-size:14px;color:#64748b">Si requiere justificación, responda desde el portal o contacte a la institución.</p>
                         """),
                 build("GRADE_PUBLISHED", "GRADE",
                         "Nueva calificación publicada — {{evaluationTitle}}",
                         """
-                        <h2>Calificación publicada</h2>
-                        <p>Hola <b>{{studentName}}</b>,</p>
-                        <p>Tu docente ha publicado la calificación de la evaluación
-                           <b>{{evaluationTitle}}</b> en el curso <b>{{courseName}}</b>.</p>
-                        <p>Nota: <b>{{grade}}</b> / {{maxGrade}}</p>
+                        <h1 style="margin:0 0 16px;font-size:20px;color:#0f172a">Calificación publicada</h1>
+                        <p style="margin:0 0 12px;font-size:15px;line-height:1.55;color:#334155">Hola <strong>{{studentName}}</strong>,</p>
+                        <p style="margin:0 0 12px;font-size:15px;line-height:1.55;color:#334155">Tu docente ha publicado la calificación de
+                           <strong>{{evaluationTitle}}</strong> en <strong>{{courseName}}</strong>.</p>
+                        <p style="margin:0;font-size:16px;color:#0f172a"><strong>Nota:</strong> {{grade}} / {{maxGrade}}</p>
                         """),
                 build("AI_FEEDBACK_READY", "AI_FEEDBACK",
                                 "Retroalimentación de tu entrega en {{taskTitle}}",
                                 """
-                                <h2>Retroalimentación disponible</h2>
-                                <p>Hola <b>{{studentName}}</b>,</p>
-                                <p>El asistente IA ha generado una retroalimentación para tu entrega
-                                   en la tarea <b>{{taskTitle}}</b>.</p>
-                                <p>Revísala en la plataforma y conversa con el asistente si quieres profundizar.</p>
+                                <h1 style="margin:0 0 16px;font-size:20px;color:#0f172a">Retroalimentación disponible</h1>
+                                <p style="margin:0 0 12px;font-size:15px;line-height:1.55;color:#334155">Hola <strong>{{studentName}}</strong>,</p>
+                                <p style="margin:0;font-size:15px;line-height:1.55;color:#334155">El asistente IA ha generado una retroalimentación para tu entrega
+                                   en <strong>{{taskTitle}}</strong>. Revísala en la plataforma.</p>
                                 """),
                 build("TASK_RETURNED", "TASK",
                         "Tu tarea fue devuelta — {{taskTitle}}",
                         """
-                        <h2>Tarea devuelta</h2>
-                        <p>Hola <b>{{studentName}}</b>,</p>
-                        <p>Tu docente ha revisado tu entrega de <b>{{taskTitle}}</b>.</p>
-                        <p>Nota: <b>{{grade}}</b> / {{maxGrade}}</p>
-                        <p>Comentario del docente: {{teacherComment}}</p>
+                        <h1 style="margin:0 0 16px;font-size:20px;color:#0f172a">Tarea devuelta</h1>
+                        <p style="margin:0 0 12px;font-size:15px;line-height:1.55;color:#334155">Hola <strong>{{studentName}}</strong>,</p>
+                        <p style="margin:0 0 12px;font-size:15px;line-height:1.55;color:#334155">Tu docente ha revisado tu entrega de <strong>{{taskTitle}}</strong>.</p>
+                        <p style="margin:0 0 8px;font-size:16px;color:#0f172a"><strong>Nota:</strong> {{grade}} / {{maxGrade}}</p>
+                        <p style="margin:0;font-size:14px;color:#64748b">Comentario: {{teacherComment}}</p>
                         """),
                 build("QUIZ_PUBLISHED", "QUIZ",
                                 "Nuevo quiz disponible — {{quizTitle}}",
                                 """
-                                <h2>Nuevo quiz publicado</h2>
-                                <p>Hola <b>{{studentName}}</b>,</p>
-                                <p>Tu docente ha publicado un nuevo quiz en el curso
-                                   <b>{{courseName}}</b>: <b>{{quizTitle}}</b>.</p>
-                                <p>Fecha límite: <b>{{dueDate}}</b></p>
+                                <h1 style="margin:0 0 16px;font-size:20px;color:#0f172a">Nuevo quiz publicado</h1>
+                                <p style="margin:0 0 12px;font-size:15px;line-height:1.55;color:#334155">Hola <strong>{{studentName}}</strong>,</p>
+                                <p style="margin:0 0 12px;font-size:15px;line-height:1.55;color:#334155">Hay un nuevo quiz en
+                                   <strong>{{courseName}}</strong>: <strong>{{quizTitle}}</strong>.</p>
+                                <p style="margin:0;font-size:14px;color:#64748b">Fecha límite: <strong>{{dueDate}}</strong></p>
                                 """),
                 build("PAYMENT_DUE", "PAYMENT",
                                 "Pago pendiente — {{invoiceNumber}}",
                                 """
-                                <h2>Pago pendiente</h2>
-                                <p>Estimado/a <b>{{parentName}}</b>,</p>
-                                <p>Le recordamos que la factura <b>{{invoiceNumber}}</b> por concepto
-                                   de <b>{{concept}}</b> vence el <b>{{dueDate}}</b>.</p>
-                                <p>Monto: <b>{{amount}}</b></p>
+                                <h1 style="margin:0 0 16px;font-size:20px;color:#0f172a">Pago pendiente</h1>
+                                <p style="margin:0 0 12px;font-size:15px;line-height:1.55;color:#334155">Estimado/a <strong>{{parentName}}</strong>,</p>
+                                <p style="margin:0 0 12px;font-size:15px;line-height:1.55;color:#334155">La factura <strong>{{invoiceNumber}}</strong> por
+                                   <strong>{{concept}}</strong> vence el <strong>{{dueDate}}</strong>.</p>
+                                <p style="margin:0;font-size:16px;color:#0f172a"><strong>Monto:</strong> {{amount}}</p>
                                 """),
                 build("ANNOUNCEMENT", "ANNOUNCEMENT",
                                 "{{title}}",
                                 """
-                                <h2>{{title}}</h2>
-                                <p>{{body}}</p>
-                                <hr/>
-                                <p style="color:#888;font-size:0.85em">Enviado por {{senderName}} — {{tenantName}}</p>
+                                <h1 style="margin:0 0 12px;font-size:20px;color:#0f172a">{{title}}</h1>
+                                <div style="font-size:15px;line-height:1.55;color:#334155">{{body}}</div>
+                                <p style="margin:16px 0 0;font-size:12px;color:#94a3b8">{{senderName}} · {{tenantName}}</p>
                                 """),
                 build("PASSWORD_RESET", "SYSTEM",
                                 "Restablece tu contraseña — {{tenantName}}",
                                 """
-                                <h2>Restablece tu contraseña</h2>
-                                <p>Hola <b>{{userFirstName}}</b>,</p>
-                                <p>Recibimos una solicitud para restablecer la contraseña de tu cuenta en
-                                   <b>{{tenantName}}</b>. Si no realizaste esta solicitud, puedes ignorar este mensaje.</p>
-                                <p>Para continuar, haz clic en el siguiente enlace (válido por
-                                   <b>{{ttlMinutes}} minutos</b>):</p>
-                                <p><a href="{{resetLink}}" style="display:inline-block;padding:10px 20px;background:#0a5;color:#fff;border-radius:4px;text-decoration:none">Restablecer contraseña</a></p>
-                                <p>Si el botón no funciona, copia y pega este enlace en tu navegador:<br/>
-                                   <code>{{resetLink}}</code></p>
-                                <p style="color:#888;font-size:0.85em">Equipo {{tenantName}}</p>
+                                <h1 style="margin:0 0 16px;font-size:20px;color:#0f172a">Restablece tu contraseña</h1>
+                                <p style="margin:0 0 12px;font-size:15px;line-height:1.55;color:#334155">Hola <strong>{{userFirstName}}</strong>,</p>
+                                <p style="margin:0 0 16px;font-size:15px;line-height:1.55;color:#334155">Recibimos una solicitud para restablecer la contraseña de tu cuenta en
+                                   <strong>{{tenantName}}</strong>. Si no fuiste tú, ignora este mensaje.</p>
+                                <p style="margin:0 0 20px"><a href="{{resetLink}}" style="display:inline-block;padding:12px 20px;background:#0e7490;color:#ffffff;border-radius:10px;text-decoration:none;font-weight:600">Restablecer contraseña</a></p>
+                                <p style="margin:0 0 8px;font-size:13px;color:#64748b">Válido por <strong>{{ttlMinutes}} minutos</strong>.</p>
+                                <p style="margin:0;font-size:12px;color:#94a3b8;word-break:break-all">{{resetLink}}</p>
                                 """),
                 build("TEACHER_ASSIGNED", "SYSTEM",
                                 "Has sido asignado(a) — {{sectionName}}",
                                 """
-                                <h2>Nueva asignación académica</h2>
-                                <p>Hola <b>{{teacherName}}</b>,</p>
-                                <p>Has sido asignado(a) al nivel <b>{{courseCode}}</b>, sección
-                                   <b>{{sectionName}}</b>.</p>
-                                <p>Puedes revisar los detalles en tu panel "Mis cursos".</p>
-                                <p style="color:#888;font-size:0.85em">Asignación: {{assignmentPublicUuid}}</p>
+                                <h1 style="margin:0 0 16px;font-size:20px;color:#0f172a">Nueva asignación académica</h1>
+                                <p style="margin:0 0 12px;font-size:15px;line-height:1.55;color:#334155">Hola <strong>{{teacherName}}</strong>,</p>
+                                <p style="margin:0;font-size:15px;line-height:1.55;color:#334155">Has sido asignado(a) al nivel <strong>{{courseCode}}</strong>, sección
+                                   <strong>{{sectionName}}</strong>. Revisa los detalles en tu panel "Mis cursos".</p>
                                 """),
                 build("SECTION_NEW_TEACHER", "ANNOUNCEMENT",
                                 "Nuevo docente en tu sección — {{sectionName}}",
                                 """
-                                <h2>Nuevo docente asignado</h2>
-                                <p>Hola,</p>
-                                <p>Te informamos que el(la) docente <b>{{teacherName}}</b> ha sido asignado(a)
-                                   a tu sección <b>{{sectionName}}</b> del nivel <b>{{levelCode}}</b>.</p>
-                                <p>Si tienes dudas, consulta con tu coordinadora académica.</p>
+                                <h1 style="margin:0 0 16px;font-size:20px;color:#0f172a">Nuevo docente asignado</h1>
+                                <p style="margin:0 0 12px;font-size:15px;line-height:1.55;color:#334155">Te informamos que <strong>{{teacherName}}</strong> ha sido asignado(a)
+                                   a tu sección <strong>{{sectionName}}</strong> del nivel <strong>{{levelCode}}</strong>.</p>
                                 """)
         );
     }

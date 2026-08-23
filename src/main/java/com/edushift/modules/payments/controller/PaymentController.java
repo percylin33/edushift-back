@@ -11,6 +11,9 @@ import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -27,7 +30,7 @@ import org.springframework.web.bind.annotation.RestController;
  * (TBD; not in MVP scope).</p>
  */
 @RestController
-@RequestMapping("/api/v1/payments")
+@RequestMapping("/payments")
 @RequiredArgsConstructor
 public class PaymentController {
 
@@ -37,11 +40,14 @@ public class PaymentController {
     @GetMapping("/invoices")
     @PreAuthorize("isAuthenticated()")
     public ApiResponse<Page<InvoiceResponse>> myInvoices(Pageable pageable) {
-        UUID guardianId = currentUser.currentUserId()
+        UUID callerId = currentUser.currentUserId()
                 .orElseThrow(() -> new com.edushift.shared.exception.UnauthorizedException(
                         "No authenticated user"));
+        // DEBT-STUDENT-PRIVACY (Fase 0.2): un STUDENT autenticado que no
+        // es guardian del pago recibe ahora las invoices asociadas a
+        // su studentId (antes veía lista vacía sin feedback).
         return ApiResponse.ok(
-                paymentService.listInvoicesForGuardian(guardianId, pageable));
+                paymentService.listInvoicesForCaller(callerId, pageable));
     }
 
     @GetMapping("/invoices/{publicUuid}")
@@ -66,5 +72,15 @@ public class PaymentController {
     public ApiResponse<CheckoutResponse> checkout(@PathVariable UUID publicUuid) {
         String email = currentUser.currentUsername().orElse(null);
         return ApiResponse.ok(paymentService.startCheckout(publicUuid, email));
+    }
+
+    @GetMapping("/invoices/{publicUuid}/receipt")
+    @PreAuthorize("isAuthenticated()")
+    public ResponseEntity<byte[]> receipt(@PathVariable UUID publicUuid) {
+        byte[] pdf = paymentService.getReceiptPdf(publicUuid);
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_PDF);
+        headers.setContentDispositionFormData("attachment", "comprobante-" + publicUuid + ".pdf");
+        return ResponseEntity.ok().headers(headers).body(pdf);
     }
 }

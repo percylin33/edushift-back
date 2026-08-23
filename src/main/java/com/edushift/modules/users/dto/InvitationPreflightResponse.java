@@ -11,13 +11,15 @@ package com.edushift.modules.users.dto;
  * same address). Email is included because the form pre-fills it and
  * the recipient can sanity-check the destination.
  *
- * <p>Notably absent: tenant id, slug, role list, and any auditing
- * field. Those are admin-internal.
+ * <p>Notably absent: tenant id, role list, and any auditing
+ * field. {@code tenantSlug} is included so the accept page can pin
+ * {@code ?tenant=} even if the emailed link omitted it.</p>
  */
 public record InvitationPreflightResponse(
 		String email,
 		String firstName,
 		String lastName,
-		String tenantName
+		String tenantName,
+		String tenantSlug
 ) {
 }

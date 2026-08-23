@@ -142,4 +142,22 @@ public interface TimeSlotRepository extends JpaRepository<TimeSlot, UUID> {
 			@Param("tenantId") UUID tenantId,
 			@Param("sectionUuid") UUID sectionUuid,
 			@Param("dayOfWeek") Short dayOfWeek);
+
+	/**
+	 * Active-assignment slots for a period (teacher workload aggregation).
+	 * When {@code teacherUuid} is null, returns slots for every teacher.
+	 */
+	@Query("""
+			select s from TimeSlot s
+			where s.deleted = false
+			  and s.teacherAssignment.unassignedAt is null
+			  and s.teacherAssignment.academicPeriod.publicUuid = :periodUuid
+			  and (:teacherUuid is null
+			       or s.teacherAssignment.teacher.publicUuid = :teacherUuid)
+			order by s.teacherAssignment.teacher.lastName asc,
+			         s.dayOfWeek asc, s.startTime asc
+			""")
+	List<TimeSlot> findActiveByPeriodAndOptionalTeacher(
+			@Param("periodUuid") UUID periodUuid,
+			@Param("teacherUuid") UUID teacherUuid);
 }

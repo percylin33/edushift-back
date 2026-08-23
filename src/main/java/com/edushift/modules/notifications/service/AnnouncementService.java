@@ -34,6 +34,11 @@ import org.springframework.transaction.annotation.Transactional;
  *       ANNOUNCEMENT) and call {@link #markRead(UUID, UUID)} to clear
  *       the unread flag.</li>
  * </ol>
+ *
+ * <p><b>Email policy:</b> publish uses {@link Channel#IN_APP} only.
+ * Mass EMAIL fan-out is disabled while SMTP is Gmail App Password
+ * (rate-limit / account block risk). Re-enable only with a transactional
+ * provider + batching.</p>
  */
 @Service
 @RequiredArgsConstructor
@@ -119,7 +124,9 @@ public class AnnouncementService {
                             .recipient(uid)
                             .template("ANNOUNCEMENT")
                             .category(Category.ANNOUNCEMENT)
-                            .channel(Channel.BOTH)
+                            // IN_APP only: email fan-out would rate-limit Gmail App Password
+                            // accounts (decenas/cientos de destinatarios por publish).
+                            .channel(Channel.IN_APP)
                             .put("title", a.getTitle())
                             .put("body", a.getBodyHtml())
                             .put("senderName", a.getAuthorUserId().toString())
@@ -139,6 +146,24 @@ public class AnnouncementService {
     @Transactional(readOnly = true)
     public List<Announcement> listPublishedRecent(int limit) {
         return announcementRepo.findPublished(
+                org.springframework.data.domain.PageRequest.of(0, limit)).getContent();
+    }
+
+    /**
+     * DEBT-STUDENT-PRIVACY (Phase 6 / Fase 0.1): list announcements visible
+     * to the given user. Filters {@code PUBLISHED} announcements by
+     * {@code audience_type} so users only see announcements that target
+     * them (the {@code announcement_recipients} resolution table is the
+     * source of truth for "is this user a recipient?").
+     *
+     * <p>Cross-tenant isolation is enforced both by the
+     * {@code @TenantId} Hibernate filter and by the manual
+     * {@code tenant_id} predicates in the query.</p>
+     */
+    @Transactional(readOnly = true)
+    public List<Announcement> listPublishedForUser(UUID userId, int limit) {
+        UUID tenantId = TenantContext.currentRequired();
+        return announcementRepo.findPublishedForUser(tenantId, userId,
                 org.springframework.data.domain.PageRequest.of(0, limit)).getContent();
     }
 

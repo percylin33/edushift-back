@@ -121,7 +121,7 @@ class PasswordPolicyValidationTest {
 	void registerTenantRejectsTrivialPasswords() {
 		RegisterTenantRequest body = new RegisterTenantRequest(
 				"Acme Corp", "acme-co", "founder@acme.test", "12345678",
-				"Founder", "Doe");
+				"Founder", "Doe", "tokentokentoken12");
 
 		Set<? extends jakarta.validation.ConstraintViolation<?>> violations =
 				validator.validate(body);
@@ -134,7 +134,7 @@ class PasswordPolicyValidationTest {
 	void registerTenantAcceptsStrongPassword() {
 		RegisterTenantRequest body = new RegisterTenantRequest(
 				"Acme Corp", "acme-co", "founder@acme.test", "Sup3rSecret!",
-				"Founder", "Doe");
+				"Founder", "Doe", "tokentokentoken12");
 
 		Set<? extends jakarta.validation.ConstraintViolation<?>> violations =
 				validator.validate(body);

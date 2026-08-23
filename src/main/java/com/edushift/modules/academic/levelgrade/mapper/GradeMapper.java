@@ -5,11 +5,11 @@ import com.edushift.modules.academic.levelgrade.dto.GradeResponse;
 import com.edushift.modules.academic.levelgrade.dto.UpdateGradeRequest;
 import com.edushift.modules.academic.levelgrade.entity.AcademicLevel;
 import com.edushift.modules.academic.levelgrade.entity.Grade;
+import com.edushift.modules.academic.levelgrade.entity.TeachingMode;
 import org.springframework.stereotype.Component;
 
 /**
- * Hand-written mapper for {@link Grade}. Same convention as the rest of
- * the codebase (no MapStruct).
+ * Hand-written mapper for {@link Grade}.
  */
 @Component
 public class GradeMapper {
@@ -20,6 +20,9 @@ public class GradeMapper {
 				grade.getLevel() != null ? grade.getLevel().getPublicUuid() : null,
 				grade.getName(),
 				grade.getOrdinal(),
+				grade.getTeachingMode() != null
+						? grade.getTeachingMode()
+						: TeachingMode.POLIDOCENTE,
 				grade.getCreatedAt(),
 				grade.getUpdatedAt()
 		);
@@ -30,6 +33,9 @@ public class GradeMapper {
 		grade.setLevel(level);
 		grade.setName(request.name());
 		grade.setOrdinal(request.ordinal());
+		grade.setTeachingMode(request.teachingMode() != null
+				? request.teachingMode()
+				: TeachingMode.POLIDOCENTE);
 		return grade;
 	}
 
@@ -39,6 +45,9 @@ public class GradeMapper {
 		}
 		if (patch.ordinal() != null) {
 			grade.setOrdinal(patch.ordinal());
+		}
+		if (patch.teachingMode() != null) {
+			grade.setTeachingMode(patch.teachingMode());
 		}
 	}
 }

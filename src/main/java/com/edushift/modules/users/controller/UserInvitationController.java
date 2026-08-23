@@ -29,7 +29,9 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -88,7 +90,9 @@ public class UserInvitationController {
 						request.email(),
 						request.firstName(),
 						request.lastName(),
-						request.roles()));
+						request.roles(),
+						request.documentType(),
+						request.documentNumber()));
 		return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.ok(response));
 	}
 
@@ -124,6 +128,20 @@ public class UserInvitationController {
 		return ResponseEntity.ok(ApiResponse.ok(response));
 	}
 
+	@PostMapping("/{publicUuid}/resend")
+	@SecurityRequirement(name = "bearerAuth")
+	@PreAuthorize("hasRole('TENANT_ADMIN')")
+	@Operation(
+			summary = "Resend a pending invitation (TENANT_ADMIN)",
+			description = "Rotates the token, extends TTL by 7 days, and re-sends "
+					+ "the activation email. Returns the new token once for copy-link. "
+					+ "409 if the invitation is ACCEPTED, CANCELLED, or EXPIRED."
+	)
+	public ResponseEntity<ApiResponse<InvitationResponse>> resend(@PathVariable UUID publicUuid) {
+		InvitationResponse response = service.resendInvitation(publicUuid);
+		return ResponseEntity.ok(ApiResponse.ok(response));
+	}
+
 	// ===========================================================================
 	// Public paths — token-driven
 	// ===========================================================================
@@ -134,16 +152,20 @@ public class UserInvitationController {
 			description = "Returns the recipient's name and tenant name so the "
 					+ "accept page can render 'Welcome to {tenant}, {firstName}'. "
 					+ "Maps token errors to 404 (not found) and 410 (gone: "
-					+ "ACCEPTED / CANCELLED / EXPIRED)."
+					+ "ACCEPTED / CANCELLED / EXPIRED). Optional ?tenant= must "
+					+ "match the invitation's school (403 INVITATION_TENANT_MISMATCH)."
 	)
 	public ResponseEntity<ApiResponse<InvitationPreflightResponse>> preflight(
 			@PathVariable
 			@NotBlank(message = "token is required")
 			@Size(min = 16, max = 128, message = "token length out of range")
 			@Parameter(description = "Opaque invitation token")
-			String token
+			String token,
+			@RequestParam(value = "tenant", required = false)
+			@Parameter(description = "School slug from the accept URL (?tenant=)")
+			String tenant
 	) {
-		InvitationPreflightResponse response = service.getPreflight(token);
+		InvitationPreflightResponse response = service.getPreflight(token, tenant);
 		return ResponseEntity.ok(ApiResponse.ok(response));
 	}
 
@@ -155,12 +177,20 @@ public class UserInvitationController {
 					+ "and returns a logged-in session — same envelope as "
 					+ "/v1/auth/login. Maps token errors to 404 / 410 (see "
 					+ "preflight). Returns 201 Created because a new user "
-					+ "resource is created."
+					+ "resource is created. Optional body.tenantSlug (or "
+					+ "X-Tenant-Slug) must match the invitation (UAT-CD-11)."
 	)
 	public ResponseEntity<AuthResponse> accept(
-			@Valid @RequestBody AcceptInvitationRequest request
+			@Valid @RequestBody AcceptInvitationRequest request,
+			@RequestHeader(value = "X-Tenant-Slug", required = false) String tenantSlugHeader
 	) {
-		AuthResponse response = service.acceptInvitation(request);
+		AcceptInvitationRequest effective = request;
+		if ((request.tenantSlug() == null || request.tenantSlug().isBlank())
+				&& tenantSlugHeader != null && !tenantSlugHeader.isBlank()) {
+			effective = new AcceptInvitationRequest(
+					request.token(), request.password(), tenantSlugHeader.trim());
+		}
+		AuthResponse response = service.acceptInvitation(effective);
 		return ResponseEntity.status(HttpStatus.CREATED).body(response);
 	}
 }

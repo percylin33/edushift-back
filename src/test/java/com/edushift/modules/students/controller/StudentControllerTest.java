@@ -107,6 +107,7 @@ private static final String BASE = "/v1/students";
 				"ada@acme.test", null, null,
 				EnrollmentStatus.ENROLLED, LocalDate.of(2026, 3, 1),
 				null,
+				null,
 				new HashMap<>(),
 				Instant.parse("2026-01-01T00:00:00Z"),
 				Instant.parse("2026-06-01T00:00:00Z"));

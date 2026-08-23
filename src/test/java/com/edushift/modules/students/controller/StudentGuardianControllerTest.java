@@ -102,7 +102,7 @@ class StudentGuardianControllerTest {
 				firstName, "Lovelace",
 				firstName + " Lovelace",
 				"anna@acme.test", "+51 999", "Engineer",
-				type, primary, true);
+				type, primary, true, null, null);
 	}
 
 	// ===========================================================================

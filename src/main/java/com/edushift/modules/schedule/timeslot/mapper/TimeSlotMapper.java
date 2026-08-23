@@ -116,6 +116,26 @@ public class TimeSlotMapper {
 		);
 	}
 
+	/**
+	 * Portal student/parent view: teacher, section, course and period
+	 * are all populated so a weekly grid can render without extra calls.
+	 */
+	public ScheduleSlotItem toPortalScheduleItem(TimeSlot slot) {
+		TeacherAssignment a = slot.getTeacherAssignment();
+		return new ScheduleSlotItem(
+				slot.getPublicUuid(),
+				a.getPublicUuid(),
+				slot.getDayOfWeek(),
+				slot.getStartTime(),
+				slot.getEndTime(),
+				slot.getClassroom(),
+				toScheduleTeacherRef(a.getTeacher()),
+				toScheduleCourseRef(a.getCourse()),
+				toScheduleSectionRef(a.getSection()),
+				toSchedulePeriodRef(a.getAcademicPeriod())
+		);
+	}
+
 	// =========================================================================
 	// AssignmentRef (TimeSlotResponse)
 	// =========================================================================

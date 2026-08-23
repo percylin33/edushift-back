@@ -283,7 +283,7 @@ class StudentBulkImportRunnerTest {
 				null, Gender.NOT_SPECIFIED,
 				null, null, null,
 				com.edushift.modules.students.entity.EnrollmentStatus.PENDING, null,
-				null, new HashMap<>(), null, null);
+				null, null, new HashMap<>(), null, null);
 	}
 
 	private static void setIdViaReflection(Object entity, UUID id) {

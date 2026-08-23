@@ -6,6 +6,7 @@ import com.edushift.modules.files.dto.UploadConfirmation;
 import com.edushift.modules.files.dto.UploadRequest;
 import com.edushift.modules.files.dto.UploadRequestResponse;
 import com.edushift.modules.files.entity.FileObject;
+import com.edushift.modules.files.entity.FileUploadStatus;
 import com.edushift.modules.files.exception.FileNotFoundException;
 import com.edushift.modules.files.service.FileObjectService;
 import com.edushift.modules.files.storage.FirebaseStorageService;
@@ -40,6 +41,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RequestPart;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
 
 /**
  * REST adapter for the {@code files} module (Sprint 7a / BE-7a.0).
@@ -69,7 +71,7 @@ import org.springframework.web.multipart.MultipartFile;
  */
 @Slf4j
 @RestController
-@RequestMapping("/v1/files")
+@RequestMapping("/files")
 @RequiredArgsConstructor
 @Tag(name = "Files",
 		description = "LMS binary registry + download endpoint. Cross-tenant "
@@ -119,7 +121,7 @@ public class FileObjectController {
 
 		// Firebase with serve-from-controller=false: redirect to a
 		// pre-signed URL so the heavy bytes never touch this server.
-		if (usesSignedUrlRedirect()) {
+		if (usesSignedUrlRedirect() && !isBrandingAsset(entity)) {
 			String signed = storageService.presignedGetUrl(
 					entity.getTenantId(), entity.getRemoteKey(),
 					storageProperties.getFirebase().getSignedUrlTtlSeconds());
@@ -141,6 +143,45 @@ public class FileObjectController {
 				.header(HttpHeaders.CONTENT_DISPOSITION,
 						"attachment; filename=\"" + safeFilename(entity.getOriginalName()) + "\"")
 				.cacheControl(CacheControl.noStore().mustRevalidate())
+				.body(new InputStreamResource(stream));
+	}
+
+	// =====================================================================
+	// GET /v1/files/public/{publicUuid}  (unauthenticated branding assets)
+	// =====================================================================
+
+	/**
+	 * Public, stable URL for tenant branding images (logo / login background).
+	 * Must stay reachable from the login page without a bearer token.
+	 * Only serves READY objects under {@code /lms/branding/} with an image MIME.
+	 */
+	@GetMapping("/public/{publicUuid}")
+	@Operation(summary = "Download a public branding image (no auth)",
+			description = "Serves logo / login-background bytes for the white-label "
+					+ "login screen. Rejects anything that is not a READY branding "
+					+ "image (404) so the public surface cannot be used as a "
+					+ "generic file CDN.")
+	public ResponseEntity<?> downloadPublicBranding(@PathVariable UUID publicUuid) {
+		// Unauthenticated requests run under the Hibernate root sentinel, so
+		// findByPublicUuid is not tenant-filtered — we must gate by module path.
+		FileObject entity = fileObjectService.findByPublicUuid(publicUuid)
+				.orElseThrow(() -> new FileNotFoundException(publicUuid.toString()));
+
+		if (!isBrandingAsset(entity)
+				|| entity.getStatus() != FileUploadStatus.READY
+				|| !isImageContentType(entity.getContentType())) {
+			throw new FileNotFoundException(publicUuid.toString());
+		}
+
+		InputStream stream = storageService.open(
+				entity.getTenantId(), entity.getRemoteKey());
+
+		return ResponseEntity.ok()
+				.contentType(resolveContentType(entity))
+				.contentLength(entity.getSizeBytes())
+				.header(HttpHeaders.CONTENT_DISPOSITION,
+						"inline; filename=\"" + safeFilename(entity.getOriginalName()) + "\"")
+				.cacheControl(CacheControl.maxAge(java.time.Duration.ofDays(7)).cachePublic())
 				.body(new InputStreamResource(stream));
 	}
 
@@ -261,12 +302,17 @@ public class FileObjectController {
 
 	/**
 	 * Build a stable download URL for {@link FileObjectResponse}.
-	 * For the controller-routed providers (LOCAL_FS, or FIREBASE with
-	 * {@code serve-from-controller=true}) the URL is a path against
-	 * the same backend. For FIREBASE with the controller bypass we
-	 * eagerly sign and return the absolute URL.
+	 * Branding assets always get the public absolute URL (login page has no
+	 * bearer). Other assets use the authenticated download path or a
+	 * short-lived signed GCS URL when Firebase bypasses the controller.
 	 */
 	private String resolveDownloadUrl(FileObject entity, UUID publicUuid) {
+		if (isBrandingAsset(entity)) {
+			return ServletUriComponentsBuilder.fromCurrentContextPath()
+					.path("/v1/files/public/")
+					.path(publicUuid.toString())
+					.toUriString();
+		}
 		if (usesSignedUrlRedirect()) {
 			String signed = storageService.presignedGetUrl(
 					entity.getTenantId(), entity.getRemoteKey(),
@@ -277,6 +323,19 @@ public class FileObjectController {
 		}
 		// Controller path (relative; FE prefixes with the API base).
 		return "/api/v1/files/" + publicUuid + "/download";
+	}
+
+	/**
+	 * Branding module objects live at
+	 * {@code tenants/{tid}/lms/branding/{uuid}.ext} (see {@code StoredObject.buildKey}).
+	 */
+	private static boolean isBrandingAsset(FileObject entity) {
+		String key = entity.getRemoteKey();
+		return key != null && key.contains("/lms/branding/");
+	}
+
+	private static boolean isImageContentType(String contentType) {
+		return contentType != null && contentType.toLowerCase().startsWith("image/");
 	}
 
 	private static MediaType resolveContentType(FileObject entity) {

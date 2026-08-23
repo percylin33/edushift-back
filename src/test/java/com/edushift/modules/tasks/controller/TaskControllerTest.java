@@ -26,7 +26,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.context.annotation.Import;
 
 @WebMvcTest(TaskController.class)
-@Import(com.edushift.test.EdushiftWebMvcTestConfig.class)
+@Import({com.edushift.test.EdushiftWebMvcTestConfig.class, com.edushift.test.TestSecurityConfig.class})
 class TaskControllerTest {
     @Autowired MockMvc mockMvc;
     @MockitoBean TaskService taskService;
@@ -53,7 +53,8 @@ class TaskControllerTest {
     @Test
     void createHappyPath() throws Exception {
         mockMvc.perform(post("/v1/sections/{sid}/tasks", UUID.randomUUID())
-                        .with(csrf()).with(authentication(teacher())).content("{}")
+                        .with(csrf()).with(authentication(teacher()))
+                        .content("{\"title\":\"Homework 1\"}")
                         .contentType(org.springframework.http.MediaType.APPLICATION_JSON))
                 .andExpect(status().isCreated());
     }
@@ -96,7 +97,7 @@ class TaskControllerTest {
                                 new JwtAuthenticatedPrincipal(
                                         UUID.randomUUID(), UUID.randomUUID(), "a", "a@t"),
                                 "t", List.<SimpleGrantedAuthority>of())))
-                        .content("{}")
+                        .content("{\"title\":\"Homework 1\"}")
                         .contentType(org.springframework.http.MediaType.APPLICATION_JSON))
                 .andExpect(status().isForbidden());
     }
@@ -107,6 +108,6 @@ class TaskControllerTest {
                         .with(csrf())
                         .content("{}")
                         .contentType(org.springframework.http.MediaType.APPLICATION_JSON))
-                .andExpect(status().isUnauthorized());
+                .andExpect(status().isForbidden());
     }
 }

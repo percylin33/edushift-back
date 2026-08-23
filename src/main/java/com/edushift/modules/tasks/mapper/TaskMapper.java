@@ -7,6 +7,8 @@ import org.springframework.stereotype.Component;
 
 /**
  * Hand-written mapper for {@link Task} (Sprint 7a / BE-7a.2).
+ *
+ * <p>Status, publishedAt and archivedAt added in BUG-2026-07-31-04.
  */
 @Component
 public class TaskMapper {
@@ -22,6 +24,9 @@ public class TaskMapper {
 				entity.getAttachmentPublicUuid(),
 				entity.getOwnerUserId(),
 				entity.isAllowResubmission(),
+				entity.getStatus(),
+				entity.getPublishedAt(),
+				entity.getArchivedAt(),
 				entity.getCreatedAt(),
 				entity.getUpdatedAt());
 	}
@@ -33,6 +38,7 @@ public class TaskMapper {
 				entity.getDueAt(),
 				entity.getAttachmentPublicUuid() != null,
 				entity.getOwnerUserId(),
+				entity.getStatus(),
 				entity.getCreatedAt());
 	}
 }

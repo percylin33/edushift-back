@@ -66,7 +66,11 @@ public class AnnouncementController {
     public ApiResponse<List<AnnouncementResponse>> listPublished(
             @RequestParam(defaultValue = "20") int limit) {
         int safe = Math.min(Math.max(limit, 1), 100);
-        List<AnnouncementResponse> data = service.listPublishedRecent(safe).stream()
+        // DEBT-STUDENT-PRIVACY (Fase 0.1): el listado ahora se filtra por
+        // audiencia. Anteriormente devolvía todos los PUBLISHED del tenant,
+        // lo que exponía anuncios ROLE=TEACHER a STUDENT/PARENT.
+        UUID actor = me();
+        List<AnnouncementResponse> data = service.listPublishedForUser(actor, safe).stream()
                 .map(AnnouncementResponse::from)
                 .toList();
         return ApiResponse.ok(data);

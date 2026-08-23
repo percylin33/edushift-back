@@ -8,16 +8,11 @@ import com.edushift.modules.academic.section.dto.SectionResponse;
 import com.edushift.modules.academic.section.dto.UpdateSectionRequest;
 import com.edushift.modules.academic.section.entity.Section;
 import com.edushift.modules.academic.year.entity.AcademicYear;
+import com.edushift.modules.teachers.entity.Teacher;
 import org.springframework.stereotype.Component;
 
 /**
- * Hand-written mapper for {@link Section}. Same convention as the rest
- * of the codebase (no MapStruct).
- *
- * <p>The mapper assumes the entity's parent associations
- * ({@code academicYear}, {@code grade}, {@code grade.level}) are
- * <em>initialised</em> before mapping. The service layer takes care of
- * loading them eagerly inside the same transaction.</p>
+ * Hand-written mapper for {@link Section}.
  */
 @Component
 public class SectionMapper {
@@ -26,6 +21,7 @@ public class SectionMapper {
 		AcademicYear year = section.getAcademicYear();
 		Grade grade = section.getGrade();
 		AcademicLevel level = grade != null ? grade.getLevel() : null;
+		Teacher homeroom = section.getHomeroomTeacher();
 
 		return new SectionResponse(
 				section.getPublicUuid(),
@@ -35,12 +31,16 @@ public class SectionMapper {
 				grade != null ? grade.getPublicUuid() : null,
 				grade != null ? grade.getName() : null,
 				grade != null ? grade.getOrdinal() : null,
+				grade != null && grade.getTeachingMode() != null
+						? grade.getTeachingMode().name() : null,
 				level != null ? level.getPublicUuid() : null,
 				level != null ? level.getCode() : null,
 				level != null ? level.getName() : null,
 				section.getName(),
 				section.getCapacity(),
 				section.getDisplayOrder(),
+				homeroom != null ? homeroom.getPublicUuid() : null,
+				homeroom != null ? homeroom.fullName() : null,
 				section.getCreatedAt(),
 				section.getUpdatedAt()
 		);

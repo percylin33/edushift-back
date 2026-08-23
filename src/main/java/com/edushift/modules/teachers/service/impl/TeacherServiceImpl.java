@@ -227,6 +227,8 @@ public class TeacherServiceImpl implements TeacherService {
 						teacher.getFirstName(),
 						teacher.getLastName(),
 						Set.of(UserRole.TEACHER.name()),
+						teacher.getDocumentType(),
+						teacher.getDocumentNumber(),
 						metadata));
 
 		log.info("[teachers] invited -- teacher={} email='{}' invitationId={}",

@@ -83,14 +83,15 @@ public class AttendanceQrController {
 			MediaType.APPLICATION_OCTET_STREAM_VALUE
 	})
 	@SecurityRequirement(name = "bearerAuth")
-	@PreAuthorize("hasAnyRole('TENANT_ADMIN','TEACHER')")
+	@PreAuthorize("hasAnyRole('TENANT_ADMIN','TEACHER','STUDENT')")
 	@Operation(summary = "Issue and render the student's QR credential",
 			description = "Returns the binary QR image (PNG by default; "
 					+ "SVG when Accept: image/svg+xml or ?format=svg). "
 					+ "Mutates the active row: every call mints a fresh "
 					+ "JWT and revokes the previous one. Use "
 					+ "GET /attendance-qr/info for a read-only status "
-					+ "check.")
+					+ "check. STUDENT may only request their own QR — "
+					+ "service-layer ownership check enforces this.")
 	public ResponseEntity<byte[]> getQr(
 			@PathVariable UUID publicUuid,
 			@RequestParam(name = "format", required = false)
@@ -101,7 +102,11 @@ public class AttendanceQrController {
 
 		MediaType chosen = resolveFormat(request, format);
 
-		IssuedQr issued = qrService.getOrIssueQr(publicUuid);
+		// DEBT-STUDENT-PRIVACY (Fase 0.4): STUDENT may only ask for their
+		// own QR. The service-layer helper enforces the row-level check
+		// (current user → student → studentPublicUuid match) so the gate
+		// is consistent across getQr / getInfo / rotate.
+		IssuedQr issued = qrService.getOrIssueQrForCaller(publicUuid);
 
 		byte[] body = MediaType.IMAGE_PNG.equals(chosen)
 				? qrRenderer.renderPng(issued.jwt())
@@ -129,16 +134,18 @@ public class AttendanceQrController {
 
 	@GetMapping(value = "/info", produces = MediaType.APPLICATION_JSON_VALUE)
 	@SecurityRequirement(name = "bearerAuth")
-	@PreAuthorize("hasAnyRole('TENANT_ADMIN','TEACHER')")
+	@PreAuthorize("hasAnyRole('TENANT_ADMIN','TEACHER','STUDENT')")
 	@Operation(summary = "Read-only metadata for the student's active QR",
 			description = "Returns issuedAt of the current active row, "
 					+ "or 200 with data=null if the alumno has never been "
 					+ "issued a QR. Never mutates the row — use this in "
 					+ "the FE to decide between 'Generar credencial' and "
-					+ "'Reimprimir credencial' before calling GET.")
+					+ "'Reimprimir credencial' before calling GET. "
+					+ "STUDENT may only request their own QR.")
 	public ResponseEntity<ApiResponse<AttendanceQrInfo>> getInfo(
 			@PathVariable UUID publicUuid) {
-		AttendanceQrInfo info = qrService.getInfo(publicUuid);
+		// Same ownership check as getQr().
+		AttendanceQrInfo info = qrService.getInfoForCaller(publicUuid);
 		return ResponseEntity.ok(ApiResponse.ok(info));
 	}
 

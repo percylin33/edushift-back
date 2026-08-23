@@ -16,6 +16,7 @@ import com.edushift.modules.tasks.dto.CreateTaskRequest;
 import com.edushift.modules.tasks.dto.TaskResponse;
 import com.edushift.modules.tasks.dto.UpdateTaskRequest;
 import com.edushift.modules.tasks.entity.Task;
+import com.edushift.modules.tasks.entity.TaskStatus;
 import com.edushift.modules.tasks.exception.DueAtInPastException;
 import com.edushift.modules.tasks.exception.RecordEmptyPatchException;
 import com.edushift.modules.tasks.exception.SectionNotFoundException;
@@ -219,11 +220,11 @@ class TaskServiceImplTest {
             when(taskMapper.toSummary(t1)).thenReturn(
                     new com.edushift.modules.tasks.dto.TaskSummary(
                             t1.getPublicUuid(), "T1", t1.getDueAt(), false,
-                            t1.getOwnerUserId(), t1.getCreatedAt()));
+                            t1.getOwnerUserId(), TaskStatus.DRAFT, t1.getCreatedAt()));
             when(taskMapper.toSummary(t2)).thenReturn(
                     new com.edushift.modules.tasks.dto.TaskSummary(
                             t2.getPublicUuid(), "T2", t2.getDueAt(), false,
-                            t2.getOwnerUserId(), t2.getCreatedAt()));
+                            t2.getOwnerUserId(), TaskStatus.DRAFT, t2.getCreatedAt()));
 
             var page = service.listBySection(section.getPublicUuid(), p);
 
@@ -514,6 +515,7 @@ class TaskServiceImplTest {
         t.setDueAt(Instant.now().plus(1, ChronoUnit.DAYS));
         t.setOwnerUserId(UUID.randomUUID());
         t.setAllowResubmission(true);
+        t.setStatus(TaskStatus.DRAFT);
         t.setCreatedAt(Instant.parse("2026-05-01T00:00:00Z"));
         t.setUpdatedAt(Instant.parse("2026-05-01T00:00:00Z"));
         return t;
@@ -529,6 +531,9 @@ class TaskServiceImplTest {
                 t.getAttachmentPublicUuid(),
                 t.getOwnerUserId(),
                 t.isAllowResubmission(),
+                TaskStatus.DRAFT,
+                null,
+                null,
                 t.getCreatedAt(),
                 t.getUpdatedAt());
     }

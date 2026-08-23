@@ -21,7 +21,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
-@RequestMapping("/v1/ai/prompts")
+@RequestMapping("/ai/prompts")
 @RequiredArgsConstructor
 @Tag(name = "AI prompt management",
      description = "Admin CRUD for AI prompt templates (Sprint 18 / BE-18.5)")

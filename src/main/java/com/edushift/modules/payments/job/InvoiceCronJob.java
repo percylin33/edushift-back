@@ -1,10 +1,14 @@
 package com.edushift.modules.payments.job;
 
+import com.edushift.modules.auth.repository.UserRepository;
+import com.edushift.modules.notifications.entity.Notification;
+import com.edushift.modules.notifications.event.NotificationEvent;
 import com.edushift.modules.payments.entity.Invoice;
 import com.edushift.modules.payments.entity.Subscription;
 import com.edushift.modules.payments.entity.Subscription.BillingPeriod;
 import com.edushift.modules.payments.repository.InvoiceRepository;
 import com.edushift.modules.payments.repository.SubscriptionRepository;
+import com.edushift.modules.students.repository.StudentRepository;
 import com.edushift.shared.multitenancy.TenantContext;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -12,10 +16,14 @@ import java.time.YearMonth;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.time.temporal.ChronoUnit;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
@@ -56,6 +64,9 @@ public class InvoiceCronJob {
 
     private final SubscriptionRepository subscriptionRepo;
     private final InvoiceRepository invoiceRepo;
+    private final ApplicationEventPublisher eventPublisher;
+    private final UserRepository userRepository;
+    private final StudentRepository studentRepository;
 
     @Value("${app.payments.cron.batch-size:200}")
     private int batchSize;
@@ -110,6 +121,7 @@ public class InvoiceCronJob {
             inv.setIssuedAt(Instant.now());
             inv.setDueAt(now.plus(15, ChronoUnit.DAYS));
             invoiceRepo.save(inv);
+            publishPaymentDue(inv);
 
             // Advance the subscription's next_billing_at.
             Instant next = advanceBilling(s, period, now);
@@ -121,6 +133,39 @@ public class InvoiceCronJob {
                     s.getAmountCents(), s.getCurrency());
             return Boolean.TRUE;
         });
+    }
+
+    private void publishPaymentDue(Invoice inv) {
+        var guardian = userRepository.findByPublicUuid(inv.getGuardianUserId()).orElse(null);
+        String parentName = guardian == null
+                ? ""
+                : (guardian.getFirstName() + " " + guardian.getLastName()).trim();
+        String studentName = studentRepository.findByPublicUuid(inv.getStudentId())
+                .map(s -> s.fullName())
+                .orElse("");
+        String amount = String.format(Locale.US, "%s %.2f",
+                inv.getCurrency() == null ? "PEN" : inv.getCurrency(),
+                inv.getTotalCents() / 100.0);
+        Map<String, Object> payload = new HashMap<>();
+        payload.put("invoiceNumber", inv.getPeriodLabel());
+        payload.put("parentName", parentName);
+        payload.put("concept", "Cuota " + inv.getPeriodLabel());
+        payload.put("dueDate", inv.getDueAt() == null ? "" : inv.getDueAt().toString());
+        payload.put("amount", amount);
+        payload.put("invoicePublicUuid", inv.getPublicUuid().toString());
+        payload.put("studentPublicUuid", inv.getStudentId().toString());
+        payload.put("studentName", studentName);
+        eventPublisher.publishEvent(
+                NotificationEvent.builder()
+                        .templateKey("PAYMENT_DUE")
+                        .category(Notification.Category.PAYMENT)
+                        .sourceId(inv.getPublicUuid())
+                        .tenantId(inv.getTenantId())
+                        .recipients(List.of(new NotificationEvent.Recipient(
+                                inv.getGuardianUserId(),
+                                guardian == null ? null : guardian.getEmail())))
+                        .payload(payload)
+                        .build());
     }
 
     private static Instant advanceBilling(Subscription s, YearMonth period, Instant now) {

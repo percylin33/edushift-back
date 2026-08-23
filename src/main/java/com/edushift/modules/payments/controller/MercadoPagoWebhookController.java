@@ -49,7 +49,7 @@ import org.springframework.web.bind.annotation.RestController;
  * </ol>
  */
 @RestController
-@RequestMapping("/api/v1/webhooks/mercadopago")
+@RequestMapping("/webhooks/mercadopago")
 @RequiredArgsConstructor
 @Slf4j
 public class MercadoPagoWebhookController {

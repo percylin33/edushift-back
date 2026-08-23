@@ -11,6 +11,8 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.when;
 
+import com.edushift.modules.admin.invitations.SchoolInvitation;
+import com.edushift.modules.admin.invitations.SchoolInvitationService;
 import com.edushift.modules.auth.dto.AuthResponse;
 import com.edushift.modules.auth.dto.UserSummary;
 import com.edushift.modules.auth.entity.User;
@@ -72,6 +74,7 @@ class TenantServiceImplTest {
 	@Mock private com.edushift.modules.academic.levelgrade.service.AcademicSeedService academicSeedService;
 	@Mock private com.edushift.modules.admin.plans.PlatformPlanRepository platformPlanRepository;
 	@Mock private PlatformTransactionManager txManager;
+	@Mock private SchoolInvitationService schoolInvitationService;
 
 	private TenantServiceImpl service;
 
@@ -88,6 +91,7 @@ class TenantServiceImplTest {
 				authService,
 				academicSeedService,
 				platformPlanRepository,
+				schoolInvitationService,
 				txManager
 		);
 		// Default platform-plan catalog: the production code falls back
@@ -337,6 +341,7 @@ class TenantServiceImplTest {
 		@DisplayName("happy path — persists tenant + admin, issues session, returns AuthResponse")
 		void registersTenantAndAdminAtomically() {
 			RegisterTenantRequest request = sampleRequest("acme-co", "Founder", "founder@acme.test");
+			stubPendingInvite("founder@acme.test");
 
 			when(tenantRepository.findBySlugIgnoreCase("acme-co")).thenReturn(Optional.empty());
 			when(tenantRepository.saveAndFlush(any(Tenant.class)))
@@ -369,7 +374,7 @@ class TenantServiceImplTest {
 			ArgumentCaptor<Tenant> tenantCaptor = ArgumentCaptor.forClass(Tenant.class);
 			verify(tenantRepository, times(1)).saveAndFlush(tenantCaptor.capture());
 			Tenant persisted = tenantCaptor.getValue();
-			assertThat(persisted.getStatus()).isEqualTo(TenantStatus.PENDING);
+			assertThat(persisted.getStatus()).isEqualTo(TenantStatus.ACTIVE);
 			assertThat(persisted.getPlan()).isEqualTo(TenantPlan.TRIAL);
 			assertThat(persisted.getTrialEndsAt()).isNotNull();
 		}
@@ -379,6 +384,7 @@ class TenantServiceImplTest {
 		void normalizesSlugAndEmail() {
 			RegisterTenantRequest request = sampleRequest("  ACME-co  ", "Founder",
 					"  Founder@ACME.test  ");
+			stubPendingInvite("founder@acme.test");
 
 			when(tenantRepository.findBySlugIgnoreCase("acme-co")).thenReturn(Optional.empty());
 			when(tenantRepository.saveAndFlush(any(Tenant.class)))
@@ -408,6 +414,7 @@ class TenantServiceImplTest {
 		@DisplayName("pre-check: slug already taken → ConflictException(TENANT_SLUG_TAKEN), no inserts")
 		void rejectsTakenSlugUpFront() {
 			RegisterTenantRequest request = sampleRequest("acme-co", "Founder", "founder@acme.test");
+			stubPendingInvite("founder@acme.test");
 			Tenant existing = newTenant("acme-co", TenantStatus.ACTIVE);
 			when(tenantRepository.findBySlugIgnoreCase("acme-co")).thenReturn(Optional.of(existing));
 
@@ -424,6 +431,7 @@ class TenantServiceImplTest {
 		@DisplayName("race condition: pre-check passes but INSERT trips unique → translates to ConflictException(TENANT_SLUG_TAKEN)")
 		void racingInsertSurfacesAsConflict() {
 			RegisterTenantRequest request = sampleRequest("acme-co", "Founder", "founder@acme.test");
+			stubPendingInvite("founder@acme.test");
 
 			when(tenantRepository.findBySlugIgnoreCase("acme-co")).thenReturn(Optional.empty());
 			// The production code inspects the SQLState on the wrapped
@@ -465,6 +473,14 @@ class TenantServiceImplTest {
 		return t;
 	}
 
+	private void stubPendingInvite(String email) {
+		SchoolInvitation invitation = new SchoolInvitation();
+		setIdViaReflection(invitation, UUID.fromString("22222222-2222-2222-2222-222222222222"));
+		invitation.setEmail(email);
+		invitation.setPublicUuid(UUID.randomUUID());
+		lenient().when(schoolInvitationService.requirePending(anyString())).thenReturn(invitation);
+	}
+
 	private static RegisterTenantRequest sampleRequest(String slug, String firstName, String email) {
 		return new RegisterTenantRequest(
 				"Acme Corp",
@@ -472,7 +488,8 @@ class TenantServiceImplTest {
 				email,
 				"Sup3rSecret!",
 				firstName,
-				"Doe"
+				"Doe",
+				"tokentokentoken12"
 		);
 	}
 

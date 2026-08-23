@@ -12,6 +12,7 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.edushift.modules.auth.PasswordResetMailer;
 import com.edushift.modules.auth.dto.ResetPasswordValidateResponse;
 import com.edushift.modules.auth.entity.PasswordResetToken;
 import com.edushift.modules.auth.entity.RefreshToken;
@@ -21,12 +22,14 @@ import com.edushift.modules.auth.entity.UserStatus;
 import com.edushift.modules.auth.repository.PasswordResetTokenRepository;
 import com.edushift.modules.auth.repository.RefreshTokenRepository;
 import com.edushift.modules.auth.repository.UserRepository;
+import com.edushift.modules.notifications.entity.Notification;
 import com.edushift.modules.notifications.service.NotificationService;
 import com.edushift.modules.notifications.service.NotificationService.NotifyCommand;
 import com.edushift.modules.tenants.entity.Tenant;
 import com.edushift.modules.tenants.entity.TenantStatus;
 import com.edushift.modules.tenants.repository.TenantRepository;
 import com.edushift.shared.exception.UnauthorizedException;
+import com.edushift.shared.web.FrontendLinks;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.lang.reflect.Field;
 import java.time.Duration;
@@ -66,6 +69,7 @@ class PasswordResetServiceTest {
 	@Mock private RefreshTokenRepository refreshTokenRepository;
 	@Mock private JwtService jwtService;
 	@Mock private NotificationService notificationService;
+	@Mock private PasswordResetMailer passwordResetMailer;
 	@Mock private PasswordEncoder passwordEncoder;
 	@Mock private PlatformTransactionManager txManager;
 
@@ -78,7 +82,8 @@ class PasswordResetServiceTest {
 		service = new PasswordResetService(
 				userRepository, tenantRepository, resetTokenRepository,
 				refreshTokenRepository, jwtService, notificationService,
-				passwordEncoder, txManager, new SimpleMeterRegistry());
+				passwordResetMailer, passwordEncoder, new FrontendLinks("http://localhost:4201"),
+				txManager, new SimpleMeterRegistry());
 		// TransactionTemplate is wired off txManager; configure it to always
 		// return a no-op SimpleTransactionStatus so the lambdas execute.
 		when(txManager.getTransaction(any())).thenReturn(new SimpleTransactionStatus());
@@ -103,8 +108,17 @@ class PasswordResetServiceTest {
 			when(jwtService.issueResetToken(eq(user), eq(tenant), any(UUID.class)))
 					.thenReturn("signed.jwt.token");
 			when(jwtService.resetTokenTtl()).thenReturn(Duration.ofHours(1));
+			when(passwordResetMailer.send(
+					eq("alice@acme.test"), eq(tenant.getName()),
+					eq("http://localhost:4201/auth/reset-password?tenant=acme&token=signed.jwt.token"),
+					eq(60L), anyString())).thenReturn(true);
 
 			service.requestReset("alice@acme.test", "acme", "127.0.0.1");
+
+			verify(passwordResetMailer).send(
+					eq("alice@acme.test"), eq(tenant.getName()),
+					eq("http://localhost:4201/auth/reset-password?tenant=acme&token=signed.jwt.token"),
+					eq(60L), anyString());
 
 			// Token persisted
 			ArgumentCaptor<PasswordResetToken> rowCap = ArgumentCaptor.forClass(PasswordResetToken.class);
@@ -119,8 +133,13 @@ class PasswordResetServiceTest {
 			verify(notificationService).notify(cmdCap.capture());
 			NotifyCommand cmd = cmdCap.getValue();
 			assertThat(cmd.templateKey()).isEqualTo("PASSWORD_RESET");
-			assertThat(cmd.recipientUserId()).isEqualTo(user.getId());
+			assertThat(cmd.recipientUserId()).isEqualTo(user.getPublicUuid());
 			assertThat(cmd.recipientEmail()).isEqualTo(user.getEmail());
+			assertThat(cmd.preferredChannel()).isEqualTo(Notification.Channel.IN_APP);
+			assertThat(cmd.payload())
+					.containsEntry("resetLink",
+							"http://localhost:4201/auth/reset-password?tenant=acme&token=signed.jwt.token")
+					.containsEntry("tenantSlug", "acme");
 		}
 
 		@Test

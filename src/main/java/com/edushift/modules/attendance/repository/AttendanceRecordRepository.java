@@ -56,21 +56,26 @@ public interface AttendanceRecordRepository extends JpaRepository<AttendanceReco
 	List<AttendanceRecord> findBySessionOrderedByStudentName(
 			@Param("session") AttendanceSession session);
 
+	List<AttendanceRecord> findByStudentOrderByOccurredAtDesc(Student student);
+
+	List<AttendanceRecord> findByStudentAndOccurredAtBetweenOrderByOccurredAtDesc(
+			Student student, Instant from, Instant to);
+
 	/**
-	 * Per-student timeline (used by the "Asistencia" tab in
-	 * student-detail and by Sprint 9 reports).
+	 * Per-student timeline (student-detail + family attendance).
+	 * Unbounded {@code from}/{@code to} cannot use {@code :from is null}
+	 * in JPQL: PostgreSQL rejects untyped null Instant binds
+	 * ({@code could not determine data type of parameter $3}).
 	 */
-	@Query("""
-			select r from AttendanceRecord r
-			where r.student = :student
-			  and (:from is null or r.occurredAt >= :from)
-			  and (:to   is null or r.occurredAt <= :to)
-			order by r.occurredAt desc
-			""")
-	List<AttendanceRecord> findByStudentInRange(
-			@Param("student") Student student,
-			@Param("from") Instant from,
-			@Param("to") Instant to);
+	default List<AttendanceRecord> findByStudentInRange(
+			Student student, Instant from, Instant to) {
+		if (from == null && to == null) {
+			return findByStudentOrderByOccurredAtDesc(student);
+		}
+		Instant start = from != null ? from : Instant.EPOCH;
+		Instant end = to != null ? to : Instant.parse("9999-12-31T23:59:59Z");
+		return findByStudentAndOccurredAtBetweenOrderByOccurredAtDesc(student, start, end);
+	}
 
 	/**
 	 * Count of records by status in a window — drives the "today

@@ -41,8 +41,9 @@ public class LlmAutoConfiguration {
 	@Bean
 	@ConditionalOnMissingBean(LlmClient.class)
 	public LlmClient mockLlmClient() {
-		log.warn("[llm-config] No real LLM provider enabled "
-				+ "(app.llm.minimax.enabled=false). "
+		log.warn("[llm-config] No real LLM provider registered "
+				+ "(MiniMaxLlmClient bean absent — typically because "
+				+ "app.llm.minimax.enabled=false or app.llm.minimax.api-key is empty). "
 				+ "Falling back to MockLlmClient — AI responses are deterministic stubs.");
 		return new MockLlmClient();
 	}

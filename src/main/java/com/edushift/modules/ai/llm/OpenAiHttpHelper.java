@@ -92,17 +92,27 @@ final class OpenAiHttpHelper {
      */
     LlmClient.LlmResponse executeOnce(LlmClient.LlmRequest request) {
         try {
-            ChatCompletionsRequest body = new ChatCompletionsRequest(
-                    request.model(),
-                    List.of(
-                            new ChatMessage("system", request.systemPrompt()),
-                            new ChatMessage("user", request.userPrompt())
-                    ),
-                    request.temperature(),
-                    request.maxTokens(),
-                    request.stopSequences(),
-                    request.extra()
-            );
+            // Flatten provider-specific extras (response_format, thinking,
+            // reasoning_split, …) into the top-level OpenAI body. Nesting them
+            // under "extra" is ignored by MiniMax/OpenAI-compatible gateways.
+            Map<String, Object> body = new java.util.LinkedHashMap<>();
+            body.put("model", request.model());
+            body.put("messages", List.of(
+                    new ChatMessage("system", request.systemPrompt()),
+                    new ChatMessage("user", request.userPrompt())
+            ));
+            if (request.temperature() != null) {
+                body.put("temperature", request.temperature());
+            }
+            if (request.maxTokens() != null) {
+                body.put("max_tokens", request.maxTokens());
+            }
+            if (request.stopSequences() != null && !request.stopSequences().isEmpty()) {
+                body.put("stop", request.stopSequences());
+            }
+            if (request.extra() != null && !request.extra().isEmpty()) {
+                body.putAll(request.extra());
+            }
             byte[] payload = objectMapper.writeValueAsBytes(body);
             HttpRequest.Builder b = HttpRequest.newBuilder()
                     .uri(URI.create(stripTrailingSlash(baseUrl) + "/chat/completions"))
@@ -188,16 +198,6 @@ final class OpenAiHttpHelper {
     // Wire-shape records (OpenAI-compatible). Kept package-private — they
     // are an implementation detail of the helper.
     // ---------------------------------------------------------------------
-
-    @JsonIgnoreProperties(ignoreUnknown = true)
-    private record ChatCompletionsRequest(
-            String model,
-            List<ChatMessage> messages,
-            Double temperature,
-            @JsonProperty("max_tokens") Integer maxTokens,
-            @JsonProperty("stop") List<String> stop,
-            Map<String, Object> extra
-    ) {}
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     private record ChatMessage(String role, String content) {}

@@ -11,6 +11,7 @@ import com.edushift.modules.ai.llm.LlmClient.LlmResponse;
 import com.edushift.modules.ai.llm.LlmException;
 import com.edushift.modules.ai.prompt.RubricGeneratorPromptBuilder;
 import com.edushift.modules.ai.repository.AiGenerationRepository;
+import com.edushift.modules.ai.util.LlmJsonSanitizer;
 import com.edushift.modules.evaluations.rubric.entity.Rubric;
 import com.edushift.modules.evaluations.rubric.repository.RubricRepository;
 import com.edushift.shared.exception.ResourceNotFoundException;
@@ -340,9 +341,10 @@ public class RubricGeneratorService {
     }
 
     private GenerateRubricResponse parseAndValidate(String text) {
+        String sanitized = LlmJsonSanitizer.sanitize(text);
         GenerateRubricResponse parsed;
         try {
-            parsed = objectMapper.readValue(text, GenerateRubricResponse.class);
+            parsed = objectMapper.readValue(sanitized, GenerateRubricResponse.class);
         } catch (JsonProcessingException e) {
             throw new AiParseException(
                     "LLM response is not valid JSON: " + firstLine(e.getMessage()), e);

@@ -315,6 +315,7 @@ class TeacherServiceImplTest {
 
 			InvitationResponse stub = new InvitationResponse(
 					UUID.randomUUID(), "ada@acme.test", "Ada", "Lovelace",
+					DocumentType.DNI, "1",
 					Set.of("TEACHER"), InvitationStatus.PENDING,
 					"tok", Instant.now().plusSeconds(3600), null, null, Instant.now());
 			when(invitationService.createInvitation(any(CreateInvitationRequest.class)))
@@ -330,6 +331,8 @@ class TeacherServiceImplTest {
 			verify(invitationService, times(1)).createInvitation(captor.capture());
 			CreateInvitationRequest sent = captor.getValue();
 			assertThat(sent.email()).isEqualTo("ada@acme.test");
+			assertThat(sent.documentType()).isEqualTo(DocumentType.DNI);
+			assertThat(sent.documentNumber()).isEqualTo("1");
 			assertThat(sent.roles()).containsExactly("TEACHER");
 			assertThat(sent.metadata())
 					.containsEntry(TeacherServiceImpl.METADATA_TEACHER_ID_KEY,

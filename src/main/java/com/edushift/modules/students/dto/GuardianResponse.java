@@ -28,6 +28,8 @@ public record GuardianResponse(
 		String occupation,
 		RelationshipType relationship,
 		boolean isPrimaryContact,
-		boolean canPickupStudent
+		boolean canPickupStudent,
+		UUID userId,
+		UUID pendingInvitationPublicUuid
 ) {
 }

@@ -55,6 +55,7 @@ public class AcademicSeedServiceImpl implements AcademicSeedService {
 				grade.setLevel(persistedLevel);
 				grade.setName(gradeDef.name());
 				grade.setOrdinal(gradeDef.ordinal());
+				grade.setTeachingMode(gradeDef.teachingMode());
 				gradeRepository.save(grade);
 				totalGrades++;
 			}

@@ -365,7 +365,7 @@ public class AttendanceController {
 			@PathVariable UUID publicUuid,
 			@Valid @RequestBody com.edushift.modules.attendance.dto.JustifyRequest request) {
 		AttendanceRecordResponse response = attendanceService.justify(
-				publicUuid, request.justificationText());
+				publicUuid, request.justificationText(), request.attachmentPublicUuid());
 		return ResponseEntity.ok(ApiResponse.ok(response));
 	}
 

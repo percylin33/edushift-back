@@ -74,8 +74,8 @@ public class NotificationController {
         List<NotificationResponse> data = page.getContent().stream()
                 .map(n -> NotificationResponse.from(
                         n,
-                        n.getTemplateKey() + " · " + n.getSentAt(),
-                        n.getPayload()))
+                        notificationService.renderSubject(n),
+                        notificationService.renderBody(n)))
                 .toList();
         return ApiResponse.ok(data, ApiResponse.Meta.of(page));
     }

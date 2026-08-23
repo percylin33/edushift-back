@@ -15,6 +15,8 @@ import com.edushift.modules.academic.year.entity.AcademicYear;
 import com.edushift.modules.academic.year.entity.AcademicYearStatus;
 import com.edushift.modules.academic.year.repository.AcademicYearRepository;
 import com.edushift.modules.students.enrollments.repository.StudentEnrollmentRepository;
+import com.edushift.modules.teachers.entity.Teacher;
+import com.edushift.modules.teachers.repository.TeacherRepository;
 import com.edushift.shared.exception.ConflictException;
 import com.edushift.shared.exception.ResourceNotFoundException;
 import com.edushift.shared.multitenancy.TenantContext;
@@ -54,6 +56,7 @@ public class SectionServiceImpl implements
 	private final GradeRepository gradeRepository;
 	private final AcademicLevelRepository levelRepository;
 	private final StudentEnrollmentRepository enrollmentRepository;
+	private final TeacherRepository teacherRepository;
 	private final SectionMapper mapper;
 
 	// =========================================================================
@@ -134,6 +137,9 @@ public class SectionServiceImpl implements
 		ensureNameAvailable(year, grade, request.name(), null);
 
 		Section section = mapper.fromCreate(request, year, grade);
+		if (request.homeroomTeacherPublicUuid() != null) {
+			section.setHomeroomTeacher(loadTeacher(request.homeroomTeacherPublicUuid()));
+		}
 		try {
 			Section saved = sectionRepository.saveAndFlush(section);
 			log.info("[academic.section] created -- publicUuid={} year={} grade={} name={}",
@@ -168,6 +174,12 @@ public class SectionServiceImpl implements
 		}
 
 		mapper.applyUpdate(request, section);
+		if (Boolean.TRUE.equals(request.clearHomeroom())) {
+			section.setHomeroomTeacher(null);
+		}
+		else if (request.homeroomTeacherPublicUuid() != null) {
+			section.setHomeroomTeacher(loadTeacher(request.homeroomTeacherPublicUuid()));
+		}
 
 		try {
 			Section saved = sectionRepository.saveAndFlush(section);
@@ -215,6 +227,11 @@ public class SectionServiceImpl implements
 	private Section loadSection(UUID publicUuid) {
 		return sectionRepository.findByPublicUuid(publicUuid)
 				.orElseThrow(() -> new ResourceNotFoundException("Section", publicUuid));
+	}
+
+	private Teacher loadTeacher(UUID publicUuid) {
+		return teacherRepository.findByPublicUuid(publicUuid)
+				.orElseThrow(() -> new ResourceNotFoundException("Teacher", publicUuid));
 	}
 
 	private void ensureNameAvailable(AcademicYear year, Grade grade, String name,

@@ -71,7 +71,7 @@ class TenantDtoTest {
     @DisplayName("RegisterTenantRequest toString masks the password")
     void registerToStringMasks() {
         var req = new RegisterTenantRequest("Acme", "acme", "admin@acme.test",
-                "Sup3rSecret!", "Ana", "Diaz");
+                "Sup3rSecret!", "Ana", "Diaz", "tokentokentoken12");
         String s = req.toString();
         assertThat(s).contains("acme");
         assertThat(s).contains("admin@acme.test");

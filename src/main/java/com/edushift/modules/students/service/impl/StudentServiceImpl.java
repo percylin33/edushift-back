@@ -1,6 +1,11 @@
 package com.edushift.modules.students.service.impl;
 
+import com.edushift.modules.auth.entity.User;
+import com.edushift.modules.auth.entity.UserRole;
+import com.edushift.modules.auth.repository.UserRepository;
 import com.edushift.modules.students.dto.CreateStudentRequest;
+import com.edushift.modules.students.dto.InviteStudentResponse;
+import com.edushift.modules.students.dto.LinkStudentUserRequest;
 import com.edushift.modules.students.dto.StudentListFilters;
 import com.edushift.modules.students.dto.StudentListItem;
 import com.edushift.modules.students.dto.StudentResponse;
@@ -12,11 +17,21 @@ import com.edushift.modules.students.entity.Student;
 import com.edushift.modules.students.mapper.StudentMapper;
 import com.edushift.modules.students.repository.StudentRepository;
 import com.edushift.modules.students.service.StudentService;
+import com.edushift.modules.users.dto.CreateInvitationRequest;
+import com.edushift.modules.users.dto.InvitationResponse;
+import com.edushift.modules.users.entity.UserInvitation;
+import com.edushift.modules.users.repository.UserInvitationRepository;
+import com.edushift.modules.users.service.UserInvitationService;
+import com.edushift.shared.exception.BusinessException;
 import com.edushift.shared.exception.ConflictException;
 import com.edushift.shared.exception.ResourceNotFoundException;
 import jakarta.persistence.criteria.JoinType;
 import jakarta.persistence.criteria.Predicate;
 import jakarta.persistence.criteria.Subquery;
+import java.time.Instant;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -48,6 +63,12 @@ public class StudentServiceImpl implements StudentService {
 
 	private final StudentRepository studentRepository;
 	private final StudentMapper mapper;
+	private final UserRepository userRepository;
+	private final UserInvitationService invitationService;
+	private final UserInvitationRepository invitationRepository;
+
+	/** Convention key carried in {@code user_invitations.metadata}. */
+	public static final String METADATA_STUDENT_ID_KEY = "studentId";
 
 	// ===========================================================================
 	// Reads
@@ -72,7 +93,8 @@ public class StudentServiceImpl implements StudentService {
 	@Override
 	@Transactional(readOnly = true)
 	public StudentResponse getStudent(UUID publicUuid) {
-		return mapper.toResponse(loadStudent(publicUuid));
+		Student student = loadStudent(publicUuid);
+		return mapper.toResponse(student, pendingInvitationUuid(student));
 	}
 
 	// ===========================================================================
@@ -155,6 +177,73 @@ public class StudentServiceImpl implements StudentService {
 				student.getPublicUuid(), student.getDocumentType(), student.getDocumentNumber());
 	}
 
+	@Override
+	@Transactional
+	public StudentResponse linkUser(UUID publicUuid, LinkStudentUserRequest request) {
+		Student student = loadStudent(publicUuid);
+		if (student.getUserId() != null) {
+			throw new ConflictException("STUDENT_ALREADY_HAS_USER",
+					"Student '" + student.fullName() + "' is already linked to a user");
+		}
+
+		User user = userRepository.findByPublicUuid(request.userPublicUuid())
+				.orElseThrow(() -> new ResourceNotFoundException("User", request.userPublicUuid()));
+
+		if (!user.hasRole(UserRole.STUDENT)) {
+			throw new ConflictException("USER_NOT_STUDENT_ROLE",
+					"Cannot link user '" + user.getEmail() + "': missing STUDENT role");
+		}
+
+		studentRepository.findByUserId(user.getPublicUuid()).ifPresent(other -> {
+			throw new ConflictException("USER_ALREADY_LINKED_TO_STUDENT",
+					"User '" + user.getEmail() + "' is already linked to another student");
+		});
+
+		student.setUserId(user.getPublicUuid());
+		Student saved = studentRepository.saveAndFlush(student);
+		log.info("[students] link-user -- student={} user={}",
+				saved.getPublicUuid(), user.getPublicUuid());
+		return mapper.toResponse(saved, null);
+	}
+
+	@Override
+	@Transactional
+	public InviteStudentResponse invite(UUID publicUuid) {
+		Student student = loadStudent(publicUuid);
+
+		if (student.getUserId() != null) {
+			throw new ConflictException("STUDENT_ALREADY_HAS_USER",
+					"Student '" + student.fullName() + "' already has a linked user");
+		}
+		if (student.getEmail() == null || student.getEmail().isBlank()) {
+			throw new BusinessException("STUDENT_EMAIL_REQUIRED",
+					"Student '" + student.fullName() + "' needs an email to be invited");
+		}
+
+		Map<String, Object> metadata = new HashMap<>();
+		metadata.put(METADATA_STUDENT_ID_KEY, student.getId().toString());
+
+		InvitationResponse response = invitationService.createInvitation(
+				new CreateInvitationRequest(
+						student.getEmail(),
+						student.getFirstName(),
+						student.getLastName(),
+						Set.of(UserRole.STUDENT.name()),
+						student.getDocumentType(),
+						student.getDocumentNumber(),
+						metadata));
+
+		log.info("[students] invited -- student={} email='{}' invitationId={}",
+				student.getPublicUuid(), student.getEmail(), response.publicUuid());
+
+		return new InviteStudentResponse(
+				response.publicUuid(),
+				response.token(),
+				response.expiresAt(),
+				student.getPublicUuid(),
+				student.getEmail());
+	}
+
 	// ===========================================================================
 	// Internals
 	// ===========================================================================
@@ -162,6 +251,15 @@ public class StudentServiceImpl implements StudentService {
 	private Student loadStudent(UUID publicUuid) {
 		return studentRepository.findByPublicUuid(publicUuid)
 				.orElseThrow(() -> new ResourceNotFoundException("Student", publicUuid));
+	}
+
+	private UUID pendingInvitationUuid(Student student) {
+		if (student.getUserId() != null || student.getEmail() == null || student.getEmail().isBlank()) {
+			return null;
+		}
+		return invitationRepository.findActivePendingByEmail(student.getEmail(), Instant.now())
+				.map(UserInvitation::getPublicUuid)
+				.orElse(null);
 	}
 
 	private void ensureDocumentAvailable(DocumentType type, String number, UUID excludeId) {

@@ -23,6 +23,9 @@ public enum AuditAction {
 	JOB_EXECUTED,
 	/** Sprint 14 (MVP Closure) / DEBT-AUTH-4: refresh-token mass revocation triggered by user status change. */
 	ADMIN_REVOKE,
+	/** Sprint 15 / DEBT-BE-F-02: SUPER_ADMIN credential rotation via dev-only break-glass. */
+	ADMIN_PASSWORD_RESET,
+	ADMIN_PASSWORD_RESET_FAILED,
 	CUSTOM
 
 }

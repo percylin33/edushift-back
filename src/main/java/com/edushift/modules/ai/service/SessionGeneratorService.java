@@ -18,6 +18,7 @@ import com.edushift.modules.ai.llm.LlmClient.LlmResponse;
 import com.edushift.modules.ai.llm.LlmException;
 import com.edushift.modules.ai.prompt.SessionGeneratorPromptBuilder;
 import com.edushift.modules.ai.rag.RagContextService;
+import com.edushift.modules.ai.util.LlmJsonSanitizer;
 import com.edushift.modules.ai.rag.RagContextService.RagSnippet;
 import com.edushift.modules.ai.repository.AiGenerationRepository;
 import com.edushift.shared.multitenancy.TenantContext;
@@ -579,9 +580,10 @@ public class SessionGeneratorService {
     // ---------------------------------------------------------------------
 
     private GenerateSessionResponse parseAndValidate(String text, int expectedDuration) {
+        String sanitized = LlmJsonSanitizer.sanitize(text);
         GenerateSessionResponse parsed;
         try {
-            parsed = objectMapper.readValue(text, GenerateSessionResponse.class);
+            parsed = objectMapper.readValue(sanitized, GenerateSessionResponse.class);
         } catch (JsonProcessingException e) {
             throw new AiParseException(
                     "LLM response is not valid JSON: " + firstLine(e.getMessage()), e);

@@ -3,8 +3,7 @@ package com.edushift.modules.ai.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyInt;
-import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -36,15 +35,19 @@ class AiQuotaServiceTest {
 
     private TenantAiSettingsRepository settingsRepo;
     private TenantAiUsageRepository usageRepo;
+    private AiTenantKeyResolver aiTenantKeyResolver;
     private AiQuotaService service;
 
     private static final UUID TENANT_ID = UUID.fromString("11111111-1111-1111-1111-111111111111");
+    private static final UUID OTHER_TENANT_ID = UUID.fromString("22222222-2222-2222-2222-222222222222");
 
     @BeforeEach
     void setUp() {
         settingsRepo = mock(TenantAiSettingsRepository.class);
         usageRepo = mock(TenantAiUsageRepository.class);
-        service = new AiQuotaService(settingsRepo, usageRepo);
+        aiTenantKeyResolver = mock(AiTenantKeyResolver.class);
+        when(aiTenantKeyResolver.resolve(TENANT_ID)).thenReturn(TENANT_ID);
+        service = new AiQuotaService(settingsRepo, usageRepo, aiTenantKeyResolver);
         TenantContext.set(TENANT_ID);
     }
 
@@ -60,7 +63,7 @@ class AiQuotaServiceTest {
     @Test
     @DisplayName("no settings row → AiDisabledException")
     void noSettingsThrowsDisabled() {
-        when(settingsRepo.findFirstByOrderByIdAsc()).thenReturn(Optional.empty());
+        when(settingsRepo.findActiveByTenantId(TENANT_ID)).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> service.verifyCanCall())
                 .isInstanceOf(AiDisabledException.class);
@@ -69,7 +72,7 @@ class AiQuotaServiceTest {
     @Test
     @DisplayName("ai_enabled=false → AiDisabledException")
     void disabledThrows() {
-        when(settingsRepo.findFirstByOrderByIdAsc()).thenReturn(Optional.of(
+        when(settingsRepo.findActiveByTenantId(TENANT_ID)).thenReturn(Optional.of(
                 settings(false, null, null, null)));
 
         assertThatThrownBy(() -> service.verifyCanCall())
@@ -80,7 +83,7 @@ class AiQuotaServiceTest {
     @DisplayName("no daily quota, no monthly quota → passes")
     void unlimitedPasses() {
         TenantAiSettings s = settings(true, null, null, "openai/gpt-4o-mini");
-        when(settingsRepo.findFirstByOrderByIdAsc()).thenReturn(Optional.of(s));
+        when(settingsRepo.findActiveByTenantId(TENANT_ID)).thenReturn(Optional.of(s));
         when(usageRepo.findByUsageDay(any(LocalDate.class))).thenReturn(Optional.empty());
 
         TenantAiSettings returned = service.verifyCanCall();
@@ -92,7 +95,7 @@ class AiQuotaServiceTest {
     void dailyUnderLimitPasses() {
         TenantAiSettings s = settings(true, 100, null, null);
         TenantAiUsage u = usage(50, 0, 0, 0L, 0L);
-        when(settingsRepo.findFirstByOrderByIdAsc()).thenReturn(Optional.of(s));
+        when(settingsRepo.findActiveByTenantId(TENANT_ID)).thenReturn(Optional.of(s));
         when(usageRepo.findByUsageDay(any())).thenReturn(Optional.of(u));
 
         service.verifyCanCall();
@@ -103,7 +106,7 @@ class AiQuotaServiceTest {
     void dailyAtLimitThrows() {
         TenantAiSettings s = settings(true, 100, null, null);
         TenantAiUsage u = usage(100, 0, 0, 0L, 0L);
-        when(settingsRepo.findFirstByOrderByIdAsc()).thenReturn(Optional.of(s));
+        when(settingsRepo.findActiveByTenantId(TENANT_ID)).thenReturn(Optional.of(s));
         when(usageRepo.findByUsageDay(any())).thenReturn(Optional.of(u));
 
         assertThatThrownBy(() -> service.verifyCanCall())
@@ -115,7 +118,7 @@ class AiQuotaServiceTest {
     @DisplayName("monthly token quota + tokens under limit → passes")
     void monthlyTokensUnderLimitPasses() {
         TenantAiSettings s = settings(true, null, 1_000_000L, null);
-        when(settingsRepo.findFirstByOrderByIdAsc()).thenReturn(Optional.of(s));
+        when(settingsRepo.findActiveByTenantId(TENANT_ID)).thenReturn(Optional.of(s));
         when(usageRepo.findByUsageDay(any())).thenReturn(Optional.empty());
         when(usageRepo.sumTokensThisMonth(TENANT_ID)).thenReturn(500_000L);
 
@@ -126,13 +129,48 @@ class AiQuotaServiceTest {
     @DisplayName("monthly token quota + tokens at limit → AiQuotaExceededException (monthly)")
     void monthlyTokensAtLimitThrows() {
         TenantAiSettings s = settings(true, null, 1_000_000L, null);
-        when(settingsRepo.findFirstByOrderByIdAsc()).thenReturn(Optional.of(s));
+        when(settingsRepo.findActiveByTenantId(TENANT_ID)).thenReturn(Optional.of(s));
         when(usageRepo.findByUsageDay(any())).thenReturn(Optional.empty());
         when(usageRepo.sumTokensThisMonth(TENANT_ID)).thenReturn(1_000_000L);
 
         assertThatThrownBy(() -> service.verifyCanCall())
                 .isInstanceOf(AiQuotaExceededException.class)
                 .hasMessageContaining("Monthly");
+    }
+
+    // -------------------------------------------------------------------
+    // Multi-tenant isolation (bug fix: post-Sprint 8)
+    // -------------------------------------------------------------------
+
+    @Test
+    @DisplayName("multi-tenant: queries the repo with the current tenant id, not a singleton")
+    void queriesSettingsByCurrentTenant() {
+        TenantAiSettings s = settings(true, null, null, null);
+        when(settingsRepo.findActiveByTenantId(TENANT_ID)).thenReturn(Optional.of(s));
+        when(usageRepo.findByUsageDay(any())).thenReturn(Optional.empty());
+
+        service.verifyCanCall();
+
+        verify(settingsRepo).findActiveByTenantId(TENANT_ID);
+        verify(settingsRepo, never()).findActiveByTenantId(OTHER_TENANT_ID);
+    }
+
+    @Test
+    @DisplayName("multi-tenant: ai_enabled=false on another tenant does NOT affect the current one")
+    void crossTenantDisabledDoesNotLeak() {
+        // other tenant has AI disabled
+        when(settingsRepo.findActiveByTenantId(OTHER_TENANT_ID))
+                .thenReturn(Optional.of(settings(false, null, null, null)));
+        // current tenant has AI enabled
+        TenantAiSettings s = settings(true, null, null, null);
+        when(settingsRepo.findActiveByTenantId(TENANT_ID)).thenReturn(Optional.of(s));
+        when(usageRepo.findByUsageDay(any())).thenReturn(Optional.empty());
+
+        TenantAiSettings returned = service.verifyCanCall();
+
+        assertThat(returned).isSameAs(s);
+        // Defensive: must never look up by raw id either (would bypass tenant filter).
+        verify(settingsRepo, never()).findById(any());
     }
 
     // -------------------------------------------------------------------

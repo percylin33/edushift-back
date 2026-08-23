@@ -8,6 +8,9 @@ import com.edushift.modules.academic.course.entity.Course;
 import com.edushift.modules.academic.period.entity.AcademicPeriod;
 import com.edushift.modules.academic.unit.entity.Unit;
 import com.edushift.modules.academic.unit.repository.UnitRepository;
+import com.edushift.modules.schedule.daytemplate.service.NonTeachingBlockResolver;
+import com.edushift.modules.schedule.timeslot.entity.TimeSlot;
+import com.edushift.modules.schedule.timeslot.repository.TimeSlotRepository;
 import com.edushift.modules.sessions.learning.dto.CreateLearningSessionRequest;
 import com.edushift.modules.sessions.learning.dto.LearningSessionFilters;
 import com.edushift.modules.sessions.learning.dto.LearningSessionListItem;
@@ -26,6 +29,7 @@ import com.edushift.shared.exception.ConflictException;
 import com.edushift.shared.exception.ResourceNotFoundException;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.LocalTime;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
@@ -62,6 +66,8 @@ public class LearningSessionServiceImpl implements LearningSessionService {
 	private final CompetencyRepository competencyRepository;
 	private final CapacityRepository capacityRepository;
 	private final LearningSessionMapper mapper;
+	private final NonTeachingBlockResolver nonTeachingBlockResolver;
+	private final TimeSlotRepository timeSlotRepository;
 
 	// =========================================================================
 	// CRUD
@@ -78,6 +84,8 @@ public class LearningSessionServiceImpl implements LearningSessionService {
 
 		ensureScheduledDateInPeriod(request.scheduledDate(),
 				assignment.getAcademicPeriod());
+		ensureNotInNonTeachingBlock(assignment, request.scheduledDate(),
+				request.durationMinutes());
 
 		Set<Competency> competencies = resolveCompetencies(
 				request.competencyUuids(), assignment.getCourse());
@@ -156,6 +164,8 @@ public class LearningSessionServiceImpl implements LearningSessionService {
 		if (request.scheduledDate() != null) {
 			ensureScheduledDateInPeriod(session.getScheduledDate(),
 					session.getTeacherAssignment().getAcademicPeriod());
+			ensureNotInNonTeachingBlock(session.getTeacherAssignment(),
+					session.getScheduledDate(), session.getDurationMinutes());
 		}
 
 		// Replace association sets when explicitly provided (even
@@ -344,6 +354,44 @@ public class LearningSessionServiceImpl implements LearningSessionService {
 		if (end != null && scheduledDate.isAfter(end)) {
 			throw new BadRequestException("SESSION_DATE_OUT_OF_PERIOD",
 					"scheduledDate " + scheduledDate + " is after period end " + end);
+		}
+	}
+
+	/**
+	 * ADR-SCH-9: reject sessions whose window falls inside recess/lunch/assembly.
+	 * Resolves start/end from the assignment's TimeSlot(s) for that weekday;
+	 * if none exist, skip (session is date-only without a teaching window).
+	 */
+	private void ensureNotInNonTeachingBlock(TeacherAssignment assignment,
+			LocalDate scheduledDate, Integer durationMinutes) {
+		if (assignment == null || assignment.getSection() == null || scheduledDate == null) {
+			return;
+		}
+		short dayOfWeek = (short) scheduledDate.getDayOfWeek().getValue();
+		List<TimeSlot> daySlots = timeSlotRepository
+				.findAllByAssignmentOrdered(assignment).stream()
+				.filter(s -> s.getDayOfWeek() != null && s.getDayOfWeek() == dayOfWeek)
+				.toList();
+		if (daySlots.isEmpty()) {
+			return;
+		}
+		for (TimeSlot slot : daySlots) {
+			LocalTime start = slot.getStartTime();
+			LocalTime end = slot.getEndTime();
+			if (durationMinutes != null && durationMinutes > 0 && start != null) {
+				LocalTime durationEnd = start.plusMinutes(durationMinutes);
+				if (durationEnd.isBefore(end) || durationEnd.equals(end)) {
+					end = durationEnd;
+				}
+			}
+			try {
+				nonTeachingBlockResolver.assertNoOverlapWithRecess(
+						assignment.getSection(), dayOfWeek, start, end);
+			}
+			catch (com.edushift.modules.schedule.timeslot.service.ScheduleConflictException ex) {
+				throw new BadRequestException("SESSION_IN_NON_TEACHING_BLOCK",
+						ex.getMessage());
+			}
 		}
 	}
 

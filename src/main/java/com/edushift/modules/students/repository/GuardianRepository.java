@@ -24,4 +24,6 @@ public interface GuardianRepository extends JpaRepository<Guardian, UUID> {
 			DocumentType documentType, String documentNumber);
 
 	Optional<Guardian> findByEmailIgnoreCase(String email);
+
+	Optional<Guardian> findByUserId(UUID userId);
 }

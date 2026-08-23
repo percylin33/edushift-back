@@ -11,6 +11,7 @@ public final class TasksErrorCodes {
     public static final String SECTION_NOT_FOUND = "SECTION_NOT_FOUND";
     public static final String DUE_AT_IN_PAST = "DUE_AT_IN_PAST";
     public static final String RECORD_EMPTY_PATCH = "RECORD_EMPTY_PATCH";
+    public static final String TASK_INVALID_STATE = "TASK_INVALID_STATE";
 
     // submission-level
     public static final String SUBMISSION_NOT_FOUND = "SUBMISSION_NOT_FOUND";

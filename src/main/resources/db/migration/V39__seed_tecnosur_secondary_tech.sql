@@ -3,6 +3,12 @@
 -- Realistic development seed for the `tecnosur` tenant.
 -- Perfil: Colegio Técnico Tecnosur — secundaria técnica grande (3er colegio).
 --
+-- Changelog:
+--   2026-07-29 — default_model + ai_generations.model_used cambiados a
+--                 'MiniMax-M3' (provider activo, ver V91 + .env.dev). Antes
+--                 usaban 'anthropic/claude-3.5-sonnet'. Re-aplicar la BD
+--                 desde cero ya no requiere el backfill forward-only de V91.
+--
 -- ⚠️  DEVELOPMENT-ORIENTED SEED.
 -- Idempotent: each block guards on existence; re-runs are safe. Skips
 -- production-like databases (guarded by current_database()).
@@ -181,7 +187,7 @@ BEGIN
             created_at, updated_at, created_by, updated_by
         ) VALUES (
             gen_random_uuid(), gen_random_uuid(), v_tenant_public, true,
-            250, 5000000, 'anthropic/claude-3.5-sonnet',
+            250, 5000000, 'MiniMax-M3',
             NOW(), NOW(), NULL, NULL
         );
         RAISE NOTICE 'V39 tenant_ai_settings seeded for tecnosur';
@@ -1096,6 +1102,9 @@ BEGIN
         RETURN;
     END IF;
 
+    -- Inserción inicial respetando la FK legacy a users(id) — V90 la retargeta
+    -- a users(public_uuid) y aplica su propio backfill (UPDATE ... SET ... = u.public_uuid
+    -- WHERE g.request_user_id = u.id). Aquí dejamos el valor en users.id.
     SELECT id INTO v_user_id
     FROM edushift.users
     WHERE tenant_id = v_tenant_id AND 'TEACHER' = ANY(roles) AND deleted = false
@@ -1112,28 +1121,28 @@ BEGIN
      'Genera 4 preguntas de opción múltiple sobre "bucles for en Python" para 4to secundaria',
      '{"questions":[{"prompt":"¿Cuál es la sintaxis correcta de un bucle for en Python?","type":"MC","points":5,"options":[{"label":"for i in range(10):","isCorrect":true},{"label":"for (i=0;i<10;i++)","isCorrect":false}],"rationale":"Python usa sintaxis de rango"}]}',
      '{"questions":[{"prompt":"¿Cuál es la sintaxis correcta de un bucle for en Python?","type":"MC","points":5,"options":[{"label":"for i in range(10):","isCorrect":true},{"label":"for (i=0;i<10;i++)","isCorrect":false}],"rationale":"Python usa sintaxis de rango"}]}',
-     'COMPLETED', NULL, NULL, 'anthropic/claude-3.5-sonnet', 312, 487, 2150,
+     'COMPLETED', NULL, NULL, 'MiniMax-M3', 312, 487, 2150,
      NOW() - INTERVAL '2 days', NOW() - INTERVAL '2 days'),
 
     (gen_random_uuid(), gen_random_uuid(), v_tenant_id, v_user_id, 'QUIZ_QUESTION_SUGGEST',
      'Genera 3 preguntas sobre la Ley de Ohm aplicadas a circuitos en serie',
      '{"questions":[{"prompt":"Si V=12V y R=4Ω, ¿cuál es la corriente?","type":"MC","points":5,"options":[{"label":"3 A","isCorrect":true},{"label":"48 A","isCorrect":false}],"rationale":"V=IR => I=V/R=3A"}]}',
      '{"questions":[{"prompt":"Si V=12V y R=4Ω, ¿cuál es la corriente?","type":"MC","points":5,"options":[{"label":"3 A","isCorrect":true},{"label":"48 A","isCorrect":false}],"rationale":"V=IR => I=V/R=3A"}]}',
-     'COMPLETED', NULL, NULL, 'anthropic/claude-3.5-sonnet', 245, 378, 1680,
+     'COMPLETED', NULL, NULL, 'MiniMax-M3', 245, 378, 1680,
      NOW() - INTERVAL '4 days', NOW() - INTERVAL '4 days'),
 
     (gen_random_uuid(), gen_random_uuid(), v_tenant_id, v_user_id, 'QUIZ_QUESTION_SUGGEST',
      'Genera 5 preguntas sobre normas ISO en dibujo técnico',
      '{"questions":[{"prompt":"¿Qué norma ISO regula el dibujo técnico mecánico?","type":"MC","points":5,"options":[{"label":"ISO 128","isCorrect":true},{"label":"ISO 9001","isCorrect":false}],"rationale":"ISO 128 es la norma de dibujo técnico"}]}',
      '{"questions":[{"prompt":"¿Qué norma ISO regula el dibujo técnico mecánico?","type":"MC","points":5,"options":[{"label":"ISO 128","isCorrect":true},{"label":"ISO 9001","isCorrect":false}],"rationale":"ISO 128 es la norma de dibujo técnico"}]}',
-     'COMPLETED', NULL, NULL, 'anthropic/claude-3.5-sonnet', 198, 312, 1420,
+     'COMPLETED', NULL, NULL, 'MiniMax-M3', 198, 312, 1420,
      NOW() - INTERVAL '6 days', NOW() - INTERVAL '6 days'),
 
     (gen_random_uuid(), gen_random_uuid(), v_tenant_id, v_user_id, 'QUIZ_QUESTION_SUGGEST',
      'Genera 3 preguntas sobre funciones VLOOKUP en Excel',
      '{"questions":[{"prompt":"¿Qué hace la función VLOOKUP?","type":"MC","points":5,"options":[{"label":"Busca un valor y devuelve otro de la misma fila","isCorrect":true},{"label":"Suma un rango de celdas","isCorrect":false}],"rationale":"VLOOKUP es búsqueda vertical"}]}',
      '{"questions":[{"prompt":"¿Qué hace la función VLOOKUP?","type":"MC","points":5,"options":[{"label":"Busca un valor y devuelve otro de la misma fila","isCorrect":true},{"label":"Suma un rango de celdas","isCorrect":false}],"rationale":"VLOOKUP es búsqueda vertical"}]}',
-     'COMPLETED', NULL, NULL, 'anthropic/claude-3.5-sonnet', 267, 401, 1980,
+     'COMPLETED', NULL, NULL, 'MiniMax-M3', 267, 401, 1980,
      NOW() - INTERVAL '8 days', NOW() - INTERVAL '8 days'),
 
     (gen_random_uuid(), gen_random_uuid(), v_tenant_id, v_user_id, 'QUIZ_QUESTION_SUGGEST',
@@ -1141,14 +1150,14 @@ BEGIN
      '{"choices":[{"finish_reason":"length","index":0,"message":{"role":"assistant","content":""}}]}',
      NULL,
      'FAILED', 'AI_PARSE_ERROR', 'LLM returned no choices (truncated by max_tokens)',
-     'anthropic/claude-3.5-sonnet', 542, 0, 5200,
+     'MiniMax-M3', 542, 0, 5200,
      NOW() - INTERVAL '1 day', NOW() - INTERVAL '1 day'),
 
     (gen_random_uuid(), gen_random_uuid(), v_tenant_id, v_user_id, 'QUIZ_QUESTION_SUGGEST',
      'Genera 4 preguntas sobre trigonometría aplicadas a dibujo técnico',
      '{"questions":[{"prompt":"¿Cuál es la relación entre sen(θ) y cos(90°-θ)?","type":"MC","points":5,"options":[{"label":"Son iguales (identidad trigonométrica fundamental)","isCorrect":true},{"label":"Son opuestos","isCorrect":false}],"rationale":"sen(θ) = cos(90°-θ)"}]}',
      '{"questions":[{"prompt":"¿Cuál es la relación entre sen(θ) y cos(90°-θ)?","type":"MC","points":5,"options":[{"label":"Son iguales (identidad trigonométrica fundamental)","isCorrect":true},{"label":"Son opuestos","isCorrect":false}],"rationale":"sen(θ) = cos(90°-θ)"}]}',
-     'COMPLETED', NULL, NULL, 'anthropic/claude-3.5-sonnet', 287, 423, 1750,
+     'COMPLETED', NULL, NULL, 'MiniMax-M3', 287, 423, 1750,
      NOW() - INTERVAL '10 days', NOW() - INTERVAL '10 days');
 
     INSERT INTO edushift.tenant_ai_usage (

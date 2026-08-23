@@ -9,7 +9,6 @@ import jakarta.persistence.PrePersist;
 import jakarta.persistence.Table;
 import java.time.Instant;
 import java.util.UUID;
-import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
@@ -78,6 +77,29 @@ public class AiChatSession extends TenantAwareEntity {
 
     @Column(name = "expires_at")
     private Instant expiresAt;
+
+    /**
+     * Soft-delete timestamp. Required by {@code chk_chat_sessions_deleted_at}
+     * when {@code deleted = true}.
+     */
+    @Column(name = "deleted_at")
+    private Instant deletedAt;
+
+    // ------------------------------------------------------------------
+    // Soft-delete lifecycle
+    // ------------------------------------------------------------------
+
+    @Override
+    public void markDeleted() {
+        super.markDeleted();
+        this.deletedAt = Instant.now();
+    }
+
+    @Override
+    public void restore() {
+        super.restore();
+        this.deletedAt = null;
+    }
 
     // ------------------------------------------------------------------
     // Helpers

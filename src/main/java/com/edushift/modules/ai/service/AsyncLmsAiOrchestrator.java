@@ -138,13 +138,12 @@ public class AsyncLmsAiOrchestrator {
         // 1. Quota gate on the caller thread — fail fast and clean.
         TenantAiSettings settings = quotaService.verifyCanCall();
         UUID tenantId = TenantContext.currentRequired();
-        UUID userId = currentUser.currentUserId().orElse(null);
+        UUID requestUserId = currentUser.currentUserId().orElse(null);
 
         // 2. Build the LlmRequest up front so we can persist the user
         //    prompt in the audit row.
-        String model = settings.getDefaultModel() != null
-                ? settings.getDefaultModel()
-                : promptBuilder.build(null, 1, null, null).model();
+        // null => QuizQuestionPromptBuilder falls back to MiniMaxProperties.defaultModel
+        String model = LmsAiService.resolveMiniMaxModel(settings.getDefaultModel());
         LlmRequest llmRequest = promptBuilder.build(
                 request.topic(), request.count(), request.questionType(), model);
 
@@ -152,7 +151,7 @@ public class AsyncLmsAiOrchestrator {
         AiGeneration gen = new AiGeneration();
         gen.setPublicUuid(UUID.randomUUID());
         gen.setTenantId(tenantId);
-        gen.setRequestUserId(userId);
+        gen.setRequestUserId(requestUserId);
         gen.setFeature(AiGeneration.Feature.QUIZ_QUESTION_SUGGEST);
         gen.setPromptText(llmRequest.userPrompt());
         gen.setStatus(AiGeneration.Status.PENDING);

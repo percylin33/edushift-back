@@ -26,6 +26,8 @@ public class UserInvitationMapper {
 				invitation.getEmail(),
 				invitation.getFirstName(),
 				invitation.getLastName(),
+				invitation.getDocumentType(),
+				invitation.getDocumentNumber(),
 				invitation.getRoleNames(),
 				deriveStatus(invitation, now),
 				invitation.getToken(),

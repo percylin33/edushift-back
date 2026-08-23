@@ -19,10 +19,13 @@ import com.edushift.modules.users.repository.UserInvitationRepository;
 import com.edushift.modules.users.service.UserInvitationService;
 import com.edushift.shared.exception.BusinessException;
 import com.edushift.shared.exception.ConflictException;
+import com.edushift.shared.exception.ForbiddenException;
 import com.edushift.shared.exception.GoneException;
+import com.edushift.modules.users.UserInvitationMailer;
 import com.edushift.modules.users.events.InvitationAcceptedEvent;
 import com.edushift.shared.exception.ResourceNotFoundException;
 import com.edushift.shared.multitenancy.TenantContext;
+import com.edushift.shared.web.FrontendLinks;
 import java.security.SecureRandom;
 import java.time.Duration;
 import java.time.Instant;
@@ -79,6 +82,8 @@ public class UserInvitationServiceImpl implements UserInvitationService {
 	private final AuthService authService;
 	private final PasswordEncoder passwordEncoder;
 	private final ApplicationEventPublisher eventPublisher;
+	private final UserInvitationMailer invitationMailer;
+	private final FrontendLinks frontendLinks;
 	private final TransactionTemplate txTemplate;
 	private final SecureRandom secureRandom = new SecureRandom();
 
@@ -90,6 +95,8 @@ public class UserInvitationServiceImpl implements UserInvitationService {
 			AuthService authService,
 			PasswordEncoder passwordEncoder,
 			ApplicationEventPublisher eventPublisher,
+			UserInvitationMailer invitationMailer,
+			FrontendLinks frontendLinks,
 			PlatformTransactionManager txManager
 	) {
 		this.invitationRepository = invitationRepository;
@@ -99,6 +106,8 @@ public class UserInvitationServiceImpl implements UserInvitationService {
 		this.authService = authService;
 		this.passwordEncoder = passwordEncoder;
 		this.eventPublisher = eventPublisher;
+		this.invitationMailer = invitationMailer;
+		this.frontendLinks = frontendLinks;
 		this.txTemplate = new TransactionTemplate(txManager);
 	}
 
@@ -129,6 +138,8 @@ public class UserInvitationServiceImpl implements UserInvitationService {
 		invitation.setEmail(email);
 		invitation.setFirstName(request.firstName().trim());
 		invitation.setLastName(request.lastName().trim());
+		invitation.setDocumentType(request.documentType());
+		invitation.setDocumentNumber(request.documentNumber().trim());
 		invitation.setRoleNames(roles.stream().map(UserRole::name)
 				.collect(Collectors.toCollection(LinkedHashSet::new)));
 		invitation.setToken(generateToken());
@@ -140,8 +151,9 @@ public class UserInvitationServiceImpl implements UserInvitationService {
 		}
 
 		UserInvitation saved = invitationRepository.save(invitation);
-		log.info("[invitations] created -- publicUuid={} email='{}' expires={}",
-				saved.getPublicUuid(), saved.getEmail(), saved.getExpiresAt());
+		String acceptUrl = dispatchInviteEmail(saved);
+		log.info("[invitations] created -- publicUuid={} email='{}' expires={} acceptUrl={}",
+				saved.getPublicUuid(), saved.getEmail(), saved.getExpiresAt(), acceptUrl);
 		return invitationMapper.toResponseWithToken(saved, now);
 	}
 
@@ -181,13 +193,42 @@ public class UserInvitationServiceImpl implements UserInvitationService {
 		return invitationMapper.toResponse(saved, now);
 	}
 
+	@Override
+	@Transactional
+	public InvitationResponse resendInvitation(UUID publicUuid) {
+		Instant now = Instant.now();
+		UserInvitation invitation = invitationRepository.findByPublicUuid(publicUuid)
+				.orElseThrow(() -> new ResourceNotFoundException("Invitation", publicUuid));
+
+		if (invitation.isAccepted()) {
+			throw new ConflictException("INVITATION_ALREADY_ACCEPTED",
+					"Invitation has already been accepted; cannot resend");
+		}
+		if (invitation.isCancelled()) {
+			throw new ConflictException("INVITATION_CANCELLED",
+					"Invitation was cancelled; create a new one from the ficha");
+		}
+		if (invitation.isExpired(now)) {
+			throw new ConflictException("INVITATION_EXPIRED",
+					"Invitation has expired; create a new one from the ficha");
+		}
+
+		invitation.setToken(generateToken());
+		invitation.setExpiresAt(now.plus(TOKEN_TTL));
+		UserInvitation saved = invitationRepository.save(invitation);
+		String acceptUrl = dispatchInviteEmail(saved);
+		log.info("[invitations] resent -- publicUuid={} email='{}' expires={} acceptUrl={}",
+				saved.getPublicUuid(), saved.getEmail(), saved.getExpiresAt(), acceptUrl);
+		return invitationMapper.toResponseWithToken(saved, now);
+	}
+
 	// ===========================================================================
 	// Public paths (token-driven, run without TenantContext)
 	// ===========================================================================
 
 	@Override
 	@Transactional(readOnly = true)
-	public InvitationPreflightResponse getPreflight(String token) {
+	public InvitationPreflightResponse getPreflight(String token, String claimedTenantSlug) {
 		Instant now = Instant.now();
 		UserInvitation invitation = loadByTokenOrFail(token, now);
 
@@ -196,11 +237,14 @@ public class UserInvitationServiceImpl implements UserInvitationService {
 		Tenant tenant = tenantRepository.findById(invitation.getTenantId())
 				.orElseThrow(() -> new ResourceNotFoundException("Tenant", invitation.getTenantId()));
 
+		assertTenantClaimMatches(tenant, claimedTenantSlug);
+
 		return new InvitationPreflightResponse(
 				invitation.getEmail(),
 				invitation.getFirstName(),
 				invitation.getLastName(),
-				tenant.getName()
+				tenant.getName(),
+				tenant.getSlug()
 		);
 	}
 
@@ -213,6 +257,8 @@ public class UserInvitationServiceImpl implements UserInvitationService {
 
 		Tenant tenant = tenantRepository.findById(invitation.getTenantId())
 				.orElseThrow(() -> new ResourceNotFoundException("Tenant", invitation.getTenantId()));
+
+		assertTenantClaimMatches(tenant, request.tenantSlug());
 
 		// Step 2 — switch to the invitation's tenant context to create
 		// the user + issue the session inside its scope.
@@ -270,6 +316,23 @@ public class UserInvitationServiceImpl implements UserInvitationService {
 		}));
 	}
 
+	/**
+	 * UAT-CD-11: when the accept URL claims a school ({@code ?tenant=} /
+	 * body {@code tenantSlug}), it must match the invitation's tenant.
+	 * Blank/null claim = skip (token alone remains authoritative).
+	 */
+	private static void assertTenantClaimMatches(Tenant invitationTenant, String claimedTenantSlug) {
+		if (claimedTenantSlug == null || claimedTenantSlug.isBlank()) {
+			return;
+		}
+		String expected = invitationTenant.getSlug();
+		if (expected == null || !expected.equalsIgnoreCase(claimedTenantSlug.trim())) {
+			throw new ForbiddenException(
+					"INVITATION_TENANT_MISMATCH",
+					"This invitation does not belong to the requested school");
+		}
+	}
+
 	// ===========================================================================
 	// Internals
 	// ===========================================================================
@@ -304,6 +367,25 @@ public class UserInvitationServiceImpl implements UserInvitationService {
 			resolved.add(role);
 		}
 		return resolved;
+	}
+
+	private String dispatchInviteEmail(UserInvitation saved) {
+		UUID tenantId = saved.getTenantId() != null
+				? saved.getTenantId()
+				: TenantContext.current().orElse(null);
+		String slug = null;
+		String schoolName = "EduShift";
+		if (tenantId != null) {
+			Tenant tenant = tenantRepository.findById(tenantId).orElse(null);
+			if (tenant != null) {
+				slug = tenant.getSlug();
+				schoolName = tenant.getName();
+			}
+		}
+		String acceptUrl = frontendLinks.userInvitation(saved.getToken(), slug);
+		invitationMailer.send(saved.getEmail(), schoolName, acceptUrl, saved.getExpiresAt(),
+				saved.getRoleNames());
+		return acceptUrl;
 	}
 
 	private String generateToken() {

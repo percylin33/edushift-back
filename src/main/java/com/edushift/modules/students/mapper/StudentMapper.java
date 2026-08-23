@@ -8,6 +8,7 @@ import com.edushift.modules.students.entity.EnrollmentStatus;
 import com.edushift.modules.students.entity.Gender;
 import com.edushift.modules.students.entity.Student;
 import java.util.HashMap;
+import java.util.UUID;
 import org.springframework.stereotype.Component;
 
 /**
@@ -42,6 +43,10 @@ public class StudentMapper {
 	}
 
 	public StudentResponse toResponse(Student s) {
+		return toResponse(s, null);
+	}
+
+	public StudentResponse toResponse(Student s, UUID pendingInvitationPublicUuid) {
 		return new StudentResponse(
 				s.getPublicUuid(),
 				s.getDocumentType(),
@@ -58,6 +63,7 @@ public class StudentMapper {
 				s.getEnrollmentStatus(),
 				s.getEnrollmentDate(),
 				s.getUserId(),
+				pendingInvitationPublicUuid,
 				// Defensive copy: callers must not be able to mutate the
 				// entity's metadata via the response.
 				new HashMap<>(s.getMetadata()),

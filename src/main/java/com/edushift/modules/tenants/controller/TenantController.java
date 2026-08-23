@@ -1,5 +1,7 @@
 package com.edushift.modules.tenants.controller;
 
+import com.edushift.modules.admin.invitations.SchoolInvitationPreflight;
+import com.edushift.modules.admin.invitations.SchoolInvitationService;
 import com.edushift.modules.auth.dto.AuthResponse;
 import com.edushift.modules.tenants.dto.RegisterTenantRequest;
 import com.edushift.modules.tenants.dto.TenantResponse;
@@ -74,6 +76,7 @@ import org.springframework.web.bind.annotation.RestController;
 public class TenantController {
 
 	private final TenantService tenantService;
+	private final SchoolInvitationService schoolInvitationService;
 
 	@GetMapping("/by-slug/{slug}")
 	@Operation(
@@ -144,23 +147,37 @@ public class TenantController {
 		return ResponseEntity.ok(ApiResponse.ok(response));
 	}
 
+	@GetMapping("/invitations/by-token/{token}")
+	@Operation(
+			summary = "Preflight a school invitation token (public)",
+			description = "Returns the invited email so the setup page can lock the field. "
+					+ "404 if the token is unknown; 410 if accepted, cancelled or expired."
+	)
+	public ResponseEntity<ApiResponse<SchoolInvitationPreflight>>
+			preflightSchoolInvitation(
+					@PathVariable
+					@NotBlank(message = "token is required")
+					@Size(min = 16, max = 128, message = "token length out of range")
+					String token
+	) {
+		return ResponseEntity.ok(ApiResponse.ok(schoolInvitationService.getPreflight(token)));
+	}
+
 	/**
-	 * Public self-signup. Mirrors the response shape of {@code /auth/login}
+	 * Invite-gated signup. Mirrors the response shape of {@code /auth/login}
 	 * (raw {@link AuthResponse}, no envelope) so the SPA can hand the
 	 * payload straight to its session store without unwrapping. The HTTP
 	 * status is {@code 201 Created} because we do create a new resource
-	 * (the tenant) — most public-facing token endpoints return 200, but
-	 * 201 is more accurate here and includes a richer response semantics
-	 * for the front to react to.
+	 * (the tenant). Requires a valid Super-Admin school invitation token.
 	 */
 	@PostMapping("/register")
 	@org.springframework.web.bind.annotation.ResponseStatus(HttpStatus.CREATED)
 	@Operation(
-			summary = "Register a new tenant + admin (public self-signup)",
-			description = "Creates the tenant in PENDING/TRIAL state, the admin "
-					+ "user, and returns a logged-in session ready for the "
-					+ "onboarding wizard. 409 TENANT_SLUG_TAKEN when the slug "
-					+ "collides with an existing tenant."
+			summary = "Register a new tenant + admin (invitation required)",
+			description = "Redeems a Super-Admin school invitation. Creates the tenant "
+					+ "in PENDING/TRIAL state, the admin user, and returns a logged-in "
+					+ "session ready for onboarding. 409 TENANT_SLUG_TAKEN when the slug "
+					+ "collides. 410 when the invitation is spent or expired."
 	)
 	public ResponseEntity<AuthResponse> register(
 			@Valid @RequestBody RegisterTenantRequest request

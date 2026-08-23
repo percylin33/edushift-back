@@ -1,7 +1,9 @@
 package com.edushift.modules.ai.service;
 
+import com.edushift.modules.ai.config.MiniMaxProperties;
 import com.edushift.modules.ai.entity.AiChatMessage;
 import com.edushift.modules.ai.entity.AiChatSession;
+import com.edushift.modules.ai.entity.TenantAiSettings;
 import com.edushift.modules.ai.exception.AiDisabledException;
 import com.edushift.modules.ai.exception.ChatSessionNotActiveException;
 import com.edushift.modules.ai.exception.ChatSessionNotFoundException;
@@ -23,7 +25,6 @@ import java.util.List;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -75,11 +76,9 @@ public class ChatService {
     private final RateLimitService rateLimitService;
     private final PiiSafetyFilter piiFilter;
     private final LlmClient llmClient;
+    private final MiniMaxProperties miniMaxProperties;
 
-    @Value("${app.ai.chat.model:MiniMax/MiniMax-M2}")
-    private String chatModel;
-
-    @Value("${app.ai.chat.temperature:0.7}")
+    @org.springframework.beans.factory.annotation.Value("${app.ai.chat.temperature:0.7}")
     private double chatTemperature;
 
     // ------------------------------------------------------------------
@@ -144,7 +143,7 @@ public class ChatService {
             throw new ChatSessionNotFoundException();
         }
         s.setStatus(AiChatSession.Status.DELETED);
-        s.markDeleted(); // TenantAwareEntity helper (sets deleted=true + deleted_at)
+        s.markDeleted();
         sessionRepo.save(s);
     }
 
@@ -176,7 +175,8 @@ public class ChatService {
 
         // 1) Quota check (SEC-8.1: per-tenant cap)
         UUID tenantId = TenantContext.currentRequired();
-        quotaService.verifyCanCall();
+        TenantAiSettings settings = quotaService.verifyCanCall();
+        String model = resolveChatModel(settings);
         // 2) Rate limit (SEC-8.1: per-user 20/h, 100/day)
         rateLimitService.checkAndIncrement(callerUserId);
 
@@ -216,7 +216,7 @@ public class ChatService {
         // 6) Run the LLM stream and accumulate content
         StringBuilder buffer = new StringBuilder();
         LlmRequest req = new LlmRequest(
-                chatModel, systemPrompt, userTextMasked, chatTemperature, 1024,
+                model, systemPrompt, userTextMasked, chatTemperature, 1024,
                 List.of(), null, history);
         LlmClient.WrappingObserver wrap = new LlmClient.WrappingObserver(observer) {
             @Override
@@ -252,6 +252,20 @@ public class ChatService {
     // ------------------------------------------------------------------
     // Helpers
     // ------------------------------------------------------------------
+
+    /**
+     * Resolves the chat model from tenant settings, falling back to the
+     * global MiniMax default ({@code app.llm.minimax.default-model}).
+     * Rejects legacy OpenRouter-style ids the same way quiz generation does.
+     */
+    String resolveChatModel(TenantAiSettings settings) {
+        String model = LmsAiService.resolveMiniMaxModel(
+                settings == null ? null : settings.getDefaultModel());
+        if (model == null || model.isBlank()) {
+            model = miniMaxProperties.getDefaultModel();
+        }
+        return model;
+    }
 
     /**
      * Build the system prompt with the tenant context (ADR-8.4).

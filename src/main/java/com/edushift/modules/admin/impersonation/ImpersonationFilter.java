@@ -11,6 +11,12 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
 import java.util.UUID;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.nio.file.StandardOpenOption;
+import java.time.Instant;
+import java.util.concurrent.atomic.AtomicBoolean;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.core.Authentication;
@@ -25,12 +31,38 @@ public class ImpersonationFilter extends OncePerRequestFilter {
 
     private static final String IMPERSONATE_HEADER = "X-Impersonate-User";
 
+    // #region agent log
+    private static final AtomicBoolean FIRST_REQUEST = new AtomicBoolean(false);
+    private static final String DEBUG_LOG_PATH = "debug-9abf98.log";
+
+    private static void writeDebugLog(String hypothesisId, String message, java.util.Map<String, Object> data) {
+        try {
+            Path p = Paths.get(DEBUG_LOG_PATH);
+            String line = "{\"sessionId\":\"9abf98\",\"timestamp\":" + Instant.now().toEpochMilli()
+                    + ",\"location\":\"ImpersonationFilter.java\",\"hypothesisId\":\"" + hypothesisId
+                    + "\",\"message\":\"" + message.replace("\"", "'") + "\",\"data\":"
+                    + (data == null ? "{}" : new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(data))
+                    + ",\"runId\":\"post-flyway-repair\"}\n";
+            Files.writeString(p, line, StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+        } catch (Exception ignored) { }
+    }
+    // #endregion agent log
+
     private final ImpersonationService impersonationService;
 
     @Override
     protected void doFilterInternal(HttpServletRequest request,
                                     HttpServletResponse response,
                                     FilterChain chain) throws ServletException, IOException {
+        // #region agent log
+        if (FIRST_REQUEST.compareAndSet(false, true)) {
+            writeDebugLog("H3", "ImpersonationFilter first doFilterInternal invoked — bean wired OK", java.util.Map.of(
+                    "bean", "ImpersonationFilter",
+                    "uri", request.getRequestURI(),
+                    "method", request.getMethod()
+            ));
+        }
+        // #endregion agent log
         String impersonateHeader = request.getHeader(IMPERSONATE_HEADER);
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
 

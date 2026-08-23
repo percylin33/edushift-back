@@ -39,6 +39,40 @@ public interface InvoiceRepository extends JpaRepository<Invoice, Long> {
 
     Page<Invoice> findByStudentIdOrderByIssuedAtDesc(UUID studentId, Pageable pageable);
 
+    /**
+     * DEBT-STUDENT-PRIVACY (Fase 0.2): list invoices that are either
+     * owned by the given guardian OR attached to the given student.
+     * Lets a STUDENT see their own invoices directly (without going
+     * through the parent/guardian linkage), while keeping the
+     * PARENT's "Mis pagos" flow unchanged.
+     *
+     * <p>Returns the same shape as
+     * {@link #findByGuardianUserIdOrderByIssuedAtDesc} so callers can
+     * reuse the same mapper. Cross-tenant isolation comes from the
+     * {@code @TenantId} Hibernate filter applied to {@code Invoice}.</p>
+     */
+    @Query("""
+            SELECT i FROM Invoice i
+            WHERE i.guardianUserId = :guardianUserId
+               OR i.studentId = :studentId
+            ORDER BY i.issuedAt DESC
+            """)
+    Page<Invoice> findByGuardianOrStudentOrderByIssuedAtDesc(
+            @Param("guardianUserId") UUID guardianUserId,
+            @Param("studentId") UUID studentId,
+            Pageable pageable);
+
+    @Query("""
+            SELECT i FROM Invoice i
+            WHERE i.guardianUserId = :guardianUserId
+               OR i.studentId IN :studentIds
+            ORDER BY i.issuedAt DESC
+            """)
+    Page<Invoice> findByGuardianOrStudentsOrderByIssuedAtDesc(
+            @Param("guardianUserId") UUID guardianUserId,
+            @Param("studentIds") List<UUID> studentIds,
+            Pageable pageable);
+
     @Query("""
             SELECT i FROM Invoice i
             WHERE i.status = com.edushift.modules.payments.entity.Invoice$Status.PENDING

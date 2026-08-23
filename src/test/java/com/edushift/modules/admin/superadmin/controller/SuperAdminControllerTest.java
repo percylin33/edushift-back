@@ -421,7 +421,7 @@ class SuperAdminControllerTest {
 		@DisplayName("old /super-admin/{uuid}/disable (from docs/api/endpoints.md) returns 404")
 		void oldPathNotMapped() throws Exception {
 			UUID id = UUID.randomUUID();
-			mockMvc.perform(patch("/super-admin/{uuid}/disable", id)
+			mockMvc.perform(patch("/v1/super-admin/{uuid}/disable", id)
 							.with(csrf()).with(authentication(superAdminAuth())))
 					.andExpect(status().isNotFound());
 		}

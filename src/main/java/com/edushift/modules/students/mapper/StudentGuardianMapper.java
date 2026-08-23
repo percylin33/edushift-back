@@ -1,9 +1,15 @@
 package com.edushift.modules.students.mapper;
 
 import com.edushift.modules.students.dto.AddGuardianRequest;
+import com.edushift.modules.students.dto.GuardianProfileResponse;
 import com.edushift.modules.students.dto.GuardianResponse;
 import com.edushift.modules.students.entity.Guardian;
 import com.edushift.modules.students.entity.StudentGuardian;
+import com.edushift.modules.users.entity.UserInvitation;
+import com.edushift.modules.users.repository.UserInvitationRepository;
+import java.time.Instant;
+import java.util.UUID;
+import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
 /**
@@ -16,7 +22,10 @@ import org.springframework.stereotype.Component;
  * the frontend has a single object to render in a table cell.
  */
 @Component
+@RequiredArgsConstructor
 public class StudentGuardianMapper {
+
+	private final UserInvitationRepository invitationRepository;
 
 	public GuardianResponse toResponse(StudentGuardian link) {
 		Guardian g = link.getGuardian();
@@ -33,8 +42,34 @@ public class StudentGuardianMapper {
 				g.getOccupation(),
 				link.getRelationship(),
 				link.isPrimaryContact(),
-				link.isCanPickupStudent()
+				link.isCanPickupStudent(),
+				g.getUserId(),
+				pendingInvitationUuid(g)
 		);
+	}
+
+	public GuardianProfileResponse toProfileResponse(Guardian g) {
+		return new GuardianProfileResponse(
+				g.getPublicUuid(),
+				g.getDocumentType(),
+				g.getDocumentNumber(),
+				g.getFirstName(),
+				g.getLastName(),
+				g.fullName(),
+				g.getEmail(),
+				g.getPhone(),
+				g.getOccupation(),
+				g.getUserId()
+		);
+	}
+
+	private UUID pendingInvitationUuid(Guardian g) {
+		if (g.getUserId() != null || g.getEmail() == null || g.getEmail().isBlank()) {
+			return null;
+		}
+		return invitationRepository.findActivePendingByEmail(g.getEmail(), Instant.now())
+				.map(UserInvitation::getPublicUuid)
+				.orElse(null);
 	}
 
 	/**

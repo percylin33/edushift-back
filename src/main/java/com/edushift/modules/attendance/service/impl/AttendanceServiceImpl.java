@@ -28,6 +28,7 @@ import com.edushift.modules.attendance.exception.SessionClosedException;
 import com.edushift.modules.attendance.exception.StudentNoActiveEnrollmentException;
 import com.edushift.modules.attendance.exception.StudentNotEnrolledException;
 import com.edushift.modules.attendance.mapper.AttendanceMapper;
+import com.edushift.modules.files.entity.FileUploadStatus;
 import com.edushift.modules.attendance.repository.AttendanceRecordRepository;
 import com.edushift.modules.attendance.repository.AttendanceSessionRepository;
 import com.edushift.modules.attendance.repository.StudentAttendanceQrRepository;
@@ -42,6 +43,7 @@ import com.edushift.modules.students.enrollments.entity.StudentEnrollment;
 import com.edushift.modules.students.enrollments.repository.StudentEnrollmentRepository;
 import com.edushift.modules.students.repository.StudentGuardianRepository;
 import com.edushift.modules.students.repository.StudentRepository;
+import com.edushift.modules.students.service.StudentGuardianService;
 import com.edushift.modules.tenants.service.TenantSettingsService;
 import com.edushift.shared.exception.BadRequestException;
 import com.edushift.shared.exception.ResourceNotFoundException;
@@ -106,9 +108,11 @@ public class AttendanceServiceImpl implements AttendanceService {
 	private final AttendanceAuditLogger auditLogger;
 	private final ApplicationEventPublisher eventPublisher; // Sprint 9 / BE-9.3
 	private final StudentGuardianRepository studentGuardianRepository; // Sprint 9A / BE-9A.1
+	private final StudentGuardianService studentGuardianService;
 	private final com.edushift.modules.auth.repository.UserRepository userRepository; // DEBT-NOTIF-4 (Sprint 9A)
 	/** Sprint 18 / BE-18.6 — SSE pub/sub for live attendance events. */
 	private final com.edushift.modules.attendance.events.AttendanceEventPublisher realtimePublisher;
+	private final com.edushift.modules.files.service.FileObjectService fileObjectService;
 
 	@Value("${edushift.attendance.future-drift-tolerance-minutes:1}")
 	private long futureDriftToleranceMinutes;
@@ -286,22 +290,32 @@ public class AttendanceServiceImpl implements AttendanceService {
 					skipped++;
 					continue;
 				}
+				AttendanceRecord record = toInsert.stream()
+						.filter(r -> r.getStudent() != null && student.getId().equals(r.getStudent().getId()))
+						.findFirst()
+						.orElse(null);
+				UUID recordPublicUuid = record == null ? null : record.getPublicUuid();
+				java.util.Map<String, Object> payload = new java.util.HashMap<>();
+				payload.put("studentName", student.fullName());
+				payload.put("date", absentAt.toString());
+				payload.put("reason", "");
+				payload.put("courseName", sectionName);
+				payload.put("parentName", guardian.fullName());
+				payload.put("studentPublicUuid", student.getPublicUuid().toString());
+				if (recordPublicUuid != null) {
+					payload.put("recordPublicUuid", recordPublicUuid.toString());
+				}
 				eventPublisher.publishEvent(
 						com.edushift.modules.notifications.event.NotificationEvent.builder()
 								.templateKey("STUDENT_ABSENT")
 								.category(com.edushift.modules.notifications.entity.Notification.Category.ABSENCE)
-								.sourceId(session.getPublicUuid())
+								.sourceId(recordPublicUuid != null ? recordPublicUuid : session.getPublicUuid())
 								.tenantId(TenantContext.currentRequired())
 								.recipients(java.util.List.of(
 										new com.edushift.modules.notifications.event.NotificationEvent.Recipient(
 												guardianPublicUserId,
 												guardian.getEmail())))
-								.payload(java.util.Map.of(
-										"studentName", student.fullName(),
-										"date", absentAt.toString(),
-										"reason", "",
-										"courseName", sectionName,
-										"parentName", guardian.fullName()))
+								.payload(payload)
 								.build());
 				published++;
 			}
@@ -925,6 +939,14 @@ public class AttendanceServiceImpl implements AttendanceService {
 								userRepository.findById(guardian.getUserId());
 						if (guardianUser.isPresent()) {
 							UUID guardianPublicUserId = guardianUser.get().getPublicUuid();
+							java.util.Map<String, Object> payload = new java.util.HashMap<>();
+							payload.put("studentName", studentName);
+							payload.put("date", saved.getSession().getOccurredOn().toString());
+							payload.put("reason", saved.getNotes() == null ? "" : saved.getNotes());
+							payload.put("courseName", sectionName);
+							payload.put("parentName", guardian.fullName());
+							payload.put("studentPublicUuid", student.getPublicUuid().toString());
+							payload.put("recordPublicUuid", saved.getPublicUuid().toString());
 							eventPublisher.publishEvent(
 									com.edushift.modules.notifications.event.NotificationEvent.builder()
 											.templateKey("STUDENT_ABSENT")
@@ -935,12 +957,7 @@ public class AttendanceServiceImpl implements AttendanceService {
 													new com.edushift.modules.notifications.event.NotificationEvent.Recipient(
 															guardianPublicUserId,
 															guardian.getEmail())))
-											.payload(java.util.Map.of(
-													"studentName", studentName,
-													"date", saved.getSession().getOccurredOn().toString(),
-													"reason", saved.getNotes() == null ? "" : saved.getNotes(),
-													"courseName", sectionName,
-													"parentName", guardian.fullName()))
+											.payload(payload)
 											.build());
 						}
 					}
@@ -1063,6 +1080,15 @@ public class AttendanceServiceImpl implements AttendanceService {
 						"Authenticated user is required"));
 	}
 
+	private boolean isCurrentUserParent() {
+		Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+		if (auth == null || !auth.isAuthenticated()) return false;
+		return auth.getAuthorities().stream()
+				.map(GrantedAuthority::getAuthority)
+				.anyMatch(authority -> "PARENT".equals(authority)
+						|| "ROLE_PARENT".equals(authority));
+	}
+
 	private boolean isCurrentUserAdmin() {
 		Authentication auth = SecurityContextHolder.getContext().getAuthentication();
 		if (auth == null || !auth.isAuthenticated()) return false;
@@ -1081,12 +1107,18 @@ public class AttendanceServiceImpl implements AttendanceService {
 
 	@Override
 	@Transactional
-	public AttendanceRecordResponse justify(UUID recordPublicUuid, String justificationText) {
-		requireAuthenticatedUser();
+	public AttendanceRecordResponse justify(
+			UUID recordPublicUuid, String justificationText, UUID attachmentPublicUuid) {
+		UUID actorPublicUuid = requireAuthenticatedUser();
 
 		AttendanceRecord record = recordRepository.findByPublicUuid(recordPublicUuid)
 				.orElseThrow(() -> new ResourceNotFoundException(
 						"AttendanceRecord", recordPublicUuid));
+
+		if (isCurrentUserParent()) {
+			studentGuardianService.assertParentLinkedToStudent(
+					actorPublicUuid, record.getStudent().getPublicUuid());
+		}
 
 		if (record.getJustificationStatus() != null) {
 			throw new BadRequestException(
@@ -1097,13 +1129,35 @@ public class AttendanceServiceImpl implements AttendanceService {
 
 		record.setJustificationStatus(JustificationStatus.PENDING);
 		record.setJustificationText(justificationText);
+		if (attachmentPublicUuid != null) {
+			attachJustificationFile(record, attachmentPublicUuid);
+		}
 
 		AttendanceRecord saved = recordRepository.saveAndFlush(record);
-		log.info("[attendance] justification submitted -- record={} text_len={}",
+		log.info("[attendance] justification submitted -- record={} text_len={} attachment={}",
 				saved.getPublicUuid(),
-				justificationText != null ? justificationText.length() : 0);
+				justificationText != null ? justificationText.length() : 0,
+				attachmentPublicUuid);
 		auditLogger.logJustificationSubmitted(saved);
 		return toRecordResponseWithUsers(saved, null);
+	}
+
+	private void attachJustificationFile(AttendanceRecord record, UUID attachmentPublicUuid) {
+		var file = fileObjectService.getByPublicUuid(attachmentPublicUuid);
+		if (file.getStatus() != FileUploadStatus.READY) {
+			throw new BadRequestException(
+					"JUSTIFICATION_ATTACHMENT_NOT_READY",
+					"Justification attachment is not ready");
+		}
+		String mime = file.getContentType() == null ? "" : file.getContentType().toLowerCase();
+		boolean allowed = mime.startsWith("image/") || "application/pdf".equals(mime);
+		if (!allowed) {
+			throw new BadRequestException(
+					"JUSTIFICATION_ATTACHMENT_TYPE",
+					"Justification attachments must be an image or a PDF");
+		}
+		fileObjectService.acquireReference(attachmentPublicUuid);
+		record.setJustificationAttachmentPublicUuid(attachmentPublicUuid);
 	}
 
 	// =====================================================================

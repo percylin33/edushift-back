@@ -1,6 +1,8 @@
 package com.edushift.modules.tenants.service.impl;
 
 import com.edushift.modules.academic.levelgrade.service.AcademicSeedService;
+import com.edushift.modules.admin.invitations.SchoolInvitation;
+import com.edushift.modules.admin.invitations.SchoolInvitationService;
 import com.edushift.modules.admin.plans.PlatformPlan;
 import com.edushift.modules.admin.plans.PlatformPlanRepository;
 import com.edushift.modules.auth.dto.AuthResponse;
@@ -104,6 +106,8 @@ public class TenantServiceImpl implements TenantService {
 	 */
 	private final PlatformPlanRepository platformPlanRepository;
 
+	private final SchoolInvitationService schoolInvitationService;
+
 	public TenantServiceImpl(
 			TenantRepository tenantRepository,
 			TenantMapper tenantMapper,
@@ -112,6 +116,7 @@ public class TenantServiceImpl implements TenantService {
 			AuthService authService,
 			AcademicSeedService academicSeedService,
 			PlatformPlanRepository platformPlanRepository,
+			SchoolInvitationService schoolInvitationService,
 			PlatformTransactionManager transactionManager) {
 		this.tenantRepository = tenantRepository;
 		this.tenantMapper = tenantMapper;
@@ -120,6 +125,7 @@ public class TenantServiceImpl implements TenantService {
 		this.authService = authService;
 		this.academicSeedService = academicSeedService;
 		this.platformPlanRepository = platformPlanRepository;
+		this.schoolInvitationService = schoolInvitationService;
 		this.txTemplate = new TransactionTemplate(transactionManager);
 	}
 
@@ -268,8 +274,9 @@ public class TenantServiceImpl implements TenantService {
 	 */
 	@Override
 	public AuthResponse register(RegisterTenantRequest request) {
+		final SchoolInvitation invitation = schoolInvitationService.requirePending(request.inviteToken());
 		final String slug = request.tenantSlug().trim().toLowerCase();
-		final String adminEmail = request.adminEmail().trim().toLowerCase();
+		final String adminEmail = invitation.getEmail();
 
 		// Pre-check: short-circuit when the slug is obviously taken. We still
 		// catch DataIntegrityViolationException below in case of a TOCTOU
@@ -299,6 +306,7 @@ public class TenantServiceImpl implements TenantService {
 						}
 
 						AuthResponse session = authService.issueSession(admin, persistedTenant);
+						schoolInvitationService.markAccepted(invitation.getId(), persistedTenant.getId());
 						log.info("[tenants] register OK -- slug='{}' adminEmail='{}' tenantId={}",
 								slug, adminEmail, persistedTenant.getId());
 						return session;
@@ -321,7 +329,9 @@ public class TenantServiceImpl implements TenantService {
 				Tenant tenant = new Tenant();
 				tenant.setName(request.tenantName().trim());
 				tenant.setSlug(slug);
-				tenant.setStatus(TenantStatus.PENDING);
+				// Super Admin already invited this school: login must work immediately.
+				// PENDING was for open self-signup + onboarding wizard; that path is gone.
+				tenant.setStatus(TenantStatus.ACTIVE);
 				tenant.setPlan(TenantPlan.TRIAL);
 				tenant.setPlanId(planId);
 				tenant.setTrialEndsAt(Instant.now().plus(TRIAL_DURATION));

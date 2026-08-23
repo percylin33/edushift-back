@@ -14,6 +14,9 @@ import com.edushift.modules.auth.entity.UserStatus;
 import com.edushift.modules.auth.repository.UserRepository;
 import com.edushift.modules.auth.security.JwtAuthenticatedPrincipal;
 import com.edushift.modules.auth.security.JwtAuthenticationToken;
+import com.edushift.modules.auth.service.PasswordResetService;
+import com.edushift.modules.tenants.entity.Tenant;
+import com.edushift.modules.tenants.repository.TenantRepository;
 import com.edushift.modules.users.dto.AssignRolesRequest;
 import com.edushift.modules.users.dto.UpdateUserRequest;
 import com.edushift.modules.users.dto.UserDetailResponse;
@@ -70,6 +73,10 @@ class UserManagementServiceImplTest {
 
 	@Mock private ApplicationEventPublisher eventPublisher;
 
+	@Mock private PasswordResetService passwordResetService;
+
+	@Mock private TenantRepository tenantRepository;
+
 	private UserManagementServiceImpl service;
 
 	private static final UUID TENANT_ID = UUID.fromString("11111111-1111-1111-1111-111111111111");
@@ -77,7 +84,9 @@ class UserManagementServiceImplTest {
 
 	@BeforeEach
 	void setUp() {
-		service = new UserManagementServiceImpl(userRepository, new UserManagementMapper(), eventPublisher);
+		service = new UserManagementServiceImpl(
+				userRepository, new UserManagementMapper(), eventPublisher,
+				passwordResetService, tenantRepository);
 		TenantContext.set(TENANT_ID);
 		seedSecurityContext(ADMIN_PUBLIC_UUID);
 	}
@@ -423,19 +432,23 @@ class UserManagementServiceImplTest {
 	// ===========================================================================
 
 	@Nested
-	@DisplayName("resetPassword — Sprint 9 stub")
+	@DisplayName("resetPassword — queues PASSWORD_RESET")
 	class ResetPassword {
 
 		@Test
-		@DisplayName("loads the user, logs the intent, returns void; never saves (Sprint 9 will)")
-		void stub() {
+		@DisplayName("loads the user and delegates to PasswordResetService")
+		void queuesForgotPasswordFlow() {
 			UUID publicUuid = UUID.randomUUID();
 			User user = newUser("ada@acme.test", "Ada", "L", UserStatus.ACTIVE);
 			user.setPublicUuid(publicUuid);
 			when(userRepository.findByPublicUuid(publicUuid)).thenReturn(Optional.of(user));
+			Tenant tenant = new Tenant();
+			tenant.setSlug("acme");
+			when(tenantRepository.findById(TENANT_ID)).thenReturn(Optional.of(tenant));
 
 			service.resetPassword(publicUuid);
 
+			verify(passwordResetService).requestReset("ada@acme.test", "acme", null);
 			verify(userRepository, never()).save(any(User.class));
 		}
 

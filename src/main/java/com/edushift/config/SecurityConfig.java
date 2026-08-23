@@ -101,18 +101,20 @@ public class SecurityConfig {
 			"/v1/auth/forgot-password",
 			"/v1/auth/reset-password",
 			"/v1/auth/reset-password/validate",
+			// DEV-ONLY: gated by @Profile({"dev","local"}) in DevAuthController.
+			// Never enable in production — no auth, would allow hijacking any tenant.
+			"/v1/auth/_dev/reset-password",
 			// `tenants/by-slug` powers the tenant-aware login screen — anyone
 			// rendering /auth/login on a given subdomain needs to read its
 			// branding before having any credentials. Sensitive fields are
 			// withheld at the DTO level (TenantSummary), so opening this path
 			// to the public web is safe by construction.
 			"/v1/tenants/by-slug/*",
-			// `tenants/register` is the public self-signup entry point.
-			// Anyone on the open internet can create a TRIAL tenant; the
-			// per-IP rate-limit landing in a future hardening sprint will
-			// keep abuse manageable. The controller validates the body
-			// strictly and the response is shaped exactly like /auth/login.
+			// `tenants/register` is invite-gated public signup: anyone with a
+			// valid unused Super-Admin school invitation token can create a
+			// TRIAL tenant. The token is the credential.
 			"/v1/tenants/register",
+			"/v1/tenants/invitations/by-token/*",
 			// User-invitation public flow (BE-3.2):
 			//   * `by-token/{token}` — preflight: returns recipient + tenant
 			//     name so the accept page can greet the user. Public-safe
@@ -145,7 +147,11 @@ public class SecurityConfig {
 			// per-chapter endpoints (`/v1/help/manuals/{role}/{file}`).
 			// The response is intentionally metadata + public docs only.
 			"/v1/help/manuals",
-			"/v1/help/manuals/**"
+			"/v1/help/manuals/**",
+			// Branding assets (logo / login background) must be readable on the
+			// unauthenticated login page. The controller only serves rows whose
+			// remote_key is under /lms/branding/ and content-type is image/*.
+			"/v1/files/public/*"
 	};
 
 	private final JwtAuthenticationFilter jwtAuthenticationFilter;
@@ -191,6 +197,12 @@ public class SecurityConfig {
 				.httpBasic(basic -> basic.disable())
 				.logout(logout -> logout.disable())
 				.authorizeHttpRequests(auth -> auth
+						/* Spring Security 6 secures every DispatcherType by default
+						 * (REQUEST, ASYNC, ERROR, FORWARD). SseEmitter triggers an
+						 * ASYNC dispatch after the controller returns; re-authorizing
+						 * that dispatch has no SecurityContext and breaks the stream.
+						 * Restrict filtering to the initial REQUEST only (Spring 5 behaviour). */
+						.shouldFilterAllDispatcherTypes(false)
 						/* CORS pre-flight: browsers fire OPTIONS without auth headers
 						 * BEFORE any cross-origin request. Spring's CorsFilter runs
 						 * earlier in the chain and short-circuits these with the proper
@@ -242,7 +254,19 @@ public class SecurityConfig {
 						.crossOriginEmbedderPolicy(coep -> coep.policy(
 								org.springframework.security.web.header.writers.CrossOriginEmbedderPolicyHeaderWriter.CrossOriginEmbedderPolicy.REQUIRE_CORP))
 						.crossOriginResourcePolicy(corp -> corp.policy(
-								org.springframework.security.web.header.writers.CrossOriginResourcePolicyHeaderWriter.CrossOriginResourcePolicy.SAME_ORIGIN)))
+								org.springframework.security.web.header.writers.CrossOriginResourcePolicyHeaderWriter.CrossOriginResourcePolicy.SAME_ORIGIN))
+						/*
+						 * Public branding images are loaded by the SPA as {@code <img>} /
+						 * CSS backgrounds from another origin (e.g. :4201 → :8081).
+						 * CORP same-origin makes Chrome emit ERR_BLOCKED_BY_RESPONSE.NotSameOrigin
+						 * even though the GET returns 200. Override last so it wins.
+						 */
+						.addHeaderWriter((request, response) -> {
+							String uri = request.getRequestURI();
+							if (uri != null && uri.contains("/v1/files/public/")) {
+								response.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+							}
+						}))
 				.addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)
 				.addFilterAfter(impersonationFilter, JwtAuthenticationFilter.class);
 

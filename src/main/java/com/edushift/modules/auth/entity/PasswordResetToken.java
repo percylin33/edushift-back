@@ -4,6 +4,7 @@ import com.edushift.shared.domain.TenantAwareEntity;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Index;
+import jakarta.persistence.PrePersist;
 import jakarta.persistence.Table;
 import java.time.Instant;
 import java.util.UUID;
@@ -58,11 +59,16 @@ import org.hibernate.annotations.SQLDelete;
 @Getter
 @Setter
 @NoArgsConstructor
-@ToString(callSuper = true, of = {"jti", "userId", "expiresAt", "usedAt", "supersededAt"})
+@ToString(callSuper = true, of = {"publicUuid", "jti", "userId", "expiresAt", "usedAt", "supersededAt"})
 @SQLDelete(sql = "UPDATE edushift.password_reset_tokens "
 		+ "SET deleted = true, updated_at = NOW() "
 		+ "WHERE id = ?")
 public class PasswordResetToken extends TenantAwareEntity {
+
+	/** External id for admin/audit tooling; auto-generated on persist. */
+	@Column(name = "public_uuid", nullable = false, updatable = false,
+			unique = true, columnDefinition = "uuid")
+	private UUID publicUuid;
 
 	/**
 	 * JWT ID of the reset token. Stored as the canonical id so lookups by
@@ -111,6 +117,13 @@ public class PasswordResetToken extends TenantAwareEntity {
 	public void markSuperseded(Instant when) {
 		if (supersededAt == null) {
 			this.supersededAt = when;
+		}
+	}
+
+	@PrePersist
+	private void onPrePersist() {
+		if (publicUuid == null) {
+			publicUuid = UUID.randomUUID();
 		}
 	}
 }

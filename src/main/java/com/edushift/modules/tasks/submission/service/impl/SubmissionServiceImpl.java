@@ -20,7 +20,9 @@ import com.edushift.modules.tasks.submission.mapper.SubmissionMapper;
 import com.edushift.modules.tasks.submission.repository.SubmissionRepository;
 import com.edushift.modules.tasks.submission.repository.SubmissionRevisionRepository;
 import com.edushift.modules.tasks.submission.service.SubmissionService;
+import com.edushift.modules.students.service.StudentGuardianService;
 import com.edushift.shared.multitenancy.TenantContext;
+import com.edushift.shared.security.CurrentUserProvider;
 import java.time.Instant;
 import java.util.Optional;
 import java.util.UUID;
@@ -29,6 +31,9 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.GrantedAuthority;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -70,6 +75,8 @@ public class SubmissionServiceImpl implements SubmissionService {
 	private final FileObjectService fileObjectService;
 	private final SubmissionMapper submissionMapper;
 	private final ApplicationEventPublisher eventPublisher; // Sprint 9 / BE-9.3
+	private final StudentGuardianService studentGuardianService;
+	private final CurrentUserProvider currentUserProvider;
 
 	@Override
 	@Transactional
@@ -78,6 +85,11 @@ public class SubmissionServiceImpl implements SubmissionService {
 		Task task = requireTask(taskPublicUuid);
 		validatePayloadNotEmpty(request);
 		validateNotPastDue(task);
+		if (isParent() && request.studentPublicUuid() != null) {
+			studentGuardianService.assertParentLinkedToStudent(
+					currentUserProvider.currentUserId().orElseThrow(),
+					request.studentPublicUuid());
+		}
 
 		Optional<Submission> existing = submissionRepository.findByTaskAndStudentUserId(
 				task, request.studentPublicUuid());
@@ -125,6 +137,12 @@ public class SubmissionServiceImpl implements SubmissionService {
 		// (DEBT-7A-24 follow-up).
 
 		return submissionMapper.toResponse(saved, isReSubmit);
+	}
+	private boolean isParent() {
+		Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+		return auth != null && auth.isAuthenticated() && auth.getAuthorities().stream()
+				.map(GrantedAuthority::getAuthority)
+				.anyMatch(value -> "PARENT".equals(value) || "ROLE_PARENT".equals(value));
 	}
 
 	@Override
@@ -180,7 +198,17 @@ public class SubmissionServiceImpl implements SubmissionService {
 				return submissionMapper.toResponse(saved);
 			}
 			UUID studentPublicUserId = studentUser.get().getPublicUuid();
+			String studentEmail = studentUser.get().getEmail();
 			String taskTitle = saved.getTask() == null ? "" : saved.getTask().getTitle();
+			java.util.Map<String, Object> payload = new java.util.HashMap<>();
+			payload.put("studentName", "");
+			payload.put("taskTitle", taskTitle);
+			payload.put("grade", saved.getGrade() == null ? "" : saved.getGrade().toString());
+			payload.put("maxGrade", "100");
+			payload.put("teacherComment", saved.getFeedback() == null ? "" : saved.getFeedback());
+			payload.put("taskPublicUuid", saved.getTask() == null || saved.getTask().getPublicUuid() == null
+					? "" : saved.getTask().getPublicUuid().toString());
+			payload.put("submissionPublicUuid", saved.getPublicUuid().toString());
 			eventPublisher.publishEvent(
 					com.edushift.modules.notifications.event.NotificationEvent.builder()
 							.templateKey("TASK_RETURNED")
@@ -189,13 +217,8 @@ public class SubmissionServiceImpl implements SubmissionService {
 							.tenantId(TenantContext.currentRequired())
 							.recipients(java.util.List.of(
 									new com.edushift.modules.notifications.event.NotificationEvent.Recipient(
-											studentPublicUserId, null)))
-							.payload(java.util.Map.of(
-									"studentName", "",
-									"taskTitle", taskTitle,
-									"grade", saved.getGrade() == null ? "" : saved.getGrade().toString(),
-									"maxGrade", "100",
-									"teacherComment", saved.getFeedback() == null ? "" : saved.getFeedback()))
+											studentPublicUserId, studentEmail)))
+							.payload(payload)
 							.build());
 		}
 

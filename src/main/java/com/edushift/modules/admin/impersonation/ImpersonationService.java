@@ -11,6 +11,11 @@ import com.edushift.shared.exception.BadRequestException;
 import com.edushift.shared.exception.ForbiddenException;
 import com.edushift.shared.exception.NotFoundException;
 import com.edushift.shared.exception.TooManyRequestsException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.nio.file.StandardOpenOption;
+import java.time.Instant;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -40,6 +45,22 @@ public class ImpersonationService {
     /** Window for the impersonation rate limiter (ms). */
     static final int IMPERSONATION_WINDOW_MS = 60 * 60 * 1_000;
 
+    // #region agent log
+    private static final String DEBUG_LOG_PATH = "debug-9abf98.log";
+
+    private static void writeDebugLog(String hypothesisId, String message, java.util.Map<String, Object> data) {
+        try {
+            Path p = Paths.get(DEBUG_LOG_PATH);
+            String line = "{\"sessionId\":\"9abf98\",\"timestamp\":" + Instant.now().toEpochMilli()
+                    + ",\"location\":\"ImpersonationService.java\",\"hypothesisId\":\"" + hypothesisId
+                    + "\",\"message\":\"" + message.replace("\"", "'") + "\",\"data\":"
+                    + (data == null ? "{}" : new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(data))
+                    + ",\"runId\":\"post-flyway-repair\"}\n";
+            Files.writeString(p, line, StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+        } catch (Exception ignored) { }
+    }
+    // #endregion agent log
+
     private final UserRepository userRepository;
     private final AuditLogger auditLogger;
     private final SimpleRateLimiter rateLimiter;
@@ -50,6 +71,12 @@ public class ImpersonationService {
      * SecurityContext — the rate-limit consumes a token only on accept.
      */
     public User resolveTarget(UUID targetPublicUuid, UUID adminUuid) {
+        // #region agent log
+        writeDebugLog("H2", "ImpersonationService.resolveTarget invoked — userRepository reachable", java.util.Map.of(
+                "bean", "ImpersonationService",
+                "method", "resolveTarget"
+        ));
+        // #endregion agent log
         User target = userRepository.findByPublicUuid(targetPublicUuid)
                 .orElseThrow(() -> new NotFoundException("USER_NOT_FOUND", "User not found"));
 

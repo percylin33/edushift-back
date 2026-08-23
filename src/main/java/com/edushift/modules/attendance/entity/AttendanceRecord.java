@@ -122,6 +122,9 @@ public class AttendanceRecord extends TenantAwareEntity {
 	@Column(name = "justification_text", length = 2000)
 	private String justificationText;
 
+	@Column(name = "justification_attachment_public_uuid", columnDefinition = "uuid")
+	private UUID justificationAttachmentPublicUuid;
+
 	@Column(name = "approved_by_user_id", columnDefinition = "uuid")
 	private UUID approvedByUserId;
 

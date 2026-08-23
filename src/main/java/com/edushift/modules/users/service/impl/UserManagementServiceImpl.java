@@ -5,6 +5,9 @@ import com.edushift.modules.auth.entity.UserRole;
 import com.edushift.modules.auth.entity.UserStatus;
 import com.edushift.modules.auth.events.UserStatusChangeEvent;
 import com.edushift.modules.auth.repository.UserRepository;
+import com.edushift.modules.auth.service.PasswordResetService;
+import com.edushift.modules.tenants.entity.Tenant;
+import com.edushift.modules.tenants.repository.TenantRepository;
 import com.edushift.modules.users.dto.AssignRolesRequest;
 import com.edushift.modules.users.dto.UpdateUserRequest;
 import com.edushift.modules.users.dto.UserDetailResponse;
@@ -60,6 +63,8 @@ public class UserManagementServiceImpl implements UserManagementService {
 	private final UserManagementMapper mapper;
 	/** Sprint 14 / DEBT-AUTH-4: publishes UserStatusChangeEvent on transitions. */
 	private final ApplicationEventPublisher eventPublisher;
+	private final PasswordResetService passwordResetService;
+	private final TenantRepository tenantRepository;
 
 	// ===========================================================================
 	// Read paths
@@ -221,10 +226,15 @@ public class UserManagementServiceImpl implements UserManagementService {
 	@Transactional
 	public void resetPassword(UUID publicUuid) {
 		User user = loadUser(publicUuid);
-		// Sprint 3 surface: load + log the intent; Sprint 9 wires the
-		// notifications module to actually send the reset email. The
-		// status flip can be added when that lands.
-		log.info("[users] reset-password requested -- publicUuid={} by={} (TODO Sprint 9: send email)",
+		UUID tenantId = TenantContext.currentRequired();
+		Tenant tenant = tenantRepository.findById(tenantId).orElse(null);
+		if (tenant == null || tenant.getSlug() == null || tenant.getSlug().isBlank()) {
+			log.warn("[users] reset-password skipped -- tenant missing for publicUuid={}",
+					user.getPublicUuid());
+			return;
+		}
+		passwordResetService.requestReset(user.getEmail(), tenant.getSlug(), null);
+		log.info("[users] reset-password queued -- publicUuid={} by={}",
 				user.getPublicUuid(), currentAdminPublicUuid());
 	}
 

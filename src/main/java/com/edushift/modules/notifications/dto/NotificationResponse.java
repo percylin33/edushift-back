@@ -4,7 +4,10 @@ import com.edushift.modules.notifications.entity.Notification;
 import com.edushift.modules.notifications.entity.Notification.Category;
 import com.edushift.modules.notifications.entity.Notification.Channel;
 import com.edushift.modules.notifications.entity.Notification.Status;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Instant;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -22,8 +25,11 @@ public record NotificationResponse(
         String subject,
         String bodyHtml,
         Instant sentAt,
-        Instant readAt
+        Instant readAt,
+        Map<String, Object> payload
 ) {
+    private static final ObjectMapper PAYLOAD_MAPPER = new ObjectMapper();
+
     public static NotificationResponse from(Notification n, String subject, String body) {
         return new NotificationResponse(
                 n.getPublicUuid(),
@@ -34,7 +40,21 @@ public record NotificationResponse(
                 subject,
                 body,
                 n.getSentAt(),
-                n.getReadAt()
+                n.getReadAt(),
+                parsePayload(n.getPayload())
         );
+    }
+
+    static Map<String, Object> parsePayload(String json) {
+        if (json == null || json.isBlank()) {
+            return Map.of();
+        }
+        try {
+            Map<String, Object> parsed = PAYLOAD_MAPPER.readValue(
+                    json, new TypeReference<Map<String, Object>>() {});
+            return parsed == null ? Map.of() : parsed;
+        } catch (Exception ignored) {
+            return Map.of();
+        }
     }
 }

@@ -325,10 +325,37 @@ public class QuizAttemptServiceImpl implements QuizAttemptService {
 	public Page<AttemptSummary> listAttempts(UUID quizPublicUuid,
 			Pageable pageable) {
 		Quiz quiz = requireQuiz(quizPublicUuid);
+		// DEBT-STUDENT-PRIVACY (Fase 0.3): a STUDENT authenticated with
+		// LMS_QUIZ_READ used to enumerate all attempts of a quiz,
+		// including attempts of their classmates. We restrict the page
+		// to attempts owned by the caller when the caller is a STUDENT;
+		// teachers/admins keep the full view (used for grading).
+		UUID caller = currentUserProvider.currentUserId().orElse(null);
+		if (caller != null && isStudentCaller(caller)) {
+			return attemptRepository
+					.findAllByQuizAndStudentUserIdOrderByAttemptNumberAsc(
+							quiz, caller, pageable)
+					.map(a -> attemptMapper.toSummary(a, quiz,
+							pendingAnswerCount(a)));
+		}
 		return attemptRepository
 				.findAllByQuizOrderByAttemptNumberAsc(quiz, pageable)
 				.map(a -> attemptMapper.toSummary(a, quiz,
 						pendingAnswerCount(a)));
+	}
+
+	/**
+	 * Best-effort detector for "caller is a STUDENT" without doing a
+	 * full {@code @PreAuthorize}. The mapper only stores the role on
+	 * the authentication principal indirectly via
+	 * {@code ROLE_STUDENT}; if for any reason that lookup fails we
+	 * fall back to false, which keeps the conservative (full-page)
+	 * behaviour for non-students.
+	 */
+	private boolean isStudentCaller(UUID callerUserId) {
+		return currentUserProvider.currentUserRole()
+				.map(r -> r == com.edushift.modules.auth.entity.UserRole.STUDENT)
+				.orElse(false);
 	}
 
 	@Override
@@ -414,6 +441,7 @@ public class QuizAttemptServiceImpl implements QuizAttemptService {
 			return;
 		}
 		UUID studentPublicUserId = studentUser.get().getPublicUuid();
+		String studentEmail = studentUser.get().getEmail();
 		eventPublisher.publishEvent(
 				com.edushift.modules.notifications.event.NotificationEvent.builder()
 						.templateKey("AI_FEEDBACK_READY")
@@ -422,7 +450,7 @@ public class QuizAttemptServiceImpl implements QuizAttemptService {
 						.tenantId(com.edushift.shared.multitenancy.TenantContext.currentRequired())
 						.recipients(java.util.List.of(
 								new com.edushift.modules.notifications.event.NotificationEvent.Recipient(
-										studentPublicUserId, null)))
+										studentPublicUserId, studentEmail)))
 						.payload(java.util.Map.of(
 								"studentName", "",
 								"taskTitle", saved.getQuiz().getTitle()))

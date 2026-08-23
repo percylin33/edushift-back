@@ -86,7 +86,8 @@ class QuizAttemptControllerTest {
         mockMvc.perform(patch("/v1/attempts/{u}", UUID.randomUUID())
                         .with(csrf()).with(authentication(taker()))
                         .contentType("application/json")
-                        .content("{\"answers\":[]}"))
+                        .content("{\"answers\":[{\"questionPublicUuid\":\"" + UUID.randomUUID()
+                                + "\",\"questionType\":\"TF\",\"selectedBoolean\":true}]}"))
                 .andExpect(status().isOk());
     }
 

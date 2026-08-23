@@ -12,6 +12,7 @@ import com.edushift.modules.ai.llm.LlmClient.LlmResponse;
 import com.edushift.modules.ai.llm.LlmException;
 import com.edushift.modules.ai.prompt.QuizQuestionPromptBuilder;
 import com.edushift.modules.ai.repository.AiGenerationRepository;
+import com.edushift.modules.ai.util.LlmJsonSanitizer;
 import com.edushift.shared.constants.LoggerNames;
 import com.edushift.shared.multitenancy.TenantContext;
 import com.edushift.shared.security.CurrentUserProvider;
@@ -113,17 +114,16 @@ public class LmsAiService {
         //    request never reached the LLM).
         TenantAiSettings settings = quotaService.verifyCanCall();
         UUID tenantId = TenantContext.currentRequired();
-        UUID userId = currentUser.currentUserId().orElse(null);
-        String model = settings.getDefaultModel() != null
-                ? settings.getDefaultModel()
-                : promptBuilder.build(null, 1, null, null).model(); // cheap: just reads default
+        UUID requestUserId = currentUser.currentUserId().orElse(null);
+        // null => QuizQuestionPromptBuilder falls back to MiniMaxProperties.defaultModel
+        String model = resolveMiniMaxModel(settings.getDefaultModel());
         // Build the prompt (this also normalises topic / count).
         LlmRequest llmRequest = promptBuilder.build(
                 request.topic(), request.count(), request.questionType(), model);
 
         // 2. Persist a PENDING audit row BEFORE the call. If the JVM
         //    dies mid-call, we still have a record of the attempt.
-        AiGeneration gen = newGeneration(tenantId, userId, llmRequest);
+        AiGeneration gen = newGeneration(tenantId, requestUserId, llmRequest);
         gen.setStatus(AiGeneration.Status.PENDING);
         generationRepo.saveAndFlush(gen);
 
@@ -213,6 +213,26 @@ public class LmsAiService {
     // Internals.
     // ---------------------------------------------------------------------
 
+    /**
+     * Returns a MiniMax-compatible model id, or {@code null} so
+     * {@link QuizQuestionPromptBuilder} falls back to
+     * {@code app.llm.minimax.default-model}.
+     *
+     * <p>Legacy OpenRouter-style ids ({@code provider/model}, {@code gpt-*},
+     * {@code claude-*}) are rejected by MiniMax with HTTP 400.</p>
+     */
+    static String resolveMiniMaxModel(String configured) {
+        if (configured == null || configured.isBlank()) {
+            return null;
+        }
+        String trimmed = configured.trim();
+        String lower = trimmed.toLowerCase();
+        if (trimmed.contains("/") || lower.startsWith("gpt-") || lower.startsWith("claude-")) {
+            return null;
+        }
+        return trimmed;
+    }
+
     private AiGeneration newGeneration(UUID tenantId, UUID userId, LlmRequest llmRequest) {
         AiGeneration g = new AiGeneration();
         g.setPublicUuid(UUID.randomUUID());
@@ -283,9 +303,10 @@ public class LmsAiService {
      * any structural problem.
      */
     private List<QuestionSuggestion> parseAndValidate(String text, int maxCount, String filterType) {
+        String sanitized = LlmJsonSanitizer.sanitize(text);
         JsonNode root;
         try {
-            root = objectMapper.readTree(text);
+            root = objectMapper.readTree(sanitized);
         } catch (JsonProcessingException e) {
             throw new AiParseException(
                     "LLM response is not valid JSON: " + firstLine(e.getMessage()), e);

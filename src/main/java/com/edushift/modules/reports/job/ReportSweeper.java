@@ -18,6 +18,10 @@ import org.springframework.stereotype.Component;
  * slot; this sweeper is the safety net. Runs every minute.</p>
  */
 @Component
+@org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(
+        name = "app.reports.sweeper.enabled",
+        havingValue = "true",
+        matchIfMissing = true)
 @RequiredArgsConstructor
 @Slf4j
 public class ReportSweeper {

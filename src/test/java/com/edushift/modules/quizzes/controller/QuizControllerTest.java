@@ -56,7 +56,7 @@ class QuizControllerTest {
         mockMvc.perform(post("/v1/sections/{u}/quizzes", UUID.randomUUID())
                         .with(csrf()).with(authentication(teacher()))
                         .contentType("application/json")
-                        .content("{}"))
+                        .content("{\"title\":\"Quiz 1\",\"maxAttempts\":1,\"maxScore\":100}"))
                 .andExpect(status().isCreated());
     }
 
@@ -100,7 +100,7 @@ class QuizControllerTest {
         mockMvc.perform(post("/v1/quizzes/{u}/questions", UUID.randomUUID())
                         .with(csrf()).with(authentication(teacher()))
                         .contentType("application/json")
-                        .content("{}"))
+                        .content("{\"type\":\"TF\",\"prompt\":\"2+2=4?\",\"points\":5,\"correctBoolean\":true}"))
                 .andExpect(status().isCreated());
     }
 
@@ -110,7 +110,7 @@ class QuizControllerTest {
         mockMvc.perform(post("/v1/questions/{u}/options", UUID.randomUUID())
                         .with(csrf()).with(authentication(teacher()))
                         .contentType("application/json")
-                        .content("{}"))
+                        .content("{\"option\":{\"label\":\"4\",\"isCorrect\":true}}"))
                 .andExpect(status().isCreated());
     }
 

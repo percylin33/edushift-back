@@ -30,9 +30,14 @@ public interface PasswordResetTokenRepository extends JpaRepository<PasswordRese
 	 * Mark all non-used, non-superseded tokens for a given user as superseded.
 	 * Called when a new reset is requested so the older links stop working.
 	 *
+	 * <p>{@code clearAutomatically=true} is required so the persistence
+	 * context does not keep stale {@link PasswordResetToken} entities after
+	 * the bulk UPDATE (avoids {@code InvalidDataAccessApiUsageException}).
+	 *
 	 * @return number of rows affected
 	 */
-	@Modifying
+	@Modifying(clearAutomatically = true, flushAutomatically = true)
+	@org.springframework.transaction.annotation.Transactional
 	@Query("""
 			UPDATE PasswordResetToken t
 			   SET t.supersededAt = :now

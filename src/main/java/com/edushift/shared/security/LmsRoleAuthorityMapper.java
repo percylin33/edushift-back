@@ -86,9 +86,21 @@ public class LmsRoleAuthorityMapper {
 				LmsAuthorities.LMS_TASK_SUBMIT,
 				LmsAuthorities.LMS_MATERIAL_READ,
 				LmsAuthorities.LMS_QUIZ_READ,
-				LmsAuthorities.LMS_QUIZ_SUBMIT
+				LmsAuthorities.LMS_QUIZ_SUBMIT,
+				// DEBT-STUDENT-PRIVACY / Fase 1-3: the /me/* surface. Each
+				// authority maps to a single sub-section (Mis cursos /
+				// Mis notas / Mi asistencia / Mi QR / Mis pagos) so a
+				// tenant can revoke any of them via PermissionOverride.
+				LmsAuthorities.ME_READ,
+				LmsAuthorities.ME_ATTENDANCE_READ,
+				LmsAuthorities.ME_ATTENDANCE_JUSTIFY,
+				LmsAuthorities.ME_QR_READ,
+				LmsAuthorities.ME_PAYMENTS_READ,
+				LmsAuthorities.ME_PAYMENTS_CHECKOUT
 		));
 		DEFAULTS.put(UserRole.PARENT, Set.of(
+				LmsAuthorities.LMS_FAMILY_READ,
+				LmsAuthorities.LMS_ATTENDANCE_JUSTIFY,
 				LmsAuthorities.LMS_TASK_READ,
 				LmsAuthorities.LMS_TASK_SUBMIT,
 				LmsAuthorities.LMS_MATERIAL_READ,
@@ -126,7 +138,6 @@ public class LmsRoleAuthorityMapper {
 			return Set.of();
 		}
 		Set<String> out = new LinkedHashSet<>();
-		boolean containsSuper = roles.contains(UserRole.SUPER_ADMIN);
 		for (UserRole role : roles) {
 			if (role == null) continue;
 			if (role == UserRole.SUPER_ADMIN) {

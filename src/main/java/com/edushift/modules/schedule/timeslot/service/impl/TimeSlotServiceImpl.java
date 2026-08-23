@@ -4,8 +4,13 @@ import com.edushift.modules.academic.period.entity.AcademicPeriod;
 import com.edushift.modules.academic.period.repository.AcademicPeriodRepository;
 import com.edushift.modules.academic.section.entity.Section;
 import com.edushift.modules.academic.section.repository.SectionRepository;
+import com.edushift.modules.schedule.daytemplate.dto.NonTeachingBlockItem;
+import com.edushift.modules.schedule.daytemplate.dto.SuggestedPeriodItem;
+import com.edushift.modules.schedule.daytemplate.entity.DayScheduleTemplate;
+import com.edushift.modules.schedule.daytemplate.service.DayScheduleTemplateService;
 import com.edushift.modules.schedule.timeslot.dto.CreateTimeSlotRequest;
 import com.edushift.modules.schedule.timeslot.dto.ScheduleSlotItem;
+import com.edushift.modules.schedule.timeslot.dto.ScheduleWeekView;
 import com.edushift.modules.schedule.timeslot.dto.TimeSlotListItem;
 import com.edushift.modules.schedule.timeslot.dto.TimeSlotResponse;
 import com.edushift.modules.schedule.timeslot.dto.UpdateTimeSlotRequest;
@@ -14,6 +19,9 @@ import com.edushift.modules.schedule.timeslot.mapper.TimeSlotMapper;
 import com.edushift.modules.schedule.timeslot.repository.TimeSlotRepository;
 import com.edushift.modules.schedule.timeslot.service.ScheduleConflictDetector;
 import com.edushift.modules.schedule.timeslot.service.TimeSlotService;
+import com.edushift.modules.students.entity.Student;
+import com.edushift.modules.students.enrollments.entity.StudentEnrollment;
+import com.edushift.modules.students.enrollments.repository.StudentEnrollmentRepository;
 import com.edushift.modules.teachers.assignments.entity.TeacherAssignment;
 import com.edushift.modules.teachers.assignments.repository.TeacherAssignmentRepository;
 import com.edushift.modules.teachers.entity.Teacher;
@@ -23,6 +31,8 @@ import com.edushift.shared.exception.ConflictException;
 import com.edushift.shared.exception.ResourceNotFoundException;
 import com.edushift.shared.security.CurrentUserProvider;
 import java.time.LocalTime;
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
@@ -65,6 +75,8 @@ public class TimeSlotServiceImpl implements TimeSlotService {
 	private final TimeSlotMapper mapper;
 	private final CurrentUserProvider currentUserProvider;
 	private final ScheduleConflictDetector conflictDetector;
+	private final StudentEnrollmentRepository enrollmentRepository;
+	private final DayScheduleTemplateService dayScheduleTemplateService;
 
 	// =========================================================================
 	// CRUD
@@ -198,6 +210,108 @@ public class TimeSlotServiceImpl implements TimeSlotService {
 
 		return timeSlotRepository.findAllByAssignmentInOrdered(assignments).stream()
 				.map(mapper::toSectionScheduleItem)
+				.toList();
+	}
+
+	@Override
+	@Transactional(readOnly = true)
+	public List<ScheduleSlotItem> getScheduleForStudent(Student student, UUID periodUuid) {
+		if (student == null) {
+			return List.of();
+		}
+		AcademicPeriod period = (periodUuid == null) ? null : periodRepository
+				.findByPublicUuid(periodUuid)
+				.orElseThrow(() -> new ResourceNotFoundException("AcademicPeriod", periodUuid));
+		List<StudentEnrollment> enrollments = enrollmentRepository.findActiveByStudentFetchSection(student);
+		List<TeacherAssignment> assignments = new ArrayList<>();
+		for (StudentEnrollment enrollment : enrollments) {
+			var section = enrollment.getSection();
+			if (section == null) {
+				continue;
+			}
+			assignments.addAll(assignmentRepository.findAllBySectionActive(section, period));
+		}
+		if (assignments.isEmpty()) {
+			return List.of();
+		}
+		return timeSlotRepository.findAllByAssignmentInOrdered(assignments).stream()
+				.map(mapper::toPortalScheduleItem)
+				.sorted(Comparator
+						.comparing(ScheduleSlotItem::dayOfWeek, Comparator.nullsLast(Comparator.naturalOrder()))
+						.thenComparing(ScheduleSlotItem::startTime, Comparator.nullsLast(Comparator.naturalOrder())))
+				.toList();
+	}
+
+	@Override
+	@Transactional(readOnly = true)
+	public ScheduleWeekView getTeacherScheduleWeek(UUID teacherUuid, UUID periodUuid) {
+		List<ScheduleSlotItem> slots = getTeacherSchedule(teacherUuid, periodUuid);
+		List<NonTeachingBlockItem> blocks = collectNonTeachingForTeacher(teacherUuid, periodUuid);
+		return ScheduleWeekView.of(slots, blocks);
+	}
+
+	@Override
+	@Transactional(readOnly = true)
+	public ScheduleWeekView getSectionScheduleWeek(UUID sectionUuid, UUID periodUuid) {
+		Section section = sectionRepository.findByPublicUuid(sectionUuid)
+				.orElseThrow(() -> new ResourceNotFoundException("Section", sectionUuid));
+		List<ScheduleSlotItem> slots = getSectionSchedule(sectionUuid, periodUuid);
+		List<NonTeachingBlockItem> blocks = dayScheduleTemplateService
+				.listHardNonTeachingBlocksForSection(section, null);
+		List<SuggestedPeriodItem> periods = dayScheduleTemplateService
+				.listSuggestedPeriodsForSection(section);
+		var templateOpt = dayScheduleTemplateService.resolveTemplateForSection(section);
+		LocalTime dayStart = templateOpt.map(DayScheduleTemplate::getDayStart).orElse(null);
+		LocalTime dayEnd = templateOpt.map(DayScheduleTemplate::getDayEnd).orElse(null);
+		Integer periodMinutes = templateOpt.map(DayScheduleTemplate::getPeriodMinutes).orElse(null);
+		return ScheduleWeekView.of(slots, blocks, dayStart, dayEnd, periodMinutes, periods);
+	}
+
+	@Override
+	@Transactional(readOnly = true)
+	public ScheduleWeekView getScheduleWeekForStudent(Student student, UUID periodUuid) {
+		List<ScheduleSlotItem> slots = getScheduleForStudent(student, periodUuid);
+		List<NonTeachingBlockItem> blocks = new ArrayList<>();
+		if (student != null) {
+			List<StudentEnrollment> enrollments = enrollmentRepository.findActiveByStudentFetchSection(student);
+			for (StudentEnrollment enrollment : enrollments) {
+				Section section = enrollment.getSection();
+				if (section != null) {
+					blocks.addAll(dayScheduleTemplateService
+							.listHardNonTeachingBlocksForSection(section, null));
+				}
+			}
+		}
+		return ScheduleWeekView.of(slots, dedupeBlocks(blocks));
+	}
+
+	private List<NonTeachingBlockItem> collectNonTeachingForTeacher(UUID teacherUuid, UUID periodUuid) {
+		Teacher teacher = teacherRepository.findByPublicUuid(teacherUuid)
+				.orElseThrow(() -> new ResourceNotFoundException("Teacher", teacherUuid));
+		AcademicPeriod period = (periodUuid == null) ? null : periodRepository
+				.findByPublicUuid(periodUuid)
+				.orElseThrow(() -> new ResourceNotFoundException("AcademicPeriod", periodUuid));
+		List<TeacherAssignment> assignments = assignmentRepository
+				.findAllByTeacher(teacher, period, true);
+		List<NonTeachingBlockItem> blocks = new ArrayList<>();
+		for (TeacherAssignment assignment : assignments) {
+			if (assignment.getSection() != null) {
+				blocks.addAll(dayScheduleTemplateService
+						.listHardNonTeachingBlocksForSection(assignment.getSection(), null));
+			}
+		}
+		return dedupeBlocks(blocks);
+	}
+
+	private static List<NonTeachingBlockItem> dedupeBlocks(List<NonTeachingBlockItem> blocks) {
+		return blocks.stream()
+				.collect(java.util.stream.Collectors.toMap(
+						NonTeachingBlockItem::blockPublicUuid,
+						b -> b,
+						(a, b) -> a,
+						java.util.LinkedHashMap::new))
+				.values()
+				.stream()
 				.toList();
 	}
 

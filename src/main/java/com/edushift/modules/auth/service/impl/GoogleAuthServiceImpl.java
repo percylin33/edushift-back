@@ -5,7 +5,6 @@ import com.edushift.modules.audit.events.AuditAction;
 import com.edushift.modules.audit.service.AuditLogger;
 import com.edushift.modules.auth.dto.AuthResponse;
 import com.edushift.modules.auth.entity.User;
-import com.edushift.modules.auth.entity.UserRole;
 import com.edushift.modules.auth.entity.UserStatus;
 import com.edushift.modules.auth.repository.UserRepository;
 import com.edushift.modules.auth.service.AuthService;
@@ -17,7 +16,6 @@ import com.edushift.shared.exception.UnauthorizedException;
 import com.edushift.shared.multitenancy.TenantContext;
 import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
 import java.util.UUID;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -38,18 +36,18 @@ import org.springframework.transaction.support.TransactionTemplate;
  *       case where the email already exists in the tenant but Google
  *       hasn't been linked yet. We update {@code google_subject} on the
  *       existing row.</li>
- *   <li><strong>Auto-provision</strong> — covers the case where neither
- *       the subject nor the email match. We create a new
- *       {@link User} with {@link UserStatus#ACTIVE} (Google's
- *       {@code email_verified=true} is trusted) and a default role of
- *       {@link UserRole#TEACHER}.</li>
+ *   <li><strong>Unknown email</strong> — no auto-provision. The school
+ *       must invite the person first (student / guardian / teacher
+ *       ficha). Unknown Google emails return
+ *       {@code 401 GOOGLE_ACCOUNT_NOT_INVITED} instead of creating a
+ *       ghost TEACHER.</li>
  * </ol>
  *
- * <h3>Anti-enumeration</h3>
- * We never tell the front-end whether the user was newly created or was
- * pre-existing. The {@link AuthResponse} payload is identical in both
- * cases. Only the {@code audit_logs} table records the branch taken (the
- * audit message includes "first-time login" / "returning user").
+ * <h3>Unknown Google emails</h3>
+ * We do not auto-provision. Unknown emails return
+ * {@code 401 GOOGLE_ACCOUNT_NOT_INVITED}. The school must invite the
+ * person from the student / guardian / teacher ficha first. Existing
+ * users (by google_subject or email) still log in as before.
  *
  * <h3>Tenant / transaction ordering</h3>
  * Mirrors the rationale documented in {@link AuthServiceImpl}'s class
@@ -60,9 +58,6 @@ import org.springframework.transaction.support.TransactionTemplate;
 @Slf4j
 @Service
 public class GoogleAuthServiceImpl implements GoogleAuthService {
-
-	/** Default role for auto-provisioned users (see class javadoc). */
-	private static final UserRole DEFAULT_PROVISIONING_ROLE = UserRole.TEACHER;
 
 	private final TenantRepository tenantRepository;
 	private final UserRepository userRepository;
@@ -125,11 +120,9 @@ public class GoogleAuthServiceImpl implements GoogleAuthService {
 				userRepository.findByGoogleSubject(profile.subject());
 
 		User user;
-		boolean provisioned;
 
 		if (bySubject.isPresent()) {
 			user = bySubject.get();
-			provisioned = false;
 		}
 		else {
 			// 2. Email match in this tenant (auto-link if Google verified the email)
@@ -141,12 +134,12 @@ public class GoogleAuthServiceImpl implements GoogleAuthService {
 					user.setAvatarUrl(profile.pictureUrl());
 				}
 				user = userRepository.saveAndFlush(user);
-				provisioned = false;
 			}
 			else {
-				// 3. Auto-provision
-				user = provisionNewUser(profile);
-				provisioned = true;
+				log.info("[google-auth] unknown email '{}' in tenant '{}' — invite required",
+						profile.email(), tenant.getSlug());
+				throw new UnauthorizedException("GOOGLE_ACCOUNT_NOT_INVITED",
+						"No account exists for this Google email. Ask the school to send an invitation.");
 			}
 		}
 
@@ -160,59 +153,18 @@ public class GoogleAuthServiceImpl implements GoogleAuthService {
 		// rotation, same audit row.
 		AuthResponse response = authService.issueSession(user, tenant);
 
-		String eventDetail = provisioned
-				? "Google login OK (auto-provisioned as " + DEFAULT_PROVISIONING_ROLE + ")"
-				: "Google login OK (existing user)";
-		log.info("[google-auth] login OK -- tenant='{}', email='{}', publicUuid='{}', provisioned={}",
-				tenant.getSlug(), user.getEmail(), user.getPublicUuid(), provisioned);
+		log.info("[google-auth] login OK -- tenant='{}', email='{}', publicUuid='{}'",
+				tenant.getSlug(), user.getEmail(), user.getPublicUuid());
 		auditLogger.log(AuditAction.LOGIN, "user",
-				user.getPublicUuid(), eventDetail,
+				user.getPublicUuid(), "Google login OK (existing user)",
 				Map.of(
 						"tenantSlug", tenant.getSlug(),
 						"email", user.getEmail(),
 						"googleSubjectHash", Integer.toHexString(profile.subject().hashCode()),
-						"remoteAddr", remoteAddr == null ? "" : remoteAddr,
-						"provisioned", String.valueOf(provisioned)
+						"remoteAddr", remoteAddr == null ? "" : remoteAddr
 				));
 
 		return response;
-	}
-
-	private User provisionNewUser(GoogleProfile profile) {
-		User user = new User();
-		user.setEmail(profile.email());
-		// Split display name into first / last; falls back to the email
-		// local-part if Google returned nothing useful.
-		String[] parts = splitName(profile.displayName());
-		user.setFirstName(parts[0]);
-		user.setLastName(parts[1]);
-		user.setAvatarUrl(profile.pictureUrl());
-		user.setGoogleSubject(profile.subject());
-		user.setEmailVerified(true); // Google already verified this email
-		user.setStatus(UserStatus.ACTIVE);
-		user.setRoleSet(Set.of(DEFAULT_PROVISIONING_ROLE));
-		// password_hash is NOT NULL on the schema. We seed an unusable
-		// BCrypt hash so password login for this account is rejected
-		// (defense in depth — even if a future admin enables it, the
-		// sentinel cannot be guessed).
-		user.setPasswordHash(
-				"$2a$12$0000000000000000000000.0000000000000000000000000000000000000000000");
-		return userRepository.saveAndFlush(user);
-	}
-
-	private static String[] splitName(String displayName) {
-		if (displayName == null || displayName.isBlank()) {
-			return new String[]{"User", "Google"};
-		}
-		String trimmed = displayName.trim();
-		int space = trimmed.indexOf(' ');
-		if (space < 0) {
-			return new String[]{trimmed, ""};
-		}
-		return new String[]{
-				trimmed.substring(0, space),
-				trimmed.substring(space + 1).trim()
-		};
 	}
 
 	private static void assertUserCanAuthenticate(User user, String tenantSlug) {

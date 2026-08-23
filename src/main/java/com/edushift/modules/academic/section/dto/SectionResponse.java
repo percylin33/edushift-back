@@ -5,10 +5,6 @@ import java.util.UUID;
 
 /**
  * Full projection of {@link com.edushift.modules.academic.section.entity.Section}.
- *
- * <p>Includes denormalised parent labels ({@code academicYearName},
- * {@code gradeName}, {@code levelCode}) so the FE can render lists and
- * detail views without a second round-trip.</p>
  */
 public record SectionResponse(
 		UUID publicUuid,
@@ -18,12 +14,15 @@ public record SectionResponse(
 		UUID gradePublicUuid,
 		String gradeName,
 		Integer gradeOrdinal,
+		String teachingMode,
 		UUID levelPublicUuid,
 		String levelCode,
 		String levelName,
 		String name,
 		Integer capacity,
 		Integer displayOrder,
+		UUID homeroomTeacherPublicUuid,
+		String homeroomTeacherName,
 		Instant createdAt,
 		Instant updatedAt
 ) {
