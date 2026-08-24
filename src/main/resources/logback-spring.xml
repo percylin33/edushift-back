@@ -33,9 +33,21 @@
 					source="spring.profiles.active"
 					defaultValue="dev"/>
 
-	<property name="LOG_PATH"  value="${LOG_PATH:-./logs}"/>
-	<property name="LOG_LEVEL_ROOT" value="${LOG_LEVEL_ROOT:-INFO}"/>
-	<property name="LOG_LEVEL_APP"  value="${LOG_LEVEL_APP:-INFO}"/>
+	<!--
+		Use springProperty (not <property name="LOG_PATH" value="${LOG_PATH:-...}"/>).
+		Self-referencing ${LOG_PATH} inside a property named LOG_PATH resolves to empty
+		and always falls back to ./logs — which breaks non-root Docker images.
+		Env: LOG_PATH=/var/log/edushift  (see Dockerfile + docker-compose*.yml)
+	-->
+	<springProperty scope="context" name="LOG_PATH"
+					source="LOG_PATH"
+					defaultValue="./logs"/>
+	<springProperty scope="context" name="LOG_LEVEL_ROOT"
+					source="LOG_LEVEL_ROOT"
+					defaultValue="INFO"/>
+	<springProperty scope="context" name="LOG_LEVEL_APP"
+					source="LOG_LEVEL_APP"
+					defaultValue="INFO"/>
 
 	<property name="MDC_FIELDS"
 			  value="cid=%X{correlationId:-} tid=%X{traceId:-} tenant=%X{tenantId:-} user=%X{userId:-}"/>
