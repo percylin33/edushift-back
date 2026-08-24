@@ -81,9 +81,9 @@ private static final String BASE = "/v1/academic/sections";
 	private SectionResponse stubResponse(String name) {
 		return new SectionResponse(
 				UUID.randomUUID(), UUID.randomUUID(), "2026", "ACTIVE",
-				UUID.randomUUID(), "1ro Primaria", 1,
+				UUID.randomUUID(), "1ro Primaria", 1, "POLIDOCENTE",
 				UUID.randomUUID(), "PRIMARIA", "Primaria",
-				name, 30, 1,
+				name, 30, 1, null, null,
 				Instant.parse("2026-01-01T00:00:00Z"),
 				Instant.parse("2026-01-01T00:00:00Z"));
 	}
@@ -162,7 +162,7 @@ private static final String BASE = "/v1/academic/sections";
 							.with(authentication(adminAuth()))
 							.contentType(MediaType.APPLICATION_JSON)
 							.content(objectMapper.writeValueAsString(new CreateSectionRequest(
-									UUID.randomUUID(), UUID.randomUUID(), "A", 30, 1))))
+									UUID.randomUUID(), UUID.randomUUID(), "A", 30, 1, null))))
 					.andExpect(status().isCreated())
 					.andExpect(jsonPath("$.data.name").value("A"));
 		}
@@ -189,7 +189,7 @@ private static final String BASE = "/v1/academic/sections";
 							.with(authentication(adminAuth()))
 							.contentType(MediaType.APPLICATION_JSON)
 							.content(objectMapper.writeValueAsString(new CreateSectionRequest(
-									UUID.randomUUID(), UUID.randomUUID(), "A", null, null))))
+									UUID.randomUUID(), UUID.randomUUID(), "A", null, null, null))))
 					.andExpect(status().isConflict())
 					.andExpect(jsonPath("$.errors[0].code").value("ACADEMIC_YEAR_LOCKED"));
 		}
@@ -205,7 +205,7 @@ private static final String BASE = "/v1/academic/sections";
 							.with(authentication(adminAuth()))
 							.contentType(MediaType.APPLICATION_JSON)
 							.content(objectMapper.writeValueAsString(new CreateSectionRequest(
-									UUID.randomUUID(), UUID.randomUUID(), "A", null, null))))
+									UUID.randomUUID(), UUID.randomUUID(), "A", null, null, null))))
 					.andExpect(status().isConflict())
 					.andExpect(jsonPath("$.errors[0].code").value("SECTION_NAME_TAKEN"));
 		}
@@ -230,7 +230,7 @@ private static final String BASE = "/v1/academic/sections";
 							.with(authentication(adminAuth()))
 							.contentType(MediaType.APPLICATION_JSON)
 							.content(objectMapper.writeValueAsString(
-									new UpdateSectionRequest("A1", null, null))))
+									new UpdateSectionRequest("A1", null, null, null, null))))
 					.andExpect(status().isOk())
 					.andExpect(jsonPath("$.data.name").value("A1"));
 		}

@@ -15,6 +15,7 @@ import com.edushift.infrastructure.multitenancy.TenantInterceptor;
 import com.edushift.modules.academic.levelgrade.dto.CreateGradeRequest;
 import com.edushift.modules.academic.levelgrade.dto.GradeReorderRequest;
 import com.edushift.modules.academic.levelgrade.dto.GradeResponse;
+import com.edushift.modules.academic.levelgrade.entity.TeachingMode;
 import com.edushift.modules.academic.levelgrade.service.GradeService;
 import com.edushift.modules.auth.security.JwtAuthenticatedPrincipal;
 import com.edushift.modules.auth.security.JwtAuthenticationToken;
@@ -67,6 +68,7 @@ class GradeControllerTest {
 
 	private GradeResponse stub(UUID levelUuid, String name, int ordinal) {
 		return new GradeResponse(UUID.randomUUID(), levelUuid, name, ordinal,
+				TeachingMode.POLIDOCENTE,
 				Instant.parse("2026-01-01T00:00:00Z"),
 				Instant.parse("2026-01-01T00:00:00Z"));
 	}
@@ -85,7 +87,8 @@ class GradeControllerTest {
 							.with(csrf())
 							.with(authentication(adminAuth()))
 							.contentType(MediaType.APPLICATION_JSON)
-							.content(objectMapper.writeValueAsString(new CreateGradeRequest("1ro", 1))))
+							.content(objectMapper.writeValueAsString(
+									new CreateGradeRequest("1ro", 1, TeachingMode.POLIDOCENTE))))
 					.andExpect(status().isCreated())
 					.andExpect(jsonPath("$.data.name").value("1ro"));
 		}
@@ -101,7 +104,8 @@ class GradeControllerTest {
 							.with(csrf())
 							.with(authentication(adminAuth()))
 							.contentType(MediaType.APPLICATION_JSON)
-							.content(objectMapper.writeValueAsString(new CreateGradeRequest("1ro", 1))))
+							.content(objectMapper.writeValueAsString(
+									new CreateGradeRequest("1ro", 1, TeachingMode.POLIDOCENTE))))
 					.andExpect(status().isConflict())
 					.andExpect(jsonPath("$.errors[0].code").value("GRADE_ORDINAL_TAKEN"));
 		}

@@ -6,6 +6,7 @@ import com.edushift.modules.academic.levelgrade.dto.CreateGradeRequest;
 import com.edushift.modules.academic.levelgrade.dto.UpdateGradeRequest;
 import com.edushift.modules.academic.levelgrade.entity.AcademicLevel;
 import com.edushift.modules.academic.levelgrade.entity.Grade;
+import com.edushift.modules.academic.levelgrade.entity.TeachingMode;
 import java.time.Instant;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
@@ -66,12 +67,13 @@ class GradeMapperTest {
         @Test
         @DisplayName("creates entity from request")
         void createsEntity() {
-            var req = new CreateGradeRequest("2do Primaria", 2);
+            var req = new CreateGradeRequest("2do Primaria", 2, TeachingMode.MONODOCENTE);
             var entity = mapper.fromCreate(req, level);
 
             assertThat(entity.getLevel()).isEqualTo(level);
             assertThat(entity.getName()).isEqualTo("2do Primaria");
             assertThat(entity.getOrdinal()).isEqualTo(2);
+            assertThat(entity.getTeachingMode()).isEqualTo(TeachingMode.MONODOCENTE);
         }
     }
 
@@ -82,7 +84,7 @@ class GradeMapperTest {
         @Test
         @DisplayName("updates name and strips whitespace")
         void updateName() {
-            var patch = new UpdateGradeRequest("  2do Primaria  ", null);
+            var patch = new UpdateGradeRequest("  2do Primaria  ", null, null);
             mapper.applyUpdate(patch, grade);
             assertThat(grade.getName()).isEqualTo("2do Primaria");
         }
@@ -90,7 +92,7 @@ class GradeMapperTest {
         @Test
         @DisplayName("updates ordinal")
         void updateOrdinal() {
-            var patch = new UpdateGradeRequest(null, 3);
+            var patch = new UpdateGradeRequest(null, 3, null);
             mapper.applyUpdate(patch, grade);
             assertThat(grade.getOrdinal()).isEqualTo(3);
         }

@@ -104,7 +104,7 @@ class SectionMapperTest {
         @DisplayName("creates entity from request")
         void createsEntity() {
             var req = new CreateSectionRequest(year.getPublicUuid(),
-                grade.getPublicUuid(), "B", 25, 2);
+                grade.getPublicUuid(), "B", 25, 2, null);
             var entity = mapper.fromCreate(req, year, grade);
 
             assertThat(entity.getAcademicYear()).isEqualTo(year);
@@ -118,7 +118,7 @@ class SectionMapperTest {
         @DisplayName("defaults displayOrder to 1 when null")
         void defaultsDisplayOrder() {
             var req = new CreateSectionRequest(year.getPublicUuid(),
-                grade.getPublicUuid(), "C", null, null);
+                grade.getPublicUuid(), "C", null, null, null);
             var entity = mapper.fromCreate(req, year, grade);
             assertThat(entity.getDisplayOrder()).isEqualTo(1);
         }
@@ -131,7 +131,7 @@ class SectionMapperTest {
         @Test
         @DisplayName("updates provided fields")
         void partialUpdate() {
-            var patch = new UpdateSectionRequest("Renamed", null, 3);
+            var patch = new UpdateSectionRequest("Renamed", null, 3, null, null);
             mapper.applyUpdate(patch, section);
 
             assertThat(section.getName()).isEqualTo("Renamed");
@@ -142,7 +142,7 @@ class SectionMapperTest {
         @Test
         @DisplayName("trims name")
         void trimsName() {
-            var patch = new UpdateSectionRequest("  Renamed  ", null, null);
+            var patch = new UpdateSectionRequest("  Renamed  ", null, null, null, null);
             mapper.applyUpdate(patch, section);
             assertThat(section.getName()).isEqualTo("Renamed");
         }

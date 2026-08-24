@@ -2,6 +2,7 @@ package com.edushift.modules.academic.levelgrade.dto;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.edushift.modules.academic.levelgrade.entity.TeachingMode;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
@@ -15,7 +16,7 @@ class DtoTest {
     @DisplayName("AcademicLevelResponse — constructor + accessors")
     void academicLevelResponse() {
         var gradeResp = new GradeResponse(UUID.randomUUID(), UUID.randomUUID(), "1ro", 1,
-            Instant.now(), Instant.now());
+            TeachingMode.POLIDOCENTE, Instant.now(), Instant.now());
         var resp = new AcademicLevelResponse(UUID.randomUUID(), "PRIMARIA", "Primaria", 2,
             List.of(gradeResp), Instant.now(), Instant.now());
         assertThat(resp.code()).isEqualTo("PRIMARIA");
@@ -42,24 +43,27 @@ class DtoTest {
     @DisplayName("GradeResponse — constructor + accessors")
     void gradeResponse() {
         var resp = new GradeResponse(UUID.randomUUID(), UUID.randomUUID(), "1ro", 1,
-            Instant.now(), Instant.now());
+            TeachingMode.MONODOCENTE, Instant.now(), Instant.now());
         assertThat(resp.name()).isEqualTo("1ro");
         assertThat(resp.ordinal()).isEqualTo(1);
+        assertThat(resp.teachingMode()).isEqualTo(TeachingMode.MONODOCENTE);
     }
 
     @Test
     @DisplayName("CreateGradeRequest — constructor + accessors")
     void createGradeRequest() {
-        var req = new CreateGradeRequest("1ro", 1);
+        var req = new CreateGradeRequest("1ro", 1, TeachingMode.POLIDOCENTE);
         assertThat(req.name()).isEqualTo("1ro");
         assertThat(req.ordinal()).isEqualTo(1);
+        assertThat(req.teachingMode()).isEqualTo(TeachingMode.POLIDOCENTE);
     }
 
     @Test
     @DisplayName("UpdateGradeRequest — constructor + accessors")
     void updateGradeRequest() {
-        var req = new UpdateGradeRequest("2do", 2);
+        var req = new UpdateGradeRequest("2do", 2, TeachingMode.MIXTO);
         assertThat(req.name()).isEqualTo("2do");
+        assertThat(req.teachingMode()).isEqualTo(TeachingMode.MIXTO);
     }
 
     @Test

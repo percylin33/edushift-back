@@ -235,7 +235,7 @@ class SectionServiceImplTest {
 			});
 
 			SectionResponse response = service.createSection(new CreateSectionRequest(
-					year.getPublicUuid(), grade.getPublicUuid(), "A", 30, 1));
+					year.getPublicUuid(), grade.getPublicUuid(), "A", 30, 1, null));
 
 			assertThat(response.name()).isEqualTo("A");
 			assertThat(response.capacity()).isEqualTo(30);
@@ -252,7 +252,7 @@ class SectionServiceImplTest {
 					.thenReturn(Optional.of(grade));
 
 			assertThatThrownBy(() -> service.createSection(new CreateSectionRequest(
-					year.getPublicUuid(), grade.getPublicUuid(), "A", null, null)))
+					year.getPublicUuid(), grade.getPublicUuid(), "A", null, null, null)))
 					.isInstanceOf(ConflictException.class)
 					.hasMessageContaining("CLOSED");
 			verify(sectionRepository, never()).saveAndFlush(any());
@@ -272,7 +272,7 @@ class SectionServiceImplTest {
 					.thenReturn(Optional.of(existing));
 
 			assertThatThrownBy(() -> service.createSection(new CreateSectionRequest(
-					year.getPublicUuid(), grade.getPublicUuid(), "A", null, null)))
+					year.getPublicUuid(), grade.getPublicUuid(), "A", null, null, null)))
 					.isInstanceOf(ConflictException.class)
 					.hasMessageContaining("'A'");
 		}
@@ -289,7 +289,7 @@ class SectionServiceImplTest {
 					.thenReturn(Optional.of(grade));
 
 			assertThatThrownBy(() -> service.createSection(new CreateSectionRequest(
-					year.getPublicUuid(), grade.getPublicUuid(), "A", null, null)))
+					year.getPublicUuid(), grade.getPublicUuid(), "A", null, null, null)))
 					.isInstanceOf(ResourceNotFoundException.class);
 		}
 
@@ -308,7 +308,7 @@ class SectionServiceImplTest {
 					.thenThrow(new DataIntegrityViolationException("uk_sections_year_grade_name_active"));
 
 			assertThatThrownBy(() -> service.createSection(new CreateSectionRequest(
-					year.getPublicUuid(), grade.getPublicUuid(), "A", null, null)))
+					year.getPublicUuid(), grade.getPublicUuid(), "A", null, null, null)))
 					.isInstanceOf(ConflictException.class);
 		}
 	}
@@ -334,7 +334,7 @@ class SectionServiceImplTest {
 			when(sectionRepository.saveAndFlush(section)).thenReturn(section);
 
 			SectionResponse response = service.updateSection(section.getPublicUuid(),
-					new UpdateSectionRequest("A1", 25, null));
+					new UpdateSectionRequest("A1", 25, null, null, null));
 
 			assertThat(response.name()).isEqualTo("A1");
 			assertThat(response.capacity()).isEqualTo(25);
@@ -349,7 +349,7 @@ class SectionServiceImplTest {
 					.thenReturn(Optional.of(section));
 
 			service.updateSection(section.getPublicUuid(),
-					new UpdateSectionRequest(null, null, null));
+					new UpdateSectionRequest(null, null, null, null, null));
 
 			verify(sectionRepository, never()).saveAndFlush(any());
 		}
@@ -363,7 +363,7 @@ class SectionServiceImplTest {
 					.thenReturn(Optional.of(section));
 
 			assertThatThrownBy(() -> service.updateSection(section.getPublicUuid(),
-					new UpdateSectionRequest("A1", null, null)))
+					new UpdateSectionRequest("A1", null, null, null, null)))
 					.isInstanceOf(ConflictException.class)
 					.hasMessageContaining("CLOSED");
 		}

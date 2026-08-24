@@ -14,6 +14,7 @@ import com.edushift.modules.academic.levelgrade.dto.GradeResponse;
 import com.edushift.modules.academic.levelgrade.dto.UpdateGradeRequest;
 import com.edushift.modules.academic.levelgrade.entity.AcademicLevel;
 import com.edushift.modules.academic.levelgrade.entity.Grade;
+import com.edushift.modules.academic.levelgrade.entity.TeachingMode;
 import com.edushift.modules.academic.levelgrade.mapper.GradeMapper;
 import com.edushift.modules.academic.levelgrade.repository.AcademicLevelRepository;
 import com.edushift.modules.academic.levelgrade.repository.GradeRepository;
@@ -82,7 +83,7 @@ class GradeServiceImplTest {
 
 			GradeResponse response = service.createGrade(
 					level.getPublicUuid(),
-					new CreateGradeRequest("1ro", 1));
+					new CreateGradeRequest("1ro", 1, TeachingMode.POLIDOCENTE));
 
 			assertThat(response.name()).isEqualTo("1ro");
 			assertThat(response.levelPublicUuid()).isEqualTo(level.getPublicUuid());
@@ -97,7 +98,8 @@ class GradeServiceImplTest {
 			when(gradeRepository.findByLevelAndOrdinal(level, 1)).thenReturn(Optional.of(existing));
 
 			assertThatThrownBy(() -> service.createGrade(
-					level.getPublicUuid(), new CreateGradeRequest("1ro", 1)))
+					level.getPublicUuid(),
+					new CreateGradeRequest("1ro", 1, TeachingMode.POLIDOCENTE)))
 					.isInstanceOf(ConflictException.class)
 					.hasMessageContaining("ordinal 1");
 			verify(gradeRepository, never()).saveAndFlush(any());
@@ -120,7 +122,7 @@ class GradeServiceImplTest {
 			assertThatThrownBy(() -> service.updateGrade(
 					levelA.getPublicUuid(),
 					gradeOfB.getPublicUuid(),
-					new UpdateGradeRequest("hacked", null)))
+					new UpdateGradeRequest("hacked", null, null)))
 					.isInstanceOf(ResourceNotFoundException.class);
 		}
 	}
