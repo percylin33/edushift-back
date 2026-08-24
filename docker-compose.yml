@@ -101,7 +101,7 @@ services:
       SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-prod}
       SERVER_PORT: 8080
       SERVER_CONTEXT_PATH: ${SERVER_CONTEXT_PATH:-/api}
-      # PostgreSQL
+      # PostgreSQL — host = compose service name (NOT localhost / 127.0.0.1)
       DB_HOST: postgres
       DB_PORT: 5432
       DB_NAME: ${DB_NAME:-edushift}
@@ -110,6 +110,9 @@ services:
       DB_SCHEMA: ${DB_SCHEMA:-edushift}
       DB_SSL_MODE: ${DB_SSL_MODE:-disable}
       DB_APPLICATION_NAME: edushift-back
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${DB_NAME:-edushift}?currentSchema=${DB_SCHEMA:-edushift}&sslmode=${DB_SSL_MODE:-disable}
+      SPRING_DATASOURCE_USERNAME: ${DB_USER:-edushift}
+      SPRING_DATASOURCE_PASSWORD: ${DB_PASSWORD}
       # Hikari
       HIKARI_MINIMUM_IDLE: ${HIKARI_MINIMUM_IDLE:-10}
       HIKARI_MAXIMUM_POOL_SIZE: ${HIKARI_MAXIMUM_POOL_SIZE:-30}
@@ -117,12 +120,14 @@ services:
       FLYWAY_ENABLED: ${FLYWAY_ENABLED:-true}
       FLYWAY_SCHEMAS: ${FLYWAY_SCHEMAS:-edushift}
       FLYWAY_DEFAULT_SCHEMA: ${FLYWAY_DEFAULT_SCHEMA:-edushift}
-      # Redis
+      # Redis — host = compose service name; no TLS inside the compose network
       REDIS_HOST: redis
       REDIS_PORT: 6379
       REDIS_PASSWORD: ${REDIS_PASSWORD}
       REDIS_SSL_ENABLED: ${REDIS_SSL_ENABLED:-false}
       REDIS_KEY_PREFIX: ${REDIS_KEY_PREFIX:-edushift:}
+      SPRING_DATA_REDIS_HOST: redis
+      SPRING_DATA_REDIS_PORT: 6379
       # Aplicación / Frontend / CORS
       APP_BASE_URL: ${APP_BASE_URL}
       FRONTEND_URL: ${FRONTEND_URL}
