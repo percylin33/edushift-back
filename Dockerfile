@@ -46,10 +46,12 @@ RUN mkdir -p /var/log/edushift/archive /app/logs/archive /app/uploads \
 # Defaults overridable via -e ... at run time. See
 # scripts/sprint-9b-launch.ps1 for the dev-profile env vars; for prod
 # you'll set DB_HOST/DB_USER/DB_PASSWORD via secrets.
+# Defaults tuned for small PaaS instances (Render free/starter 512Mi).
+# Override JAVA_OPTS / JAVA_TOOL_OPTIONS on larger hosts.
 ENV SPRING_PROFILES_ACTIVE=prod \
     SERVER_PORT=8081 \
     LOG_PATH=/var/log/edushift \
-    JAVA_OPTS="-XX:+UseG1GC -XX:MaxRAMPercentage=75.0"
+    JAVA_OPTS="-XX:+UseContainerSupport -XX:MaxRAMPercentage=50 -XX:InitialRAMPercentage=10 -XX:MaxMetaspaceSize=128m -XX:MetaspaceSize=64m -XX:+ExitOnOutOfMemoryError -XX:+UseG1GC"
 
 # Entrypoint starts as root so it can chown mounted log volumes, then drops
 # to uid 1001 before launching the JVM.
