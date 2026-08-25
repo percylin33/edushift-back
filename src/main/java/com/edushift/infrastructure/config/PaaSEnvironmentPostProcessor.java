@@ -1,7 +1,9 @@
 package com.edushift.infrastructure.config;
 
+import java.net.InetAddress;
 import java.net.URI;
 import java.net.URISyntaxException;
+import java.net.UnknownHostException;
 import java.util.HashMap;
 import java.util.Map;
 import org.springframework.boot.SpringApplication;
@@ -31,6 +33,7 @@ public class PaaSEnvironmentPostProcessor implements EnvironmentPostProcessor, O
 		Map<String, Object> additions = new HashMap<>();
 		maybeDisableRedis(environment, additions);
 		maybeMapDatabaseUrl(environment, additions);
+		ensureSslForManagedPostgres(environment, additions);
 		maybeMapRedisUrl(environment, additions);
 
 		if (!additions.isEmpty()) {
@@ -86,6 +89,7 @@ public class PaaSEnvironmentPostProcessor implements EnvironmentPostProcessor, O
 
 		try {
 			ParsedDb parsed = parsePostgresUrl(databaseUrl);
+			rejectBareRenderInternalHost(parsed.jdbcUrl());
 			additions.put("spring.datasource.url", parsed.jdbcUrl());
 			if (!hasText(environment.getProperty("SPRING_DATASOURCE_USERNAME"))
 					&& !hasText(environment.getProperty("spring.datasource.username"))
@@ -101,6 +105,125 @@ public class PaaSEnvironmentPostProcessor implements EnvironmentPostProcessor, O
 		catch (URISyntaxException ex) {
 			throw new IllegalStateException("Invalid DATABASE_URL: " + ex.getMessage(), ex);
 		}
+	}
+
+	/**
+	 * Render Internal hostnames look like {@code dpg-xxxxx-a} (no dots). They only
+	 * resolve on Render's private network when the Web Service and DB share a region
+	 * AND the DB is linked. If DNS fails, fail fast with actionable instructions
+	 * instead of a buried Flyway {@code UnknownHostException}.
+	 */
+	private static void rejectBareRenderInternalHost(String jdbcOrDbUrl) {
+		String host = extractHost(jdbcOrDbUrl);
+		if (host == null || !host.matches("(?i)dpg-[a-z0-9]+-a")) {
+			return;
+		}
+		try {
+			InetAddress.getByName(host);
+		}
+		catch (UnknownHostException ex) {
+			throw new IllegalStateException(
+					"Render Internal hostname '" + host + "' does not resolve (UnknownHostException). "
+							+ "Fix ONE of these:\n"
+							+ "  1) Prefer External URL — Render → Postgres → Connect → External Database URL, then set:\n"
+							+ "       SPRING_DATASOURCE_URL=jdbc:postgresql://" + host
+							+ ".<region>-postgres.render.com:5432/<dbname>?sslmode=require\n"
+							+ "       SPRING_DATASOURCE_USERNAME=...\n"
+							+ "       SPRING_DATASOURCE_PASSWORD=...\n"
+							+ "       (and remove/override DATABASE_URL if it still points at '" + host + "')\n"
+							+ "  2) Or keep Internal — put Web Service and Postgres in the SAME region and "
+							+ "Link the database to this service in Render.",
+					ex);
+		}
+	}
+
+	private static String extractHost(String url) {
+		if (url == null) {
+			return null;
+		}
+		try {
+			String normalized = url.trim();
+			if (normalized.startsWith("jdbc:")) {
+				normalized = normalized.substring("jdbc:".length());
+			}
+			if (normalized.startsWith("postgres://")) {
+				normalized = "postgresql://" + normalized.substring("postgres://".length());
+			}
+			if (!normalized.contains("://")) {
+				normalized = "postgresql://" + normalized;
+			}
+			return URI.create(normalized).getHost();
+		}
+		catch (Exception ignored) {
+			return null;
+		}
+	}
+
+	/**
+	 * Render / Railway / Neon / etc. reject non-TLS clients with
+	 * {@code FATAL: SSL/TLS required}. If the JDBC URL (or {@code DB_SSL_MODE})
+	 * still says {@code disable}/{@code prefer} against a managed host, force
+	 * {@code sslmode=require}.
+	 */
+	private static void ensureSslForManagedPostgres(
+			ConfigurableEnvironment environment, Map<String, Object> additions) {
+		String jdbcUrl = firstText(
+				additions.get("spring.datasource.url"),
+				environment.getProperty("SPRING_DATASOURCE_URL"),
+				environment.getProperty("spring.datasource.url"));
+		if (hasText(jdbcUrl)) {
+			rejectBareRenderInternalHost(jdbcUrl);
+		}
+		if (!hasText(jdbcUrl)) {
+			String databaseUrl = environment.getProperty("DATABASE_URL");
+			if (hasText(databaseUrl) && looksLikePostgresUrl(databaseUrl) && isManagedPostgresHost(databaseUrl)) {
+				additions.put("DB_SSL_MODE", "require");
+			}
+			return;
+		}
+
+		if (!isManagedPostgresHost(jdbcUrl)) {
+			return;
+		}
+
+		String forced = forceSslModeRequire(jdbcUrl);
+		if (!forced.equals(jdbcUrl)) {
+			additions.put("spring.datasource.url", forced);
+			additions.put("SPRING_DATASOURCE_URL", forced);
+		}
+		additions.put("DB_SSL_MODE", "require");
+	}
+
+	private static String forceSslModeRequire(String jdbcUrl) {
+		if (jdbcUrl.contains("sslmode=require")) {
+			return jdbcUrl;
+		}
+		String without = jdbcUrl
+				.replaceAll("(?i)([?&])sslmode=[^&]*", "$1")
+				.replaceAll("\\?&", "?")
+				.replaceAll("\\?$", "");
+		return without.contains("?")
+				? without + "&sslmode=require"
+				: without + "?sslmode=require";
+	}
+
+	private static boolean isManagedPostgresHost(String urlOrHost) {
+		String v = urlOrHost.toLowerCase();
+		return v.contains("render.com")
+				|| v.contains("rlwy.net")
+				|| v.contains("neon.tech")
+				|| v.contains("supabase.co")
+				|| v.contains("amazonaws.com")
+				|| v.matches("(?s).*\\bdpg-[a-z0-9]+-a\\b.*");
+	}
+
+	private static String firstText(Object... values) {
+		for (Object value : values) {
+			if (value != null && hasText(String.valueOf(value))) {
+				return String.valueOf(value);
+			}
+		}
+		return null;
 	}
 
 	private static void maybeMapRedisUrl(ConfigurableEnvironment environment, Map<String, Object> additions) {
