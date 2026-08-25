@@ -50,9 +50,9 @@ public class FcmSender {
 
 	@PostConstruct
 	void probe() {
-		if (fcmInitializer == null) {
-			log.warn("[fcm-sender] FirebaseInitializer not present; FcmSender is a no-op. "
-					+ "Check that the firebase-messaging dependency is on the classpath.");
+		if (fcmInitializer == null || fcmInitializer.app() == null) {
+			log.warn("[fcm-sender] FirebaseApp not initialized; FcmSender is a no-op. "
+					+ "Set FIREBASE_ENABLED=false or provide Firebase credentials.");
 		}
 		else {
 			log.info("[fcm-sender] FCM ready, async={}", async);
@@ -60,7 +60,7 @@ public class FcmSender {
 	}
 
 	public void send(UUID recipientUserPublicUuid, String title, String body, Map<String, String> data) {
-		if (fcmInitializer == null) return;
+		if (fcmInitializer == null || fcmInitializer.app() == null) return;
 
 		List<UserDeviceToken> tokens = deviceTokenRepository
 				.findByTenantIdAndUserPublicUuidAndActiveTrueOrderByLastSeenAtDesc(

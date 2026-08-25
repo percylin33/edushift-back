@@ -20,8 +20,11 @@ COPY mvnw ./
 RUN chmod +x mvnw && ./mvnw -B -ntp dependency:go-offline
 
 # Now copy source and build.
+# CACHE_BUST: bump or pass --build-arg CACHE_BUST=$(date +%s) / Render "Clear build cache"
+# so source changes are never skipped by a stale layer cache.
+ARG CACHE_BUST=2026-08-25-paas-oom
 COPY src ./src
-RUN ./mvnw -B -ntp -DskipTests package
+RUN echo "cache-bust=${CACHE_BUST}" && ./mvnw -B -ntp -DskipTests package
 
 # ---- Stage 2: runtime ----
 FROM eclipse-temurin:21-jre-jammy AS runtime
@@ -43,15 +46,12 @@ RUN mkdir -p /var/log/edushift/archive /app/logs/archive /app/uploads \
  && chown -R edushift:edushift /var/log/edushift /app/logs /app/uploads \
  && chmod +x /app/docker-entrypoint.sh
 
-# Defaults overridable via -e ... at run time. See
-# scripts/sprint-9b-launch.ps1 for the dev-profile env vars; for prod
-# you'll set DB_HOST/DB_USER/DB_PASSWORD via secrets.
-# Defaults tuned for small PaaS instances (Render free/starter 512Mi).
-# Override JAVA_OPTS / JAVA_TOOL_OPTIONS on larger hosts.
+# Defaults for ~1GiB+ containers (Render Starter). Free 512Mi is too small for
+# this monolith — expect OOM. Override JAVA_TOOL_OPTIONS on the host.
 ENV SPRING_PROFILES_ACTIVE=prod \
     SERVER_PORT=8081 \
     LOG_PATH=/var/log/edushift \
-    JAVA_OPTS="-XX:+UseContainerSupport -XX:MaxRAMPercentage=50 -XX:InitialRAMPercentage=10 -XX:MaxMetaspaceSize=128m -XX:MetaspaceSize=64m -XX:+ExitOnOutOfMemoryError -XX:+UseG1GC"
+    JAVA_OPTS="-XX:+UseContainerSupport -XX:MaxRAMPercentage=55 -XX:InitialRAMPercentage=10 -XX:MaxMetaspaceSize=160m -XX:MetaspaceSize=96m -XX:+ExitOnOutOfMemoryError -XX:+UseG1GC"
 
 # Entrypoint starts as root so it can chown mounted log volumes, then drops
 # to uid 1001 before launching the JVM.

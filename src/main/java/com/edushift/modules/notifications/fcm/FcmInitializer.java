@@ -45,8 +45,12 @@ public class FcmInitializer {
 	void init() throws IOException {
 		GoogleCredentials credentials = loadCredentials();
 		if (credentials == null) {
-			throw new IllegalStateException(
-					"app.integrations.firebase.enabled=true but no credentials-json or credentials-path was configured");
+			// Do not crash the whole app on PaaS when FCM is toggled on without secrets.
+			// FcmSender already no-ops when FirebaseApp was never initialized.
+			log.warn("[fcm-init] app.integrations.firebase.enabled=true but no credentials-json "
+					+ "or credentials-path configured — FCM disabled for this process. "
+					+ "Set FIREBASE_ENABLED=false or provide FIREBASE_CREDENTIALS_JSON / path.");
+			return;
 		}
 		FirebaseOptions.Builder builder = FirebaseOptions.builder()
 				.setCredentials(credentials)

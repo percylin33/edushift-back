@@ -42,9 +42,17 @@ public class PaaSEnvironmentPostProcessor implements EnvironmentPostProcessor, O
 	}
 
 	private static void maybeDisableRedis(ConfigurableEnvironment environment, Map<String, Object> additions) {
-		String enabled = environment.getProperty("edushift.redis.enabled",
-				environment.getProperty("EDUSHIFT_REDIS_ENABLED", "true"));
-		if (!"false".equalsIgnoreCase(enabled)) {
+		// Read OS env first: this EPP may run before application-prod.properties
+		// resolves edushift.redis.enabled=${REDIS_ENABLED:…}.
+		String enabled = firstText(
+				environment.getProperty("EDUSHIFT_REDIS_ENABLED"),
+				environment.getProperty("REDIS_ENABLED"),
+				environment.getProperty("edushift.redis.enabled"));
+		if (enabled == null) {
+			enabled = "true";
+		}
+		if (!"false".equalsIgnoreCase(enabled.trim())) {
+			rejectBareRenderRedisHost(environment);
 			return;
 		}
 
@@ -56,6 +64,36 @@ public class PaaSEnvironmentPostProcessor implements EnvironmentPostProcessor, O
 		String existing = environment.getProperty("spring.autoconfigure.exclude", "");
 		additions.put("spring.autoconfigure.exclude",
 				existing.isBlank() ? extra : existing + "," + extra);
+	}
+
+	/**
+	 * Render Redis Internal hosts look like {@code red-xxxxx} (no dots). Connecting
+	 * without private-network DNS hangs Lettuce for minutes and Render reports
+	 * "No open ports detected" before Tomcat ever binds {@code $PORT}.
+	 */
+	private static void rejectBareRenderRedisHost(ConfigurableEnvironment environment) {
+		String host = firstText(
+				extractHost(environment.getProperty("SPRING_DATA_REDIS_URL")),
+				extractHost(environment.getProperty("spring.data.redis.url")),
+				extractHost(environment.getProperty("REDIS_URL")),
+				environment.getProperty("REDIS_HOST"),
+				environment.getProperty("spring.data.redis.host"));
+		if (host == null || !host.matches("(?i)red-[a-z0-9]+")) {
+			return;
+		}
+		try {
+			InetAddress.getByName(host);
+		}
+		catch (UnknownHostException ex) {
+			throw new IllegalStateException(
+					"Render Redis Internal hostname '" + host + "' does not resolve. "
+							+ "Fix ONE of these:\n"
+							+ "  1) Set REDIS_ENABLED=false (and EDUSHIFT_REDIS_ENABLED=false) until Redis is ready\n"
+							+ "  2) Use External Redis host (….region-redis.render.com) + REDIS_SSL_ENABLED=true "
+							+ "and the real Redis password from the Render dashboard\n"
+							+ "  3) Keep Internal — same region + link Redis to this Web Service",
+					ex);
+		}
 	}
 
 	private static void rejectPostgresUrlAsRedis(ConfigurableEnvironment environment) {
