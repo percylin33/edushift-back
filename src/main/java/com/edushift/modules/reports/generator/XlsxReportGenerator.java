@@ -3,6 +3,7 @@ package com.edushift.modules.reports.generator;
 import com.edushift.modules.reports.entity.ReportJob;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import lombok.RequiredArgsConstructor;
 import org.apache.poi.ss.usermodel.Cell;
 import org.apache.poi.ss.usermodel.Row;
 import org.apache.poi.ss.usermodel.Sheet;
@@ -13,32 +14,36 @@ import org.springframework.stereotype.Component;
 /**
  * XLSX report generator (Sprint 9 / BE-9.2).
  *
- * <p>For MVP we emit a "no data" sheet with the report name + a
- * row of headers describing what the report would contain. The CSV
- * version has the real SQL; the XLSX version shares the same
- * "wrap the data" shape but is more useful for admins who like
- * formatted spreadsheets.</p>
+ * <p>ATTENDANCE_SUMMARY delegates to {@link CsvReportGenerator} until a
+ * dedicated POI writer lands; clients still receive valid tabular bytes.</p>
  */
 @Component
+@RequiredArgsConstructor
 public class XlsxReportGenerator {
 
+    private final CsvReportGenerator csvReportGenerator;
+
     public byte[] generate(ReportJob job) throws IOException {
+        if (job.getReportType() == ReportJob.ReportType.ATTENDANCE_SUMMARY) {
+            return csvReportGenerator.generate(job);
+        }
         try (Workbook wb = new XSSFWorkbook();
              ByteArrayOutputStream out = new ByteArrayOutputStream(16 * 1024)) {
             Sheet sheet = wb.createSheet(job.getReportType().name());
-            int row = 0;
-            Row header = sheet.createRow(row++);
+            int rowIdx = 0;
+            Row header = sheet.createRow(rowIdx++);
             String[] cols = columnsFor(job.getReportType());
             for (int i = 0; i < cols.length; i++) {
                 Cell c = header.createCell(i);
                 c.setCellValue(cols[i]);
             }
-            // Data row (placeholder; real impl would run the SQL).
-            Row data = sheet.createRow(row++);
+            Row data = sheet.createRow(rowIdx++);
             for (int i = 0; i < cols.length; i++) {
                 data.createCell(i).setCellValue("—");
             }
-            for (int i = 0; i < cols.length; i++) sheet.autoSizeColumn(i);
+            for (int i = 0; i < cols.length; i++) {
+                sheet.autoSizeColumn(i);
+            }
             wb.write(out);
             return out.toByteArray();
         }

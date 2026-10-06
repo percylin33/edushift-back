@@ -25,6 +25,7 @@
 		  Sprint 16 / INFRA-16.2.
 		-->
 		<jacoco.check.skip>true</jacoco.check.skip>
+		<maven.compiler.processAnnotations>true</maven.compiler.processAnnotations>
 	</properties>
 
 	<dependencies>

@@ -36,7 +36,7 @@ class QuizAttemptMapperTest {
         var answers = List.of(answer(5, true), answer(0, false));
         when(answerRepo.findAllByAttemptOrderByQuestionPositionAsc(attempt)).thenReturn(answers);
 
-        var r = mapper.toResponse(attempt, true, 2);
+        var r = mapper.toResponse(attempt, true);
 
         assertThat(r.publicUuid()).isEqualTo(attempt.getPublicUuid());
         assertThat(r.studentUserId()).isEqualTo(attempt.getStudentUserId());
@@ -55,7 +55,7 @@ class QuizAttemptMapperTest {
         when(answerRepo.findAllByAttemptOrderByQuestionPositionAsc(attempt))
                 .thenReturn(List.of(answer(5, true)));
 
-        var r = mapper.toResponse(attempt, attempt.getQuiz(), false, 0);
+        var r = mapper.toResponse(attempt, attempt.getQuiz(), false);
 
         assertThat(r.revealCorrectness()).isFalse();
         assertThat(r.answers()).hasSize(1);
@@ -71,10 +71,10 @@ class QuizAttemptMapperTest {
         var attempt = attempt();
         when(answerRepo.findAllByAttemptOrderByQuestionPositionAsc(attempt)).thenReturn(List.of());
 
-        var withQuiz = mapper.toResponse(attempt, attempt.getQuiz(), true, 0);
+        var withQuiz = mapper.toResponse(attempt, attempt.getQuiz(), true);
         assertThat(withQuiz.maxScore()).isEqualTo(Integer.valueOf(100));
 
-        var withoutQuiz = mapper.toResponse(attempt, true, 0);
+        var withoutQuiz = mapper.toResponse(attempt, null, true);
         assertThat(withoutQuiz.maxScore()).isNull();
     }
 
@@ -85,11 +85,11 @@ class QuizAttemptMapperTest {
         attempt.setExpiresAt(Instant.now().plusSeconds(120));
         when(answerRepo.findAllByAttemptOrderByQuestionPositionAsc(attempt)).thenReturn(List.of());
 
-        var r = mapper.toResponse(attempt, true, 0);
+        var r = mapper.toResponse(attempt, true);
         assertThat(r.timeRemainingSeconds()).isBetween(110, 120);
 
         attempt.setExpiresAt(null);
-        var r2 = mapper.toResponse(attempt, true, 0);
+        var r2 = mapper.toResponse(attempt, true);
         assertThat(r2.timeRemainingSeconds()).isNull();
     }
 

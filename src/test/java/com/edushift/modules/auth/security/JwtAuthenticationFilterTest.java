@@ -1,7 +1,9 @@
 package com.edushift.modules.auth.security;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -63,7 +65,7 @@ class JwtAuthenticationFilterTest {
 	private com.edushift.shared.security.LmsRoleAuthorityMapper authorityMapper;
 
 	@Mock
-	private com.edushift.modules.tenants.repository.TenantRepository tenantRepository;
+	private com.edushift.modules.tenants.service.TenantStatusCache tenantStatusCache;
 
 	@InjectMocks
 	private JwtAuthenticationFilter filter;
@@ -77,6 +79,9 @@ class JwtAuthenticationFilterTest {
 		request = new MockHttpServletRequest("GET", "/v1/auth/me");
 		response = new MockHttpServletResponse();
 		SecurityContextHolder.clearContext();
+		// Default: tenant is ACTIVE so happy-path tests authenticate.
+		lenient().when(tenantStatusCache.getStatus(any(UUID.class)))
+				.thenReturn(com.edushift.modules.tenants.entity.TenantStatus.ACTIVE);
 	}
 
 	@AfterEach
@@ -306,8 +311,13 @@ class JwtAuthenticationFilterTest {
 			com.edushift.shared.security.LmsRoleAuthorityMapper realMapper =
 					new com.edushift.shared.security.LmsRoleAuthorityMapper(
 							mock(com.edushift.modules.tenants.service.PermissionOverrideService.class));
+			com.edushift.modules.tenants.service.TenantStatusCache statusCache =
+					mock(com.edushift.modules.tenants.service.TenantStatusCache.class);
+			when(statusCache.getStatus(any(UUID.class)))
+					.thenReturn(com.edushift.modules.tenants.entity.TenantStatus.ACTIVE);
 			JwtAuthenticationFilter realFilter =
-					new JwtAuthenticationFilter(jwtService, realMapper, mock(com.edushift.modules.tenants.repository.TenantRepository.class));
+					new JwtAuthenticationFilter(jwtService, realMapper, statusCache,
+							mock(com.edushift.modules.auth.repository.UserRepository.class));
 
 			UUID publicUuid = UUID.randomUUID();
 			UUID tenantId = UUID.randomUUID();

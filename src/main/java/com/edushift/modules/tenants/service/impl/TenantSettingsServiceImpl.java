@@ -5,6 +5,7 @@ import com.edushift.modules.tenants.repository.TenantRepository;
 import com.edushift.modules.tenants.service.TenantSettingsService;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -34,6 +35,12 @@ public class TenantSettingsServiceImpl implements TenantSettingsService {
 
 	private static final String SETTINGS_ATTENDANCE_KEY = "attendance";
 	private static final String SETTING_LATE_AFTER_MINUTES_KEY = "lateAfterMinutes";
+	private static final String SETTINGS_ACADEMIC_KEY = "academic";
+	private static final String SETTING_DEFAULT_UNIT_COUNT_KEY = "defaultUnitCount";
+
+	public static final int DEFAULT_UNIT_COUNT = TenantSettingsService.DEFAULT_UNIT_COUNT;
+	public static final int MIN_UNIT_COUNT = TenantSettingsService.MIN_UNIT_COUNT;
+	public static final int MAX_UNIT_COUNT = TenantSettingsService.MAX_UNIT_COUNT;
 
 	private final TenantRepository tenantRepository;
 	private final int defaultLateAfterMinutes;
@@ -65,6 +72,47 @@ public class TenantSettingsServiceImpl implements TenantSettingsService {
 		int resolved = resolveFromDb(tenantId);
 		cache.put(tenantId, new CachedSettings(resolved, now.plus(cacheTtl)));
 		return resolved;
+	}
+
+	@Override
+	@Transactional(readOnly = true)
+	public int getDefaultUnitCount(UUID tenantId) {
+		if (tenantId == null) {
+			return DEFAULT_UNIT_COUNT;
+		}
+		return tenantRepository.findById(tenantId)
+				.map(this::extractDefaultUnitCount)
+				.orElse(DEFAULT_UNIT_COUNT);
+	}
+
+	@Override
+	@Transactional
+	public void setDefaultUnitCount(UUID tenantId, int count) {
+		if (tenantId == null) {
+			throw new IllegalArgumentException("tenantId is required");
+		}
+		int clamped = clampUnitCount(count);
+		Tenant tenant = tenantRepository.findById(tenantId)
+				.orElseThrow(() -> new IllegalArgumentException(
+						"Tenant not found: " + tenantId));
+		Map<String, Object> settings = tenant.getSettings();
+		if (settings == null) {
+			settings = new HashMap<>();
+			tenant.setSettings(settings);
+		}
+		Object academicNode = settings.get(SETTINGS_ACADEMIC_KEY);
+		Map<String, Object> academic;
+		if (academicNode instanceof Map<?, ?> raw) {
+			academic = new HashMap<>();
+			raw.forEach((k, v) -> academic.put(String.valueOf(k), v));
+		}
+		else {
+			academic = new HashMap<>();
+		}
+		academic.put(SETTING_DEFAULT_UNIT_COUNT_KEY, clamped);
+		settings.put(SETTINGS_ACADEMIC_KEY, academic);
+		tenantRepository.saveAndFlush(tenant);
+		log.info("[tenant-settings] tenantId={} defaultUnitCount={}", tenantId, clamped);
 	}
 
 	private int resolveFromDb(UUID tenantId) {
@@ -100,6 +148,33 @@ public class TenantSettingsServiceImpl implements TenantSettingsService {
 		return parsed;
 	}
 
+	private int extractDefaultUnitCount(Tenant tenant) {
+		Map<String, Object> settings = tenant.getSettings();
+		if (settings == null || settings.isEmpty()) {
+			return DEFAULT_UNIT_COUNT;
+		}
+		Object academicNode = settings.get(SETTINGS_ACADEMIC_KEY);
+		if (!(academicNode instanceof Map<?, ?> academicMap)) {
+			return DEFAULT_UNIT_COUNT;
+		}
+		Object value = academicMap.get(SETTING_DEFAULT_UNIT_COUNT_KEY);
+		Integer parsed = coerceToPositiveInt(value);
+		if (parsed == null) {
+			if (value != null) {
+				log.warn("[tenant-settings] tenantId={} has malformed "
+						+ "settings.academic.defaultUnitCount='{}'; "
+						+ "falling back to {}",
+						tenant.getId(), value, DEFAULT_UNIT_COUNT);
+			}
+			return DEFAULT_UNIT_COUNT;
+		}
+		return clampUnitCount(parsed);
+	}
+
+	public static int clampUnitCount(int count) {
+		return TenantSettingsService.clampUnitCount(count);
+	}
+
 	private static Integer coerceToNonNegativeInt(Object value) {
 		if (value == null) return null;
 		try {
@@ -113,6 +188,14 @@ public class TenantSettingsServiceImpl implements TenantSettingsService {
 		catch (NumberFormatException e) {
 			return null;
 		}
+	}
+
+	private static Integer coerceToPositiveInt(Object value) {
+		Integer parsed = coerceToNonNegativeInt(value);
+		if (parsed == null || parsed < 1) {
+			return null;
+		}
+		return parsed;
 	}
 
 	private static int sanitizeNonNegative(int value) {

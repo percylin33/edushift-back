@@ -1,23 +1,44 @@
 package com.edushift.modules.tasks.submission.mapper;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.when;
 
+import com.edushift.modules.files.service.FileObjectService;
 import com.edushift.modules.tasks.entity.Task;
 import com.edushift.modules.tasks.submission.dto.SubmissionResponse;
 import com.edushift.modules.tasks.submission.dto.SubmissionSummary;
 import com.edushift.modules.tasks.submission.entity.Submission;
 import com.edushift.modules.tasks.submission.entity.SubmissionStatus;
+import com.edushift.modules.auth.repository.UserRepository;
+import com.edushift.modules.students.repository.StudentRepository;
 import java.lang.reflect.Field;
 import java.time.Instant;
+import java.util.Optional;
 import java.util.UUID;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.InjectMocks;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
 
+@ExtendWith(MockitoExtension.class)
 @DisplayName("SubmissionMapper")
 class SubmissionMapperTest {
 
-    private final SubmissionMapper mapper = new SubmissionMapper();
+    @Mock private UserRepository userRepository;
+    @Mock private StudentRepository studentRepository;
+    @Mock private FileObjectService fileObjectService;
+    @InjectMocks private SubmissionMapper mapper;
+
+    @BeforeEach
+    void stubLookupsEmpty() {
+        when(userRepository.findByPublicUuid(any())).thenReturn(Optional.empty());
+        when(studentRepository.findByUserId(any())).thenReturn(Optional.empty());
+    }
 
     @Nested
     @DisplayName("toResponse")
@@ -88,10 +109,11 @@ class SubmissionMapperTest {
 
             assertThat(sum.publicUuid()).isEqualTo(s.getPublicUuid());
             assertThat(sum.studentPublicUuid()).isEqualTo(s.getStudentUserId());
+            assertThat(sum.studentFullName()).isEqualTo("Estudiante");
             assertThat(sum.status()).isEqualTo(SubmissionStatus.SUBMITTED);
             assertThat(sum.grade()).isNull();
             assertThat(sum.hasAttachment()).isTrue();
-            assertThat(sum.createdAt()).isEqualTo(s.getCreatedAt());
+            assertThat(sum.submittedAt()).isEqualTo(s.getCreatedAt());
         }
 
         @Test
@@ -114,10 +136,6 @@ class SubmissionMapperTest {
             assertThat(mapper.toSummary(s).hasAttachment()).isFalse();
         }
     }
-
-    // ------------------------------------------------------------------
-    // helpers
-    // ------------------------------------------------------------------
 
     private Submission newSubmission(SubmissionStatus status, Short grade, String textBody) {
         Submission s = new Submission();

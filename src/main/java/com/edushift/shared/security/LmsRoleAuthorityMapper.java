@@ -67,7 +67,8 @@ public class LmsRoleAuthorityMapper {
 				LmsAuthorities.LMS_PAYMENT_ADMIN,
 				LmsAuthorities.LMS_ANNOUNCEMENTS_CREATE,
 				LmsAuthorities.LMS_NOTIFICATIONS_MANAGE,
-				LmsAuthorities.LMS_AI_USAGE
+				LmsAuthorities.LMS_AI_USAGE,
+				LmsAuthorities.USERS_PROVISION_SECTION
 		));
 		DEFAULTS.put(UserRole.TEACHER, Set.of(
 				LmsAuthorities.LMS_TASK_READ,
@@ -79,7 +80,8 @@ public class LmsRoleAuthorityMapper {
 				LmsAuthorities.LMS_QUIZ_READ,
 				LmsAuthorities.LMS_QUIZ_CREATE,
 				LmsAuthorities.LMS_QUIZ_GRADE,
-				LmsAuthorities.LMS_AI_GENERATE
+				LmsAuthorities.LMS_AI_GENERATE,
+				LmsAuthorities.LMS_ANNOUNCEMENTS_CREATE_OWN
 		));
 		DEFAULTS.put(UserRole.STUDENT, Set.of(
 				LmsAuthorities.LMS_TASK_READ,
@@ -111,7 +113,8 @@ public class LmsRoleAuthorityMapper {
 				LmsAuthorities.LMS_TASK_READ,
 				LmsAuthorities.LMS_MATERIAL_READ,
 				LmsAuthorities.LMS_QUIZ_READ,
-				LmsAuthorities.LMS_PAYMENT_ADMIN
+				LmsAuthorities.LMS_PAYMENT_ADMIN,
+				LmsAuthorities.USERS_PROVISION_SECTION
 		));
 		// SUPER_ADMIN intentionally not in DEFAULTS — its authority set is
 		// assembled inline in resolveFor() because it bypasses tenant overrides.
@@ -176,6 +179,11 @@ public class LmsRoleAuthorityMapper {
 		Set<String> revokes = overrideService.revokedFor(tenantId)
 				.getOrDefault(role, Set.of());
 		result.removeAll(revokes);
+		// Students never publish, even if a tenant override tried to grant it.
+		if (role == UserRole.STUDENT) {
+			result.remove(LmsAuthorities.LMS_ANNOUNCEMENTS_CREATE);
+			result.remove(LmsAuthorities.LMS_ANNOUNCEMENTS_CREATE_OWN);
+		}
 		return result;
 	}
 

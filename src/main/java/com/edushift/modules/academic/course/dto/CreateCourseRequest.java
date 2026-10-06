@@ -15,6 +15,10 @@ import java.util.UUID;
  * apply to >= 1 level (invariant {@code COURSE_NEEDS_AT_LEAST_ONE_LEVEL},
  * 422). Cross-tenant level UUIDs become a 404 {@code RESOURCE_NOT_FOUND}
  * (anti-enumeration).</p>
+ *
+ * <p>{@code color} and {@code icon} are optional; when omitted the service
+ * applies {@link com.edushift.modules.academic.course.CourseVisualDefaults}
+ * from {@code code}.</p>
  */
 public record CreateCourseRequest(
 
@@ -38,6 +42,12 @@ public record CreateCourseRequest(
 		Integer hoursPerWeek,
 
 		Boolean isActive,
+
+		@Pattern(regexp = "^#[0-9A-Fa-f]{6}$", message = "color must be #RRGGBB")
+		String color,
+
+		@Size(max = 64, message = "icon too long")
+		String icon,
 
 		@NotEmpty(message = "levelPublicUuids must contain at least one level")
 		List<UUID> levelPublicUuids

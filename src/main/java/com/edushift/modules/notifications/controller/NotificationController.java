@@ -71,12 +71,7 @@ public class NotificationController {
             Pageable pageable) {
         UUID me = me();
         Page<Notification> page = notificationService.listForUser(me, unreadOnly, pageable);
-        List<NotificationResponse> data = page.getContent().stream()
-                .map(n -> NotificationResponse.from(
-                        n,
-                        notificationService.renderSubject(n),
-                        notificationService.renderBody(n)))
-                .toList();
+        List<NotificationResponse> data = notificationService.toResponses(page.getContent());
         return ApiResponse.ok(data, ApiResponse.Meta.of(page));
     }
 

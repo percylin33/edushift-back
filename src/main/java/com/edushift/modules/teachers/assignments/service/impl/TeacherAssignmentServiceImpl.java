@@ -122,6 +122,59 @@ public class TeacherAssignmentServiceImpl implements TeacherAssignmentService {
 
 	@Override
 	@Transactional(readOnly = true)
+	public List<AssignmentListItem> listFiltered(
+			UUID teacherPublicUuid,
+			UUID sectionPublicUuid,
+			UUID coursePublicUuid,
+			UUID periodPublicUuid,
+			boolean activeOnly) {
+		UUID effectiveTeacherUuid = teacherPublicUuid;
+
+		// TEACHER (non-admin): always scoped to self. Passing another
+		// teacherId is treated as not-found (anti-enumeration).
+		if (!isCurrentUserAdmin()) {
+			UUID callerUserPublicUuid = currentUserProvider.currentUserId()
+					.orElseThrow(() -> new ResourceNotFoundException(
+							"Authenticated user identity is required"));
+			UUID myTeacherPublicUuid = teacherRepository
+					.findByUserId(callerUserPublicUuid)
+					.map(Teacher::getPublicUuid)
+					.orElseThrow(() -> new ResourceNotFoundException(
+							"Teacher", callerUserPublicUuid));
+			if (teacherPublicUuid != null
+					&& !teacherPublicUuid.equals(myTeacherPublicUuid)) {
+				log.warn("[teachers.assignments] filtered self-only guard hit -- "
+						+ "callerUserId={} askedTeacher={} myTeacher={}",
+						callerUserPublicUuid, teacherPublicUuid, myTeacherPublicUuid);
+				throw new ResourceNotFoundException("Teacher", teacherPublicUuid);
+			}
+			effectiveTeacherUuid = myTeacherPublicUuid;
+		}
+
+		Teacher teacher = (effectiveTeacherUuid == null)
+				? null : loadTeacher(effectiveTeacherUuid);
+		Section section = (sectionPublicUuid == null)
+				? null : loadSection(sectionPublicUuid);
+		Course course = (coursePublicUuid == null)
+				? null : loadCourse(coursePublicUuid);
+		AcademicPeriod period = (periodPublicUuid == null)
+				? null : loadPeriod(periodPublicUuid);
+
+		List<AssignmentListItem> rows = assignmentRepository
+				.findAllFiltered(teacher, section, course, period, activeOnly)
+				.stream()
+				.map(mapper::toListItem)
+				.toList();
+
+		log.info("[teachers.assignments] filtered list -- count={} activeOnly={} "
+						+ "teacher={} section={} course={} period={}",
+				rows.size(), activeOnly,
+				effectiveTeacherUuid, sectionPublicUuid, coursePublicUuid, periodPublicUuid);
+		return rows;
+	}
+
+	@Override
+	@Transactional(readOnly = true)
 	public List<SectionTeacherItem> listForSection(UUID sectionPublicUuid,
 			UUID periodPublicUuid) {
 		Section section = loadSection(sectionPublicUuid);

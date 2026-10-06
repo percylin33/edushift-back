@@ -2,6 +2,7 @@ package com.edushift.modules.materials.repository;
 
 import com.edushift.modules.academic.section.entity.Section;
 import com.edushift.modules.materials.entity.Material;
+import com.edushift.modules.teachers.assignments.entity.TeacherAssignment;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -11,9 +12,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.stereotype.Repository;
 
 /**
- * Spring Data repository for {@link Material} (Sprint 7a / BE-7a.1).
- * Tenant-scoped automatically by Hibernate's {@code @TenantId}
- * discriminator; cross-tenant lookups return empty by construction.
+ * Spring Data repository for {@link Material} (Sprint 7a / BE-7a.1 + V105).
  */
 @Repository
 public interface MaterialRepository extends JpaRepository<Material, UUID> {
@@ -24,5 +23,10 @@ public interface MaterialRepository extends JpaRepository<Material, UUID> {
 
 	Page<Material> findAllBySectionOrderByCreatedAtDesc(Section section, Pageable pageable);
 
+	Page<Material> findAllBySectionAndTeacherAssignmentOrderByCreatedAtDesc(
+			Section section, TeacherAssignment teacherAssignment, Pageable pageable);
+
 	List<Material> findAllByFilePublicUuid(UUID filePublicUuid);
+
+	long countBySectionAndTeacherAssignment(Section section, TeacherAssignment teacherAssignment);
 }

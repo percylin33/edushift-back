@@ -79,7 +79,7 @@ class StudentBulkImportParserTest {
 				.isInstanceOfSatisfying(BulkImportException.class,
 						ex -> {
 							assertThat(ex.getCode()).isEqualTo("INVALID_FILE");
-							assertThat(ex.getMessage()).contains("documentnumber");
+							assertThat(ex.getMessage()).containsIgnoringCase("documentNumber");
 						});
 	}
 
@@ -193,6 +193,80 @@ class StudentBulkImportParserTest {
 		assertThatThrownBy(() -> parser.parse(new ByteArrayInputStream(junk)))
 				.isInstanceOfSatisfying(BulkImportException.class,
 						ex -> assertThat(ex.getCode()).isEqualTo("INVALID_FILE"));
+	}
+
+	@Test
+	@DisplayName("Spanish headers + FEMENINO / MADRE synonyms resolve")
+	void spanishHeadersAndEnumAliases() throws Exception {
+		byte[] payload = build(workbook -> {
+			Sheet sheet = workbook.createSheet("Estudiantes");
+			writeHeader(sheet,
+					"Tipo de documento", "Número de documento", "Nombres", "Apellido paterno",
+					"Género", "Nombres apoderado", "Apellido apoderado",
+					"Tipo doc. apoderado", "Número doc. apoderado", "Parentesco");
+			Row r = sheet.createRow(1);
+			r.createCell(0).setCellValue("DNI");
+			r.createCell(1).setCellValue("12345678");
+			r.createCell(2).setCellValue("Ada");
+			r.createCell(3).setCellValue("Lovelace");
+			r.createCell(4).setCellValue("FEMENINO");
+			r.createCell(5).setCellValue("Anne");
+			r.createCell(6).setCellValue("Byron");
+			r.createCell(7).setCellValue("DNI");
+			r.createCell(8).setCellValue("87654321");
+			r.createCell(9).setCellValue("MADRE");
+		});
+
+		List<StudentRowDraft> drafts = parser.parse(new ByteArrayInputStream(payload));
+		assertThat(drafts).hasSize(1);
+		assertThat(drafts.get(0).gender()).isEqualTo(Gender.FEMALE);
+		assertThat(drafts.get(0).guardianRelationship().name()).isEqualTo("MOTHER");
+		assertThat(drafts.get(0).hasCompleteGuardian()).isTrue();
+	}
+
+	@Test
+	@DisplayName("explicit columnMapping maps weird headers")
+	void explicitColumnMapping() throws Exception {
+		byte[] payload = build(workbook -> {
+			Sheet sheet = workbook.createSheet("Custom");
+			writeHeader(sheet, "DOC", "NRO", "NOM", "APE");
+			Row r = sheet.createRow(1);
+			r.createCell(0).setCellValue("DNI");
+			r.createCell(1).setCellValue("99999999");
+			r.createCell(2).setCellValue("Bob");
+			r.createCell(3).setCellValue("Smith");
+		});
+
+		var mapping = java.util.Map.of(
+				"documentType", "DOC",
+				"documentNumber", "NRO",
+				"firstName", "NOM",
+				"lastName", "APE");
+
+		List<StudentRowDraft> drafts = parser.parse(new ByteArrayInputStream(payload), mapping);
+		assertThat(drafts).hasSize(1);
+		assertThat(drafts.get(0).firstName()).isEqualTo("Bob");
+		assertThat(drafts.get(0).documentNumber()).isEqualTo("99999999");
+	}
+
+	@Test
+	@DisplayName("preview returns suggestedMapping for Spanish headers")
+	void previewSuggestsSpanish() throws Exception {
+		byte[] payload = build(workbook -> {
+			Sheet sheet = workbook.createSheet("Estudiantes");
+			writeHeader(sheet, "Tipo de documento", "Número de documento", "Nombres", "Apellido paterno");
+			Row r = sheet.createRow(1);
+			r.createCell(0).setCellValue("DNI");
+			r.createCell(1).setCellValue("1");
+			r.createCell(2).setCellValue("A");
+			r.createCell(3).setCellValue("B");
+		});
+
+		var preview = parser.preview(new ByteArrayInputStream(payload));
+		assertThat(preview.headers()).contains("Nombres");
+		assertThat(preview.suggestedMapping()).containsEntry("firstName", "Nombres");
+		assertThat(preview.unmappedRequired()).isEmpty();
+		assertThat(preview.sampleRows()).hasSize(1);
 	}
 
 	// ---------------------------------------------------------------------------

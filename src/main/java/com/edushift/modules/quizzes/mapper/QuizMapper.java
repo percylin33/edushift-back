@@ -9,9 +9,13 @@ import com.edushift.modules.quizzes.entity.QuizOption;
 import com.edushift.modules.quizzes.entity.QuizQuestion;
 import com.edushift.modules.quizzes.repository.QuizOptionRepository;
 import com.edushift.modules.quizzes.repository.QuizQuestionRepository;
-import java.util.Collections;
+import com.edushift.modules.teachers.assignments.support.LmsAssignmentProjection;
+import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.UUID;
 import org.springframework.stereotype.Component;
 
 /**
@@ -62,14 +66,17 @@ public class QuizMapper {
 	public QuizResponse toResponse(Quiz entity, boolean revealCorrectness) {
 		List<QuizQuestion> questions = questionRepository
 				.findAllByQuizOrderByPositionAsc(entity);
+		Map<UUID, List<QuizOption>> optionsByQuestion = loadOptions(questions);
 		List<QuestionResponse> questionDtos = questions.stream()
-				.map(this::toQuestionResponse)
+				.map(q -> toQuestionResponse(q,
+						optionsByQuestion.getOrDefault(q.getId(), List.of())))
 				.toList();
 
 		int totalPoints = questionDtos.stream()
 				.mapToInt(q -> q.points())
 				.sum();
 
+		var assignment = entity.getTeacherAssignment();
 		return new QuizResponse(
 				entity.getPublicUuid(),
 				entity.getSection() != null
@@ -93,15 +100,15 @@ public class QuizMapper {
 				revealCorrectness,
 				questionDtos,
 				entity.getCreatedAt(),
-				entity.getUpdatedAt());
+				entity.getUpdatedAt(),
+				LmsAssignmentProjection.publicUuid(assignment),
+				LmsAssignmentProjection.coursePublicUuid(assignment),
+				LmsAssignmentProjection.courseName(assignment),
+				LmsAssignmentProjection.periodLabel(assignment));
 	}
 
-	public QuizSummary toSummary(Quiz entity) {
-		List<QuizQuestion> questions = questionRepository
-				.findAllByQuizOrderByPositionAsc(entity);
-		int totalPoints = questions.stream()
-				.mapToInt(q -> q.getPoints() == null ? 0 : q.getPoints())
-				.sum();
+	public QuizSummary toSummary(Quiz entity, int questionCount, int totalPoints) {
+		var assignment = entity.getTeacherAssignment();
 		return new QuizSummary(
 				entity.getPublicUuid(),
 				entity.getTitle(),
@@ -111,9 +118,13 @@ public class QuizMapper {
 				toInt(entity.getAttemptsAllowed()),
 				toInt(entity.getMaxScore()),
 				entity.getOwnerUserId(),
-				questions.size(),
+				questionCount,
 				totalPoints,
-				entity.getCreatedAt());
+				entity.getCreatedAt(),
+				LmsAssignmentProjection.publicUuid(assignment),
+				LmsAssignmentProjection.coursePublicUuid(assignment),
+				LmsAssignmentProjection.courseName(assignment),
+				LmsAssignmentProjection.periodLabel(assignment));
 	}
 
 	// ------------------------------------------------------------------
@@ -122,7 +133,11 @@ public class QuizMapper {
 
 	public QuestionResponse toQuestionResponse(QuizQuestion entity) {
 		List<QuizOption> options = optionRepository
-				.findAllByQuestionOrderByPositionAsc(entity);
+				.findAllByQuestionInOrderByPositionAsc(List.of(entity));
+		return toQuestionResponse(entity, options);
+	}
+
+	private QuestionResponse toQuestionResponse(QuizQuestion entity, List<QuizOption> options) {
 		List<OptionResponse> optionDtos = options.stream()
 				.sorted(Comparator.comparingInt(
 						o -> o.getPosition() == null ? 0 : o.getPosition()))
@@ -152,6 +167,19 @@ public class QuizMapper {
 	// ------------------------------------------------------------------
 	// helpers
 	// ------------------------------------------------------------------
+
+	private Map<UUID, List<QuizOption>> loadOptions(List<QuizQuestion> questions) {
+		if (questions.isEmpty()) {
+			return Map.of();
+		}
+		Map<UUID, List<QuizOption>> grouped = new LinkedHashMap<>();
+		for (QuizOption option : optionRepository
+				.findAllByQuestionInOrderByPositionAsc(questions)) {
+			UUID questionId = option.getQuestion().getId();
+			grouped.computeIfAbsent(questionId, id -> new ArrayList<>()).add(option);
+		}
+		return grouped;
+	}
 
 	private static Integer toInt(Short s) {
 		return s == null ? null : s.intValue();

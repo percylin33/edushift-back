@@ -6,15 +6,20 @@ import com.edushift.modules.family.dto.FamilyChildSummary;
 import com.edushift.modules.family.dto.FamilyGradeItemDto;
 import com.edushift.modules.family.dto.FamilyPaymentItemDto;
 import com.edushift.modules.family.service.FamilyService;
+import com.edushift.modules.reports.entity.ReportJob;
 import com.edushift.modules.schedule.timeslot.dto.ScheduleWeekView;
 import com.edushift.shared.api.ApiResponse;
 import com.edushift.shared.security.CurrentUserProvider;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import org.springdoc.core.annotations.ParameterObject;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.format.annotation.DateTimeFormat;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -46,10 +51,40 @@ public class FamilyController {
 	@PreAuthorize("hasAuthority('LMS_FAMILY_READ')")
 	public ResponseEntity<Page<FamilyAttendanceRecordDto>> getChildAttendance(
 			@PathVariable UUID studentPublicUuid,
+			@RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+			@RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
 			@ParameterObject Pageable pageable) {
 		UUID userId = currentUserProvider.currentUserId()
 				.orElseThrow(() -> new IllegalStateException("Authenticated user is required"));
-		return ResponseEntity.ok(familyService.getChildAttendance(studentPublicUuid, userId, pageable));
+		return ResponseEntity.ok(
+				familyService.getChildAttendance(studentPublicUuid, userId, from, to, pageable));
+	}
+
+	@GetMapping("/children/{studentPublicUuid}/attendance/export")
+	@PreAuthorize("hasAuthority('LMS_FAMILY_READ')")
+	public ResponseEntity<byte[]> exportChildAttendance(
+			@PathVariable UUID studentPublicUuid,
+			@RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+			@RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
+			@RequestParam(defaultValue = "PDF") ReportJob.Format format) throws java.io.IOException {
+		UUID userId = currentUserProvider.currentUserId()
+				.orElseThrow(() -> new IllegalStateException("Authenticated user is required"));
+		byte[] body = familyService.exportChildAttendance(studentPublicUuid, userId, from, to, format);
+		String ext = format.name().toLowerCase();
+		return ResponseEntity.ok()
+				.header(HttpHeaders.CONTENT_DISPOSITION,
+						"attachment; filename=asistencia-hijo." + ext)
+				.contentType(contentTypeFor(format))
+				.body(body);
+	}
+
+	private static MediaType contentTypeFor(ReportJob.Format format) {
+		return switch (format) {
+			case PDF -> MediaType.APPLICATION_PDF;
+			case XLSX -> MediaType.parseMediaType(
+					"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+			case CSV -> MediaType.parseMediaType("text/csv");
+		};
 	}
 
 	@GetMapping("/children/{studentPublicUuid}/grades")

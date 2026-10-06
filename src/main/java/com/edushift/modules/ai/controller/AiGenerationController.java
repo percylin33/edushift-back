@@ -1,7 +1,10 @@
 package com.edushift.modules.ai.controller;
 
+import com.edushift.modules.ai.dto.GenerateApplicationSheetRequest;
+import com.edushift.modules.ai.dto.GenerateApplicationSheetResponse;
 import com.edushift.modules.ai.dto.GenerateRubricRequest;
 import com.edushift.modules.ai.dto.GenerateSessionRequest;
+import com.edushift.modules.ai.service.ApplicationSheetGeneratorService;
 import com.edushift.modules.ai.service.RubricGeneratorService;
 import com.edushift.modules.ai.service.RubricGeneratorService.RubricGeneratorResult;
 import com.edushift.modules.ai.service.SessionGeneratorService;
@@ -43,16 +46,19 @@ public class AiGenerationController {
 
     private final SessionGeneratorService sessionGeneratorService;
     private final RubricGeneratorService rubricGeneratorService;
+    private final ApplicationSheetGeneratorService applicationSheetGeneratorService;
     private final ObjectMapper objectMapper;
     private final Executor aiJobExecutor;
 
     public AiGenerationController(
             SessionGeneratorService sessionGeneratorService,
             RubricGeneratorService rubricGeneratorService,
+            ApplicationSheetGeneratorService applicationSheetGeneratorService,
             ObjectMapper objectMapper,
             @Qualifier("aiJobExecutor") Executor aiJobExecutor) {
         this.sessionGeneratorService = sessionGeneratorService;
         this.rubricGeneratorService = rubricGeneratorService;
+        this.applicationSheetGeneratorService = applicationSheetGeneratorService;
         this.objectMapper = objectMapper;
         this.aiJobExecutor = aiJobExecutor;
     }
@@ -69,6 +75,14 @@ public class AiGenerationController {
             @Valid @RequestBody GenerateSessionRequest request) {
         SessionGeneratorResult result = sessionGeneratorService.generateSession(request);
         return ResponseEntity.ok(ApiResponse.ok(result));
+    }
+
+    @PostMapping("/application-sheets/generate")
+    @PreAuthorize("hasAuthority('" + LmsAuthorities.LMS_AI_GENERATE + "')")
+    @Operation(summary = "Generate one printable worksheet for a single grade")
+    public ResponseEntity<ApiResponse<GenerateApplicationSheetResponse>> generateApplicationSheet(
+            @Valid @RequestBody GenerateApplicationSheetRequest request) {
+        return ResponseEntity.ok(ApiResponse.ok(applicationSheetGeneratorService.generate(request)));
     }
 
     @PostMapping(value = "/generate-session/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)

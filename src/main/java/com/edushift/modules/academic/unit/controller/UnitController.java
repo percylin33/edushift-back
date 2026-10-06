@@ -1,10 +1,13 @@
 package com.edushift.modules.academic.unit.controller;
 
 import com.edushift.modules.academic.unit.dto.CreateUnitRequest;
+import com.edushift.modules.academic.unit.dto.SeedUnitsRequest;
+import com.edushift.modules.academic.unit.dto.SeedUnitsResponse;
 import com.edushift.modules.academic.unit.dto.UnitListItem;
 import com.edushift.modules.academic.unit.dto.UnitReorderRequest;
 import com.edushift.modules.academic.unit.dto.UnitResponse;
 import com.edushift.modules.academic.unit.dto.UpdateUnitRequest;
+import com.edushift.modules.academic.unit.service.UnitSeedService;
 import com.edushift.modules.academic.unit.service.UnitService;
 import com.edushift.shared.api.ApiResponse;
 import io.swagger.v3.oas.annotations.Operation;
@@ -39,7 +42,7 @@ import org.springframework.web.bind.annotation.RestController;
  *   <caption>Unit endpoints</caption>
  *   <tr><th>Method</th><th>Path</th><th>Auth</th><th>Returns</th></tr>
  *   <tr><td>GET   </td><td>/academic/courses/{courseUuid}/units            </td>
- *       <td>TENANT_ADMIN</td><td>{@code List<}{@link UnitListItem}{@code >}</td></tr>
+ *       <td>TENANT_ADMIN | TEACHER</td><td>{@code List<}{@link UnitListItem}{@code >}</td></tr>
  *   <tr><td>POST  </td><td>/academic/courses/{courseUuid}/units            </td>
  *       <td>TENANT_ADMIN</td><td>{@link UnitResponse} (201)</td></tr>
  *   <tr><td>PATCH </td><td>/academic/courses/{courseUuid}/units/reorder    </td>
@@ -68,6 +71,7 @@ import org.springframework.web.bind.annotation.RestController;
 public class UnitController {
 
 	private final UnitService service;
+	private final UnitSeedService seedService;
 
 	// =========================================================================
 	// Course-scoped routes
@@ -75,12 +79,13 @@ public class UnitController {
 
 	@GetMapping("/academic/courses/{courseUuid}/units")
 	@SecurityRequirement(name = "bearerAuth")
-	@PreAuthorize("hasRole('TENANT_ADMIN')")
+	@PreAuthorize("hasAnyRole('TENANT_ADMIN', 'TEACHER')")
 	@Operation(
-			summary = "List units of a course (TENANT_ADMIN)",
+			summary = "List units of a course (TENANT_ADMIN | TEACHER)",
 			description = "Sorted by displayOrder asc. Optional ?isActive=true|false "
 					+ "narrows by activation flag. 404 RESOURCE_NOT_FOUND if the course "
-					+ "publicUuid is unknown for the tenant (incl. cross-tenant)."
+					+ "publicUuid is unknown for the tenant (incl. cross-tenant). "
+					+ "TEACHER needs read access to pick a unit when creating sessions."
 	)
 	public ResponseEntity<List<UnitListItem>> list(
 			@PathVariable UUID courseUuid,
@@ -107,6 +112,27 @@ public class UnitController {
 	) {
 		UnitResponse response = service.createUnit(courseUuid, request);
 		return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.ok(response));
+	}
+
+	@PostMapping("/academic/courses/{courseUuid}/units/seed-defaults")
+	@SecurityRequirement(name = "bearerAuth")
+	@PreAuthorize("hasRole('TENANT_ADMIN')")
+	@Operation(
+			summary = "Seed standard units (Unidad 1..N) into this course (TENANT_ADMIN)",
+			description = "Idempotent: returns seeded=false if the course already has "
+					+ "at least one unit. count defaults to tenant "
+					+ "settings.academic.defaultUnitCount (or 8). Optional "
+					+ "saveAsTenantDefault persists the effective count on the tenant."
+	)
+	public ResponseEntity<ApiResponse<SeedUnitsResponse>> seedDefaults(
+			@PathVariable UUID courseUuid,
+			@RequestBody(required = false) @Valid SeedUnitsRequest request
+	) {
+		SeedUnitsRequest body = request != null ? request : new SeedUnitsRequest(null, false);
+		boolean saveAsDefault = Boolean.TRUE.equals(body.saveAsTenantDefault());
+		SeedUnitsResponse response = seedService.seedForCourse(
+				courseUuid, body.count(), saveAsDefault);
+		return ResponseEntity.ok(ApiResponse.ok(response));
 	}
 
 	@PatchMapping("/academic/courses/{courseUuid}/units/reorder")

@@ -6,7 +6,6 @@ import java.util.UUID;
 
 /**
  * Lean projection for list endpoints ({@code GET /sections/{uuid}/materials}).
- * Avoids loading the file metadata in the list (one fewer JOIN per row).
  */
 public record MaterialSummary(
 		UUID publicUuid,
@@ -14,6 +13,14 @@ public record MaterialSummary(
 		MaterialKind kind,
 		Long fileSizeBytes,
 		UUID ownerPublicUuid,
-		Instant createdAt
+		Instant createdAt,
+		UUID teacherAssignmentPublicUuid,
+		UUID coursePublicUuid,
+		String courseName,
+		String periodLabel,
+		UUID filePublicUuid,
+		String filename,
+		String contentType,
+		String externalUrl
 ) {
 }

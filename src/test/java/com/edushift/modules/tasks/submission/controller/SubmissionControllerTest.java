@@ -61,7 +61,7 @@ class SubmissionControllerTest {
         given(submissionService.submit(any(), any(), any())).willReturn(
                 new SubmissionResponse(
                         UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(),
-                        null, null, SubmissionStatus.SUBMITTED, null, null, null, null,
+                        null, null, null, SubmissionStatus.SUBMITTED, null, null, null, null,
                         false, Instant.now(), Instant.now()));
         mockMvc.perform(post("/v1/tasks/{tid}/submissions", UUID.randomUUID())
                         .with(csrf()).with(authentication(submitter()))

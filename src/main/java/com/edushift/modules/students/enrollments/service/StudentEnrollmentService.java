@@ -4,6 +4,7 @@ import com.edushift.modules.students.enrollments.dto.CreateEnrollmentRequest;
 import com.edushift.modules.students.enrollments.dto.EnrollmentListItem;
 import com.edushift.modules.students.enrollments.dto.EnrollmentResponse;
 import com.edushift.modules.students.enrollments.dto.SectionStudentRosterItem;
+import com.edushift.modules.students.enrollments.dto.UpdateEnrollmentRequest;
 import com.edushift.modules.students.enrollments.dto.WithdrawEnrollmentRequest;
 import java.util.List;
 import java.util.UUID;
@@ -27,6 +28,7 @@ import java.util.UUID;
  *       falls outside the academic year window.</li>
  *   <li>{@code 409 ENROLLMENT_YEAR_MISMATCH} —
  *       {@code section.academicYear != request.academicYear}.</li>
+ *   <li>{@code 409 ENROLLMENT_NOT_ACTIVE} — PATCH on a terminal row.</li>
  *   <li>{@code 400 INVALID_WITHDRAW_STATUS} — caller passed
  *       {@code ACTIVE} as the withdraw target.</li>
  *   <li>{@code 400 VALIDATION_ERROR} — {@code withdrawnAt < enrolledAt}.</li>
@@ -43,6 +45,10 @@ public interface StudentEnrollmentService {
 	/** Creates a new ACTIVE enrollment for the student. */
 	EnrollmentResponse createEnrollment(UUID studentPublicUuid,
 			CreateEnrollmentRequest request);
+
+	/** Updates {@code enrolledAt} on an ACTIVE enrollment. */
+	EnrollmentResponse updateEnrollment(UUID enrollmentPublicUuid,
+			UpdateEnrollmentRequest request);
 
 	/** Soft-ends an enrollment, transitioning it to a terminal status. */
 	EnrollmentResponse withdrawEnrollment(UUID enrollmentPublicUuid,

@@ -1,5 +1,6 @@
 package com.edushift.modules.auth.dto;
 
+import com.edushift.modules.auth.entity.EmailSource;
 import com.edushift.modules.auth.entity.UserStatus;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import java.time.Instant;
@@ -46,6 +47,8 @@ public record UserResponse(
 		String avatarUrl,
 		UserStatus status,
 		boolean emailVerified,
+		EmailSource emailSource,
+		boolean mustChangePassword,
 		boolean mfaEnabled,
 		Set<String> roles,
 		Set<String> permissions,

@@ -119,6 +119,14 @@ public class LearningSession extends TenantAwareEntity {
 	@Column(name = "status", nullable = false, length = 16)
 	private SessionStatus status = SessionStatus.PLANNED;
 
+	/**
+	 * When true, other teachers of the same course, grade and period may
+	 * view the plan (without observations) and copy it. The row itself
+	 * stays on this assignment.
+	 */
+	@Column(name = "shared_with_grade", nullable = false)
+	private boolean sharedWithGrade = false;
+
 	@Column(name = "started_at")
 	private Instant startedAt;
 

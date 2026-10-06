@@ -78,6 +78,24 @@ public class AttendanceAuditLogger {
 				meta);
 	}
 
+	/**
+	 * Audit abandoning an ACTIVE session with zero check-ins (empty close
+	 * or end-of-day cleanup). Soft-deletes the session without materializing
+	 * ABSENT rows — safe for holidays / unused gate sessions.
+	 */
+	public void logSessionAbandoned(AttendanceSession session, String reason) {
+		Map<String, Object> meta = baseMeta(AttendanceAuditEventTypes.SESSION_ABANDONED);
+		meta.put("reason", reason);
+		meta.put("occurredOn", session.getOccurredOn() != null
+				? session.getOccurredOn().toString() : null);
+		meta.put("slot", session.getSlot() != null ? session.getSlot().name() : null);
+		emit(AuditAction.DELETE,
+				AttendanceAuditEventTypes.RESOURCE_SESSION,
+				session.getPublicUuid(),
+				"Attendance session abandoned (0 check-ins)",
+				meta);
+	}
+
 	// =====================================================================
 	// Check-in / records
 	// =====================================================================

@@ -1,5 +1,7 @@
 package com.edushift.modules.students.enrollments.repository;
 
+import com.edushift.modules.academic.levelgrade.entity.AcademicLevel;
+import com.edushift.modules.academic.levelgrade.entity.Grade;
 import com.edushift.modules.academic.section.entity.Section;
 import com.edushift.modules.academic.year.entity.AcademicYear;
 import com.edushift.modules.students.enrollments.entity.StudentEnrollment;
@@ -63,16 +65,61 @@ public interface StudentEnrollmentRepository extends JpaRepository<StudentEnroll
 	List<StudentEnrollment> findAllByStudent(@Param("student") Student student);
 
 	/**
-	 * Active roster of a section (current students). Ordered by the
-	 * student's last name to render alphabetically without an extra sort.
+	 * Active roster of a section (current students). Ordered
+	 * alphabetically by last name, then first name, then second last
+	 * name (ES-PE classroom lists).
 	 */
 	@Query("""
 			select e from StudentEnrollment e
 			where e.section = :section
 			  and e.status = com.edushift.modules.students.enrollments.entity.StudentEnrollmentStatus.ACTIVE
-			order by e.student.lastName asc, e.student.firstName asc
+			order by lower(e.student.lastName) asc,
+			         lower(e.student.firstName) asc,
+			         lower(e.student.secondLastName) asc
 			""")
 	List<StudentEnrollment> findActiveBySection(@Param("section") Section section);
+
+	/**
+	 * Active roster filtered by grade (all sections of that grade in any year).
+	 */
+	@Query("""
+			select e from StudentEnrollment e
+			join fetch e.student
+			where e.section.grade = :grade
+			  and e.status = com.edushift.modules.students.enrollments.entity.StudentEnrollmentStatus.ACTIVE
+			order by lower(e.student.lastName) asc,
+			         lower(e.student.firstName) asc
+			""")
+	List<StudentEnrollment> findActiveByGrade(@Param("grade") Grade grade);
+
+	/**
+	 * Active roster filtered by academic level (all grades under the level).
+	 */
+	@Query("""
+			select e from StudentEnrollment e
+			join fetch e.student
+			where e.section.grade.level = :level
+			  and e.status = com.edushift.modules.students.enrollments.entity.StudentEnrollmentStatus.ACTIVE
+			order by lower(e.student.lastName) asc,
+			         lower(e.student.firstName) asc
+			""")
+	List<StudentEnrollment> findActiveByLevel(@Param("level") AcademicLevel level);
+
+
+	/**
+	 * Section roster filtered by enrollment status set (F3 gradebook toggles).
+	 */
+	@Query("""
+			select e from StudentEnrollment e
+			where e.section = :section
+			  and e.status in :statuses
+			order by lower(e.student.lastName) asc,
+			         lower(e.student.firstName) asc,
+			         lower(e.student.secondLastName) asc
+			""")
+	List<StudentEnrollment> findBySectionAndStatusIn(
+			@Param("section") Section section,
+			@Param("statuses") java.util.Collection<com.edushift.modules.students.enrollments.entity.StudentEnrollmentStatus> statuses);
 
 	/**
 	 * Existence check used by {@code SectionServiceImpl.deleteSection}

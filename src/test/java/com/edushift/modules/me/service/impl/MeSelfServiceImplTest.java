@@ -59,7 +59,7 @@ class MeSelfServiceImplTest {
         when(attendanceRecordRepository.findByStudentInRange(student, null, null))
                 .thenReturn(List.of(record));
 
-        List<MeAttendanceRecordResponse> result = service.listMyAttendance();
+        List<MeAttendanceRecordResponse> result = service.listMyAttendance(null, null);
 
         assertThat(result).hasSize(1);
         assertThat(result.get(0).status()).isEqualTo(AttendanceRecordStatus.ABSENT);
@@ -88,7 +88,7 @@ class MeSelfServiceImplTest {
         when(currentUserProvider.currentUserId()).thenReturn(Optional.of(userId));
         when(studentRepository.findByUserId(userId)).thenReturn(Optional.empty());
 
-        assertThatThrownBy(service::listMyAttendance)
+        assertThatThrownBy(() -> service.listMyAttendance(null, null))
                 .isInstanceOf(NotFoundException.class);
     }
 

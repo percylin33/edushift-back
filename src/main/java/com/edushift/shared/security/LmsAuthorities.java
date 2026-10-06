@@ -65,6 +65,13 @@ public final class LmsAuthorities {
 	// @PreAuthorize can resolve it via hasAuthority(...).
 	public static final String LMS_ANNOUNCEMENTS_CREATE = "LMS_ANNOUNCEMENTS_CREATE";
 
+	/**
+	 * Teacher-scoped announcement authoring. Allows create / publish only
+	 * for sections and courses the teacher is actively assigned to.
+	 * Students can never receive this authority.
+	 */
+	public static final String LMS_ANNOUNCEMENTS_CREATE_OWN = "LMS_ANNOUNCEMENTS_CREATE_OWN";
+
 	// Notifications admin (Sprint 10 / BE-10.x). Gates the admin surface
 	// of /api/v1/notifications/templates and /api/v1/notifications/admin/*
 	// (create / publish / configure). Granted to TENANT_ADMIN + SUPER_ADMIN.
@@ -99,6 +106,12 @@ public final class LmsAuthorities {
 	public static final String ME_QR_READ = "ME_QR_READ";
 	public static final String ME_PAYMENTS_READ = "ME_PAYMENTS_READ";
 	public static final String ME_PAYMENTS_CHECKOUT = "ME_PAYMENTS_CHECKOUT";
+
+	/**
+	 * Mass provision of STUDENT/PARENT portal accounts for a section (CRED-7).
+	 * Granted to TENANT_ADMIN and STAFF by default.
+	 */
+	public static final String USERS_PROVISION_SECTION = "USERS_PROVISION_SECTION";
 
 	private LmsAuthorities() {
 		// utility class

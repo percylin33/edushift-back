@@ -96,6 +96,7 @@ public class AiGeneration extends BaseEntity {
         QUIZ_QUESTION_SUGGEST,
         RUBRIC_SUGGEST,
         SESSION_OUTLINE_SUGGEST,
+        APPLICATION_SHEET_SUGGEST,
         OTHER
     }
 

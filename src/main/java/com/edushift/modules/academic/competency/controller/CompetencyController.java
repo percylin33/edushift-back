@@ -64,11 +64,12 @@ public class CompetencyController {
 
 	@GetMapping("/academic/courses/{courseUuid}/competencies")
 	@SecurityRequirement(name = "bearerAuth")
-	@PreAuthorize("hasRole('TENANT_ADMIN')")
+	@PreAuthorize("hasAnyRole('TENANT_ADMIN', 'TEACHER')")
 	@Operation(
-			summary = "List competencies of a course (TENANT_ADMIN)",
+			summary = "List competencies of a course (TENANT_ADMIN | TEACHER)",
 			description = "Sorted by displayOrder asc. Optional ?isActive=true|false. "
-					+ "404 RESOURCE_NOT_FOUND if course UUID is unknown / cross-tenant."
+					+ "404 RESOURCE_NOT_FOUND if course UUID is unknown / cross-tenant. "
+					+ "TEACHER needs read access when creating learning sessions."
 	)
 	public ResponseEntity<List<CompetencyListItem>> list(
 			@PathVariable UUID courseUuid,
@@ -81,13 +82,16 @@ public class CompetencyController {
 	@PostMapping("/academic/courses/{courseUuid}/competencies")
 	@ResponseStatus(HttpStatus.CREATED)
 	@SecurityRequirement(name = "bearerAuth")
-	@PreAuthorize("hasRole('TENANT_ADMIN')")
+	@PreAuthorize("hasAnyRole('TENANT_ADMIN', 'TEACHER')")
 	@Operation(
-			summary = "Create a competency inside a course (TENANT_ADMIN)",
-			description = "If displayOrder is omitted, the new competency is appended "
-					+ "(max(displayOrder) + 1). 409 COMPETENCY_CODE_TAKEN on case-insensitive "
-					+ "code collision inside the same course. 409 COMPETENCY_ORDER_TAKEN on "
-					+ "concurrent ordinal collision."
+			summary = "Create a competency inside a course (TENANT_ADMIN | TEACHER)",
+			description = "Admin creates an INSTITUTIONAL competency. A teacher creates "
+					+ "a TEACHER competency only when they have an active assignment on "
+					+ "the course, and must include at least one capacity. If code is "
+					+ "omitted it is derived from the name. 409 COMPETENCY_CODE_TAKEN on "
+					+ "case-insensitive code collision. 409 COMPETENCY_ORDER_TAKEN on "
+					+ "concurrent ordinal collision. 403 TEACHER_NOT_ASSIGNED_TO_COURSE "
+					+ "when the teacher does not teach the course."
 	)
 	public ResponseEntity<ApiResponse<CompetencyResponse>> create(
 			@PathVariable UUID courseUuid,
@@ -138,8 +142,8 @@ public class CompetencyController {
 
 	@GetMapping("/academic/competencies/{publicUuid}")
 	@SecurityRequirement(name = "bearerAuth")
-	@PreAuthorize("hasRole('TENANT_ADMIN')")
-	@Operation(summary = "Get a competency with its capacities (TENANT_ADMIN)")
+	@PreAuthorize("hasAnyRole('TENANT_ADMIN', 'TEACHER')")
+	@Operation(summary = "Get a competency with its capacities (TENANT_ADMIN | TEACHER)")
 	public ResponseEntity<ApiResponse<CompetencyResponse>> getOne(
 			@PathVariable UUID publicUuid
 	) {
@@ -177,5 +181,35 @@ public class CompetencyController {
 	public ResponseEntity<Void> delete(@PathVariable UUID publicUuid) {
 		service.deleteCompetency(publicUuid);
 		return ResponseEntity.noContent().build();
+	}
+
+	@PostMapping("/academic/competencies/{publicUuid}/deactivate")
+	@SecurityRequirement(name = "bearerAuth")
+	@PreAuthorize("hasAnyRole('TENANT_ADMIN', 'TEACHER')")
+	@Operation(
+			summary = "Deactivate a competency (TENANT_ADMIN | TEACHER)",
+			description = "Sets isActive=false. A teacher may only deactivate a TEACHER "
+					+ "competency they created, and only when no other teacher's session "
+					+ "references it. 403 COMPETENCY_ORIGIN_LOCKED, 403 "
+					+ "TEACHER_NOT_ASSIGNED_TO_COURSE, 409 COMPETENCY_USED_BY_OTHER_TEACHER."
+	)
+	public ResponseEntity<ApiResponse<CompetencyResponse>> deactivate(
+			@PathVariable UUID publicUuid
+	) {
+		return ResponseEntity.ok(ApiResponse.ok(service.deactivateCompetency(publicUuid)));
+	}
+
+	@PostMapping("/academic/competencies/{publicUuid}/promote")
+	@SecurityRequirement(name = "bearerAuth")
+	@PreAuthorize("hasRole('TENANT_ADMIN')")
+	@Operation(
+			summary = "Promote a teacher competency to the school catalog (TENANT_ADMIN)",
+			description = "Sets origin from TEACHER to INSTITUTIONAL. created_by is unchanged. "
+					+ "409 COMPETENCY_ORIGIN_LOCKED when the competency is not TEACHER."
+	)
+	public ResponseEntity<ApiResponse<CompetencyResponse>> promote(
+			@PathVariable UUID publicUuid
+	) {
+		return ResponseEntity.ok(ApiResponse.ok(service.promoteCompetency(publicUuid)));
 	}
 }

@@ -84,6 +84,16 @@ public class Quiz extends TenantAwareEntity {
 			foreignKey = @ForeignKey(name = "fk_lms_quizzes_section"))
 	private com.edushift.modules.academic.section.entity.Section section;
 
+	/**
+	 * Optional anchor to a {@link com.edushift.modules.teachers.assignments.entity.TeacherAssignment}
+	 * (V105). NULL for legacy rows created before course-scoping.
+	 */
+	@ManyToOne(fetch = FetchType.LAZY)
+	@JoinColumn(name = "teacher_assignment_id",
+			columnDefinition = "uuid",
+			foreignKey = @ForeignKey(name = "fk_lms_quizzes_teacher_assignment"))
+	private com.edushift.modules.teachers.assignments.entity.TeacherAssignment teacherAssignment;
+
 	@Column(name = "title", nullable = false, length = 200)
 	private String title;
 

@@ -21,6 +21,12 @@ public record InvoiceResponse(
         Instant dueAt,
         Instant paidAt,
         String notes,
+        UUID evidenceFilePublicUuid,
+        Instant evidenceSubmittedAt,
+        String evidenceNotes,
+        String evidenceRejectionReason,
+        long moraCents,
+        boolean moraExempt,
         List<InvoiceItemResponse> items
 ) {
     public static InvoiceResponse from(Invoice i, List<InvoiceItemResponse> items) {
@@ -29,7 +35,14 @@ public record InvoiceResponse(
                 i.getGuardianUserId(), i.getPeriodLabel(), i.getCurrency(),
                 i.getSubtotalCents(), i.getDiscountCents(), i.getTaxCents(),
                 i.getTotalCents(), i.getStatus(), i.getIssuedAt(), i.getDueAt(),
-                i.getPaidAt(), i.getNotes(), items
+                i.getPaidAt(), i.getNotes(),
+                i.getEvidenceFilePublicUuid(),
+                i.getEvidenceSubmittedAt(),
+                i.getEvidenceNotes(),
+                i.getEvidenceRejectionReason(),
+                i.getMoraCents(),
+                i.isMoraExempt(),
+                items
         );
     }
 }

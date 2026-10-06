@@ -1,8 +1,8 @@
 package com.edushift.modules.reports.generator;
 
 import com.edushift.modules.reports.entity.ReportJob;
+import com.edushift.shared.branding.PlatformPdfBrand;
 import com.lowagie.text.Document;
-import com.lowagie.text.Element;
 import com.lowagie.text.Font;
 import com.lowagie.text.FontFactory;
 import com.lowagie.text.PageSize;
@@ -29,15 +29,13 @@ public class PdfReportGenerator {
     public byte[] generate(ReportJob job) {
         ByteArrayOutputStream out = new ByteArrayOutputStream(16 * 1024);
         try (Document doc = new Document(PageSize.A4)) {
-            PdfWriter.getInstance(doc, out);
+            PdfWriter writer = PdfWriter.getInstance(doc, out);
+            PlatformPdfBrand.installFooter(doc, writer);
             doc.open();
 
-            Font titleFont = FontFactory.getFont(FontFactory.HELVETICA_BOLD, 18);
             Font metaFont  = FontFactory.getFont(FontFactory.HELVETICA, 10);
 
-            Paragraph title = new Paragraph("EduShift — " + job.getReportType().name(), titleFont);
-            title.setAlignment(Element.ALIGN_LEFT);
-            doc.add(title);
+            PlatformPdfBrand.writeHeader(doc, "EduShift — " + job.getReportType().name(), null);
             doc.add(new Paragraph("Generado: " + Instant.now(), metaFont));
             doc.add(new Paragraph(" "));
 

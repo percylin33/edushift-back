@@ -119,6 +119,21 @@ public class User extends TenantAwareEntity {
 	@Column(name = "email_verified", nullable = false)
 	private boolean emailVerified = false;
 
+	/**
+	 * Whether {@link #email} is a real mailbox or a mass-provision
+	 * synthetic address (CRED-7). Mailers must skip {@code SYNTHETIC}.
+	 */
+	@Enumerated(EnumType.STRING)
+	@Column(name = "email_source", nullable = false, length = 20)
+	private EmailSource emailSource = EmailSource.REAL;
+
+	/**
+	 * When true the user must set a new password before using the app
+	 * (temp-password mass provision path).
+	 */
+	@Column(name = "must_change_password", nullable = false)
+	private boolean mustChangePassword = false;
+
 	@Column(name = "mfa_enabled", nullable = false)
 	private boolean mfaEnabled = false;
 

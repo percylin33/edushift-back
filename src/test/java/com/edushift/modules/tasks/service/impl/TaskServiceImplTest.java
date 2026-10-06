@@ -3,6 +3,7 @@ package com.edushift.modules.tasks.service.impl;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyCollection;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -10,24 +11,37 @@ import static org.mockito.Mockito.when;
 
 import com.edushift.modules.academic.section.entity.Section;
 import com.edushift.modules.academic.section.repository.SectionRepository;
+import com.edushift.modules.auth.entity.User;
+import com.edushift.modules.auth.repository.UserRepository;
 import com.edushift.modules.files.entity.FileObject;
 import com.edushift.modules.files.service.FileObjectService;
+import com.edushift.modules.notifications.entity.Notification;
+import com.edushift.modules.notifications.event.NotificationEvent;
+import com.edushift.modules.students.enrollments.entity.StudentEnrollment;
+import com.edushift.modules.students.enrollments.repository.StudentEnrollmentRepository;
+import com.edushift.modules.students.entity.Student;
 import com.edushift.modules.tasks.dto.CreateTaskRequest;
 import com.edushift.modules.tasks.dto.TaskResponse;
 import com.edushift.modules.tasks.dto.UpdateTaskRequest;
 import com.edushift.modules.tasks.entity.Task;
 import com.edushift.modules.tasks.entity.TaskStatus;
 import com.edushift.modules.tasks.exception.DueAtInPastException;
+import com.edushift.modules.tasks.exception.InvalidTaskStateException;
 import com.edushift.modules.tasks.exception.RecordEmptyPatchException;
 import com.edushift.modules.tasks.exception.SectionNotFoundException;
 import com.edushift.modules.tasks.exception.TaskNotFoundException;
 import com.edushift.modules.tasks.mapper.TaskMapper;
 import com.edushift.modules.tasks.repository.TaskRepository;
+import com.edushift.modules.teachers.assignments.entity.TeacherAssignment;
+import com.edushift.modules.teachers.assignments.support.LmsAssignmentBinder;
+import com.edushift.shared.multitenancy.TenantContext;
 import java.lang.reflect.Field;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -37,6 +51,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
@@ -50,16 +65,41 @@ class TaskServiceImplTest {
     @Mock private SectionRepository sectionRepository;
     @Mock private FileObjectService fileObjectService;
     @Mock private TaskMapper taskMapper;
+    @Mock private LmsAssignmentBinder lmsAssignmentBinder;
+    @Mock private ApplicationEventPublisher eventPublisher;
+    @Mock private StudentEnrollmentRepository studentEnrollmentRepository;
+    @Mock private UserRepository userRepository;
+    @Mock private com.edushift.modules.tasks.submission.repository.SubmissionRepository submissionRepository;
 
     @InjectMocks private TaskServiceImpl service;
 
     private Section section;
+    private TeacherAssignment assignment;
+    private UUID assignmentUuid;
+    private UUID tenantId;
 
     @BeforeEach
     void setUp() {
+        tenantId = UUID.randomUUID();
+        TenantContext.set(tenantId);
         section = new Section();
         setField(section, "publicUuid", UUID.randomUUID());
         setField(section, "id", UUID.randomUUID());
+        section.setName("Sección 1A");
+        assignmentUuid = UUID.randomUUID();
+        assignment = new TeacherAssignment();
+        setField(assignment, "publicUuid", assignmentUuid);
+        assignment.setSection(section);
+    }
+
+    @AfterEach
+    void tearDown() {
+        TenantContext.clear();
+    }
+
+    private void stubBinder() {
+        when(lmsAssignmentBinder.requireForCreate(any(UUID.class), any(Section.class)))
+                .thenReturn(assignment);
     }
 
     // =====================================================================
@@ -77,7 +117,11 @@ class TaskServiceImplTest {
                     "Algebra Tarea 1",
                     "Resolver",
                     Instant.now().plus(2, ChronoUnit.DAYS),
+                    null,
+                    assignmentUuid,
+                    20,
                     null);
+            stubBinder();
             UUID owner = UUID.randomUUID();
 
             when(sectionRepository.findByPublicUuid(section.getPublicUuid()))
@@ -98,6 +142,7 @@ class TaskServiceImplTest {
             assertThat(saved.getSection()).isSameAs(section);
             assertThat(saved.getOwnerUserId()).isEqualTo(owner);
             assertThat(saved.isAllowResubmission()).isTrue();
+            assertThat(saved.getMaxScore()).isEqualTo((short) 20);
             verify(fileObjectService, never()).acquireReference(any());
         }
 
@@ -108,7 +153,11 @@ class TaskServiceImplTest {
             var req = new CreateTaskRequest(
                     "Tarea con PDF", null,
                     Instant.now().plus(1, ChronoUnit.DAYS),
-                    attach);
+                    attach,
+                    assignmentUuid,
+                    20,
+                    null);
+            stubBinder();
 
             when(sectionRepository.findByPublicUuid(section.getPublicUuid()))
                     .thenReturn(Optional.of(section));
@@ -131,7 +180,11 @@ class TaskServiceImplTest {
             var req = new CreateTaskRequest(
                     "T", null,
                     Instant.now().plus(1, ChronoUnit.DAYS),
-                    attach);
+                    attach,
+                    assignmentUuid,
+                    20,
+                    null);
+            stubBinder();
 
             when(sectionRepository.findByPublicUuid(section.getPublicUuid()))
                     .thenReturn(Optional.of(section));
@@ -153,7 +206,7 @@ class TaskServiceImplTest {
         void sectionMissing() {
             UUID missingSection = UUID.randomUUID();
             var req = new CreateTaskRequest(
-                    "T", null, Instant.now().plus(1, ChronoUnit.DAYS), null);
+                    "T", null, Instant.now().plus(1, ChronoUnit.DAYS), null, assignmentUuid, 20, null);
 
             when(sectionRepository.findByPublicUuid(missingSection))
                     .thenReturn(Optional.empty());
@@ -171,6 +224,9 @@ class TaskServiceImplTest {
             var req = new CreateTaskRequest(
                     "T", null,
                     Instant.now().minus(1, ChronoUnit.HOURS),
+                    null,
+                    assignmentUuid,
+                    20,
                     null);
 
             when(sectionRepository.findByPublicUuid(section.getPublicUuid()))
@@ -186,7 +242,8 @@ class TaskServiceImplTest {
         @Test
         @DisplayName("dueAt null — allowed (optional)")
         void dueAtNull() {
-            var req = new CreateTaskRequest("T", "d", null, null);
+            var req = new CreateTaskRequest("T", "d", null, null, assignmentUuid, 20, null);
+            stubBinder();
             when(sectionRepository.findByPublicUuid(section.getPublicUuid()))
                     .thenReturn(Optional.of(section));
             when(taskRepository.save(any(Task.class))).thenAnswer(inv -> inv.getArgument(0));
@@ -217,14 +274,19 @@ class TaskServiceImplTest {
                     .thenReturn(Optional.of(section));
             when(taskRepository.findAllBySectionOrderByDueAtDesc(section, p))
                     .thenReturn(new PageImpl<>(java.util.List.of(t1, t2), p, 2));
-            when(taskMapper.toSummary(t1)).thenReturn(
-                    new com.edushift.modules.tasks.dto.TaskSummary(
-                            t1.getPublicUuid(), "T1", t1.getDueAt(), false,
-                            t1.getOwnerUserId(), TaskStatus.DRAFT, t1.getCreatedAt()));
-            when(taskMapper.toSummary(t2)).thenReturn(
-                    new com.edushift.modules.tasks.dto.TaskSummary(
-                            t2.getPublicUuid(), "T2", t2.getDueAt(), false,
-                            t2.getOwnerUserId(), TaskStatus.DRAFT, t2.getCreatedAt()));
+            when(submissionRepository.countGroupedByTaskId(any()))
+                    .thenReturn(java.util.List.of());
+            when(submissionRepository.countGradedGroupedByTaskId(any()))
+                    .thenReturn(java.util.List.of());
+            when(taskMapper.toSummary(any(Task.class), any(Integer.class), any(Integer.class))).thenAnswer(inv -> {
+                Task t = inv.getArgument(0);
+                int count = inv.getArgument(1);
+                int graded = inv.getArgument(2);
+                return new com.edushift.modules.tasks.dto.TaskSummary(
+                        t.getPublicUuid(), t.getTitle(), t.getDueAt(), false,
+                        t.getOwnerUserId(), 100, TaskStatus.DRAFT, t.getCreatedAt(),
+                        null, null, null, null, count, graded);
+            });
 
             var page = service.listBySection(section.getPublicUuid(), p);
 
@@ -260,10 +322,31 @@ class TaskServiceImplTest {
             Task t = newTask("Tarea 1");
             when(taskRepository.findByPublicUuid(t.getPublicUuid()))
                     .thenReturn(Optional.of(t));
-            when(taskMapper.toResponse(t)).thenReturn(toResponse(t));
+            when(submissionRepository.countByTask(t)).thenReturn(3L);
+            when(submissionRepository.countByTaskAndStatus(t, com.edushift.modules.tasks.submission.entity.SubmissionStatus.GRADED))
+                    .thenReturn(1L);
+            when(taskMapper.toResponse(t, 3, 1)).thenReturn(
+                    new TaskResponse(
+                            t.getPublicUuid(),
+                            t.getSection() != null ? t.getSection().getPublicUuid() : null,
+                            t.getTitle(),
+                            t.getDescription(),
+                            t.getDueAt(),
+                            t.getAttachmentPublicUuid(),
+                            t.getOwnerUserId(),
+                            t.isAllowResubmission(),
+                            100,
+                            TaskStatus.DRAFT,
+                            null,
+                            null,
+                            t.getCreatedAt(),
+                            t.getUpdatedAt(),
+                            null, null, null, null, 3, 1));
 
             TaskResponse r = service.getByPublicUuid(t.getPublicUuid());
             assertThat(r.title()).isEqualTo("Tarea 1");
+            assertThat(r.submissionsCount()).isEqualTo(3);
+            assertThat(r.gradedSubmissionsCount()).isEqualTo(1);
         }
 
         @Test
@@ -293,7 +376,7 @@ class TaskServiceImplTest {
             var req = new UpdateTaskRequest(
                     "Nuevo", "Nueva desc",
                     Instant.now().plus(2, ChronoUnit.DAYS),
-                    null, Boolean.FALSE);
+                    null, Boolean.FALSE, null);
             when(taskRepository.findByPublicUuid(t.getPublicUuid()))
                     .thenReturn(Optional.of(t));
             when(taskRepository.save(t)).thenReturn(t);
@@ -311,7 +394,7 @@ class TaskServiceImplTest {
         @DisplayName("empty patch — RecordEmptyPatchException, no save")
         void emptyPatch() {
             Task t = newTask("Original");
-            var req = new UpdateTaskRequest(null, null, null, null, null);
+            var req = new UpdateTaskRequest(null, null, null, null, null, null);
 
             assertThatThrownBy(() -> service.patch(t.getPublicUuid(), req))
                     .isInstanceOf(RecordEmptyPatchException.class);
@@ -324,7 +407,7 @@ class TaskServiceImplTest {
         @DisplayName("missing task — TaskNotFoundException")
         void missing() {
             UUID id = UUID.randomUUID();
-            var req = new UpdateTaskRequest("X", null, null, null, null);
+            var req = new UpdateTaskRequest("X", null, null, null, null, null);
             when(taskRepository.findByPublicUuid(id)).thenReturn(Optional.empty());
 
             assertThatThrownBy(() -> service.patch(id, req))
@@ -336,7 +419,7 @@ class TaskServiceImplTest {
         void dueAtInPast() {
             Task t = newTask("Original");
             var req = new UpdateTaskRequest(null, null,
-                    Instant.now().minus(1, ChronoUnit.HOURS), null, null);
+                    Instant.now().minus(1, ChronoUnit.HOURS), null, null, null);
             when(taskRepository.findByPublicUuid(t.getPublicUuid()))
                     .thenReturn(Optional.of(t));
 
@@ -354,7 +437,7 @@ class TaskServiceImplTest {
             UUID newAttach = UUID.randomUUID();
             t.setAttachmentPublicUuid(oldAttach);
 
-            var req = new UpdateTaskRequest(null, null, null, newAttach, null);
+            var req = new UpdateTaskRequest(null, null, null, newAttach, null, null);
 
             when(taskRepository.findByPublicUuid(t.getPublicUuid()))
                     .thenReturn(Optional.of(t));
@@ -377,7 +460,7 @@ class TaskServiceImplTest {
             UUID newAttach = UUID.randomUUID();
             t.setAttachmentPublicUuid(null);
 
-            var req = new UpdateTaskRequest(null, null, null, newAttach, null);
+            var req = new UpdateTaskRequest(null, null, null, newAttach, null, null);
 
             when(taskRepository.findByPublicUuid(t.getPublicUuid()))
                     .thenReturn(Optional.of(t));
@@ -399,7 +482,7 @@ class TaskServiceImplTest {
             UUID attach = UUID.randomUUID();
             t.setAttachmentPublicUuid(attach);
 
-            var req = new UpdateTaskRequest(null, null, null, attach, null);
+            var req = new UpdateTaskRequest(null, null, null, attach, null, null);
 
             when(taskRepository.findByPublicUuid(t.getPublicUuid()))
                     .thenReturn(Optional.of(t));
@@ -418,7 +501,7 @@ class TaskServiceImplTest {
             Task t = newTask("Original");
             UUID newAttach = UUID.randomUUID();
 
-            var req = new UpdateTaskRequest(null, null, null, newAttach, null);
+            var req = new UpdateTaskRequest(null, null, null, newAttach, null, null);
 
             when(taskRepository.findByPublicUuid(t.getPublicUuid()))
                     .thenReturn(Optional.of(t));
@@ -502,6 +585,133 @@ class TaskServiceImplTest {
     }
 
     // =====================================================================
+    // publish / archive
+    // =====================================================================
+
+    @Nested
+    @DisplayName("publish")
+    class Publish {
+
+        @Test
+        @DisplayName("happy path — DRAFT → PUBLISHED + TASK_PUBLISHED fan-out to enrolled students")
+        void notifiesEnrolledStudents() {
+            Task t = newTask("Algebra 1");
+            UUID userInternal = UUID.randomUUID();
+            UUID userPublic = UUID.randomUUID();
+
+            Student student = new Student();
+            student.setUserId(userInternal);
+            student.setEmail("alumno@demo.pe");
+
+            StudentEnrollment enrollment = new StudentEnrollment();
+            enrollment.setStudent(student);
+            enrollment.setSection(section);
+
+            User user = new User();
+            setField(user, "id", userInternal);
+            setField(user, "publicUuid", userPublic);
+            user.setEmail("alumno@demo.pe");
+
+            when(taskRepository.findByPublicUuid(t.getPublicUuid())).thenReturn(Optional.of(t));
+            when(taskRepository.save(t)).thenReturn(t);
+            when(taskMapper.toResponse(t)).thenAnswer(inv -> toResponse((Task) inv.getArgument(0)));
+            when(studentEnrollmentRepository.findActiveBySection(section))
+                    .thenReturn(List.of(enrollment));
+            when(userRepository.findAllById(anyCollection())).thenReturn(List.of(user));
+
+            TaskResponse resp = service.publish(t.getPublicUuid());
+
+            assertThat(t.getStatus()).isEqualTo(TaskStatus.PUBLISHED);
+            assertThat(t.getPublishedAt()).isNotNull();
+            assertThat(resp).isNotNull();
+
+            ArgumentCaptor<NotificationEvent> captor = ArgumentCaptor.forClass(NotificationEvent.class);
+            verify(eventPublisher, times(1)).publishEvent(captor.capture());
+            NotificationEvent event = captor.getValue();
+            assertThat(event.templateKey()).isEqualTo("TASK_PUBLISHED");
+            assertThat(event.category()).isEqualTo(Notification.Category.TASK);
+            assertThat(event.sourceId()).isEqualTo(t.getPublicUuid());
+            assertThat(event.tenantId()).isEqualTo(tenantId);
+            assertThat(event.recipients()).hasSize(1);
+            assertThat(event.recipients().get(0).userId()).isEqualTo(userPublic);
+            assertThat(event.payload()).containsEntry("taskTitle", "Algebra 1");
+            assertThat(event.payload()).containsEntry("courseName", "Sección 1A");
+        }
+
+        @Test
+        @DisplayName("no enrollments — publishes status but no notification events")
+        void noEnrollmentsNoEvents() {
+            Task t = newTask("Sin alumnos");
+            when(taskRepository.findByPublicUuid(t.getPublicUuid())).thenReturn(Optional.of(t));
+            when(taskRepository.save(t)).thenReturn(t);
+            when(taskMapper.toResponse(t)).thenAnswer(inv -> toResponse((Task) inv.getArgument(0)));
+            when(studentEnrollmentRepository.findActiveBySection(section)).thenReturn(List.of());
+
+            service.publish(t.getPublicUuid());
+
+            assertThat(t.getStatus()).isEqualTo(TaskStatus.PUBLISHED);
+            verify(eventPublisher, never()).publishEvent(any());
+        }
+
+        @Test
+        @DisplayName("enrolled student without userId — skipped, no event")
+        void skipsUnlinkedStudent() {
+            Task t = newTask("Sin user link");
+            Student student = new Student();
+            student.setUserId(null);
+            StudentEnrollment enrollment = new StudentEnrollment();
+            enrollment.setStudent(student);
+            enrollment.setSection(section);
+
+            when(taskRepository.findByPublicUuid(t.getPublicUuid())).thenReturn(Optional.of(t));
+            when(taskRepository.save(t)).thenReturn(t);
+            when(taskMapper.toResponse(t)).thenAnswer(inv -> toResponse((Task) inv.getArgument(0)));
+            when(studentEnrollmentRepository.findActiveBySection(section))
+                    .thenReturn(List.of(enrollment));
+
+            service.publish(t.getPublicUuid());
+
+            verify(eventPublisher, never()).publishEvent(any());
+            verify(userRepository, never()).findAllById(anyCollection());
+        }
+
+        @Test
+        @DisplayName("not DRAFT — InvalidTaskStateException, no save / no events")
+        void notDraftRejected() {
+            Task t = newTask("Ya publicada");
+            t.setStatus(TaskStatus.PUBLISHED);
+            when(taskRepository.findByPublicUuid(t.getPublicUuid())).thenReturn(Optional.of(t));
+
+            assertThatThrownBy(() -> service.publish(t.getPublicUuid()))
+                    .isInstanceOf(InvalidTaskStateException.class);
+
+            verify(taskRepository, never()).save(any());
+            verify(eventPublisher, never()).publishEvent(any());
+        }
+    }
+
+    @Nested
+    @DisplayName("archive")
+    class Archive {
+
+        @Test
+        @DisplayName("PUBLISHED → ARCHIVED without notification events")
+        void noNotificationOnArchive() {
+            Task t = newTask("Archivar");
+            t.setStatus(TaskStatus.PUBLISHED);
+            when(taskRepository.findByPublicUuid(t.getPublicUuid())).thenReturn(Optional.of(t));
+            when(taskRepository.save(t)).thenReturn(t);
+            when(taskMapper.toResponse(t)).thenAnswer(inv -> toResponse((Task) inv.getArgument(0)));
+
+            service.archive(t.getPublicUuid());
+
+            assertThat(t.getStatus()).isEqualTo(TaskStatus.ARCHIVED);
+            verify(eventPublisher, never()).publishEvent(any());
+            verify(studentEnrollmentRepository, never()).findActiveBySection(any());
+        }
+    }
+
+    // =====================================================================
     // helpers
     // =====================================================================
 
@@ -515,6 +725,7 @@ class TaskServiceImplTest {
         t.setDueAt(Instant.now().plus(1, ChronoUnit.DAYS));
         t.setOwnerUserId(UUID.randomUUID());
         t.setAllowResubmission(true);
+        t.setMaxScore((short) 100);
         t.setStatus(TaskStatus.DRAFT);
         t.setCreatedAt(Instant.parse("2026-05-01T00:00:00Z"));
         t.setUpdatedAt(Instant.parse("2026-05-01T00:00:00Z"));
@@ -531,11 +742,13 @@ class TaskServiceImplTest {
                 t.getAttachmentPublicUuid(),
                 t.getOwnerUserId(),
                 t.isAllowResubmission(),
+                100,
                 TaskStatus.DRAFT,
                 null,
                 null,
                 t.getCreatedAt(),
-                t.getUpdatedAt());
+                t.getUpdatedAt(),
+                null, null, null, null, 0, 0);
     }
 
     private static void setField(Object target, String name, Object value) {

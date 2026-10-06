@@ -39,6 +39,11 @@ public class Subscription extends TenantAwareEntity {
     public enum Status { ACTIVE, PAUSED, CANCELLED }
     public enum BillingPeriod { MONTHLY, ANNUAL }
 
+    /**
+     * Staff-reviewed sibling discount. Cron applies money only when {@link #APPLIED}.
+     */
+    public enum SiblingDiscountStatus { NONE, SUGGESTED, APPLIED, REJECTED }
+
     @Column(name = "public_uuid", nullable = false, updatable = false, unique = true)
     private UUID publicUuid;
 
@@ -47,6 +52,10 @@ public class Subscription extends TenantAwareEntity {
 
     @Column(name = "guardian_user_id", nullable = false)
     private UUID guardianUserId;
+
+    /** Soft FK to {@code payment_concepts.id}. */
+    @Column(name = "concept_id")
+    private UUID conceptId;
 
     @Column(name = "plan_code", nullable = false, length = 40)
     private String planCode;
@@ -66,11 +75,29 @@ public class Subscription extends TenantAwareEntity {
     @Column(name = "status", nullable = false, length = 15)
     private Status status = Status.ACTIVE;
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "sibling_discount_status", nullable = false, length = 15)
+    private SiblingDiscountStatus siblingDiscountStatus = SiblingDiscountStatus.NONE;
+
     @Column(name = "start_at", nullable = false)
     private Instant startAt = Instant.now();
 
     @Column(name = "next_billing_at")
     private Instant nextBillingAt;
+
+    /**
+     * Preferred day of month (1–31). When a month is shorter, billing uses that month's last day.
+     */
+    @JdbcTypeCode(SqlTypes.SMALLINT)
+    @Column(name = "billing_day_of_month")
+    private Integer billingDayOfMonth;
+
+    /**
+     * Preferred calendar month (1–12) for {@link BillingPeriod#ANNUAL}; null for monthly.
+     */
+    @JdbcTypeCode(SqlTypes.SMALLINT)
+    @Column(name = "billing_month")
+    private Integer billingMonth;
 
     @Column(name = "cancelled_at")
     private Instant cancelledAt;

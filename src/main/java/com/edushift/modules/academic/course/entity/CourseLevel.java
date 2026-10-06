@@ -19,6 +19,7 @@ import lombok.NoArgsConstructor;
 import lombok.Setter;
 import lombok.ToString;
 import org.hibernate.annotations.SQLDelete;
+import org.hibernate.annotations.SQLRestriction;
 
 /**
  * Explicit M:N pivot between {@link Course} and
@@ -48,6 +49,7 @@ import org.hibernate.annotations.SQLDelete;
 @Setter
 @NoArgsConstructor
 @ToString(callSuper = true, of = {"publicUuid"})
+@SQLRestriction("deleted = false")
 @SQLDelete(sql = "UPDATE edushift.course_levels "
 		+ "SET deleted = true, deleted_at = NOW(), updated_at = NOW() "
 		+ "WHERE id = ?")

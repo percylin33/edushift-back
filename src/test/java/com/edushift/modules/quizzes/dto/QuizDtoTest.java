@@ -27,7 +27,7 @@ class QuizDtoTest {
     @DisplayName("CreateQuizRequest — valid payload")
     void createQuizRequest_valid() {
         var r = new CreateQuizRequest("T", "D", Instant.now().plusSeconds(60),
-                30, 2, 100, null);
+                30, 2, 100, null, UUID.randomUUID());
         assertThat(VALIDATOR.validate(r)).isEmpty();
         assertThat(r.title()).isEqualTo("T");
         assertThat(r.maxAttempts()).isEqualTo(2);
@@ -37,15 +37,15 @@ class QuizDtoTest {
     @Test
     @DisplayName("CreateQuizRequest — blank title violates @NotBlank")
     void createQuizRequest_blankTitle() {
-        var r = new CreateQuizRequest("", "D", null, 30, 2, 100, null);
+        var r = new CreateQuizRequest("", "D", null, 30, 2, 100, null, UUID.randomUUID());
         assertThat(VALIDATOR.validate(r)).isNotEmpty();
     }
 
     @Test
     @DisplayName("CreateQuizRequest — maxAttempts must be 1..10")
     void createQuizRequest_maxAttemptsRange() {
-        var tooLow = new CreateQuizRequest("T", null, null, null, 0, 100, null);
-        var tooHigh = new CreateQuizRequest("T", null, null, null, 11, 100, null);
+        var tooLow = new CreateQuizRequest("T", null, null, null, 0, 100, null, UUID.randomUUID());
+        var tooHigh = new CreateQuizRequest("T", null, null, null, 11, 100, null, UUID.randomUUID());
         assertThat(VALIDATOR.validate(tooLow)).isNotEmpty();
         assertThat(VALIDATOR.validate(tooHigh)).isNotEmpty();
     }
@@ -63,7 +63,8 @@ class QuizDtoTest {
         var q = UUID.randomUUID();
         var r = new QuizResponse(q, q, "T", "D", QuizStatus.PUBLISHED,
                 Instant.now(), 30, 2, 100, q, Instant.now(), Instant.now(),
-                null, null, 3, 100, true, List.of(), Instant.now(), Instant.now());
+                null, null, 3, 100, true, List.of(), Instant.now(), Instant.now(),
+                null, null, null, null);
         assertThat(r.publicUuid()).isEqualTo(q);
         assertThat(r.status()).isEqualTo(QuizStatus.PUBLISHED);
         assertThat(r.questionCount()).isEqualTo(3);
@@ -77,7 +78,8 @@ class QuizDtoTest {
     void quizSummary() {
         var q = UUID.randomUUID();
         var s = new QuizSummary(q, "T", QuizStatus.DRAFT, Instant.now(),
-                30, 1, 100, q, 5, 50, Instant.now());
+                30, 1, 100, q, 5, 50, Instant.now(),
+                null, null, null, null);
         assertThat(s.publicUuid()).isEqualTo(q);
         assertThat(s.status()).isEqualTo(QuizStatus.DRAFT);
         assertThat(s.questionCount()).isEqualTo(5);

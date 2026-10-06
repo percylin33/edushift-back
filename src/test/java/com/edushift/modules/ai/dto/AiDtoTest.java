@@ -59,7 +59,7 @@ class AiDtoTest {
     @Test
     @DisplayName("GenerateSessionRequest stores the canonical fields")
     void sessionRequest() {
-        var r = new GenerateSessionRequest("Topico", UUID.randomUUID(), UUID.randomUUID(), 60, List.of(), List.of());
+        var r = new GenerateSessionRequest("Topico", UUID.randomUUID(), UUID.randomUUID(), 60, List.of(), List.of(), null);
         assertThat(r.topic()).isEqualTo("Topico");
         assertThat(r.durationMinutes()).isEqualTo(60);
         assertThat(r.competencyIds()).isEmpty();

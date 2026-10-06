@@ -32,7 +32,9 @@ import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 /**
  * Orchestrates the BE-8.1 "generate learning session outline" AI flow.
@@ -89,6 +91,8 @@ public class SessionGeneratorService {
     private final com.edushift.modules.sessions.learning.service.LearningSessionService learningSessionService;
     private final com.edushift.modules.teachers.assignments.repository.TeacherAssignmentRepository teacherAssignmentRepository;
     private final RagContextService ragContextService;
+    private final com.edushift.modules.sessions.template.service.SessionTemplateService sessionTemplateService;
+    private final TransactionTemplate tx;
 
     public SessionGeneratorService(LlmClient llmClient,
                                    SessionGeneratorPromptBuilder promptBuilder,
@@ -102,7 +106,9 @@ public class SessionGeneratorService {
                                    CapacityRepository capacityRepository,
                                    com.edushift.modules.sessions.learning.service.LearningSessionService learningSessionService,
                                    com.edushift.modules.teachers.assignments.repository.TeacherAssignmentRepository teacherAssignmentRepository,
-                                   RagContextService ragContextService) {
+                                   RagContextService ragContextService,
+                                   com.edushift.modules.sessions.template.service.SessionTemplateService sessionTemplateService,
+                                   PlatformTransactionManager transactionManager) {
         this.llmClient = llmClient;
         this.promptBuilder = promptBuilder;
         this.quotaService = quotaService;
@@ -116,6 +122,8 @@ public class SessionGeneratorService {
         this.learningSessionService = learningSessionService;
         this.teacherAssignmentRepository = teacherAssignmentRepository;
         this.ragContextService = ragContextService;
+        this.sessionTemplateService = sessionTemplateService;
+        this.tx = new TransactionTemplate(transactionManager);
     }
 
     /**
@@ -124,7 +132,6 @@ public class SessionGeneratorService {
      * {@code CourseNotFoundException} (404) / {@code AiParseException}
      * / {@code LlmException} as documented on the class.
      */
-    @Transactional
     public SessionGeneratorResult generateSession(GenerateSessionRequest request) {
         // 1. Quota gate. If this throws, no audit row is created.
         TenantAiSettings settings = quotaService.verifyCanCall();
@@ -141,23 +148,16 @@ public class SessionGeneratorService {
                     course.getCode(), course.getPublicUuid());
         }
 
-        // 3. Resolve course level / grade name (for context). We pick the
-        //    first level the course is offered at (the prompt just needs
-        //    a hint; multiple-level detail would bloat the prompt).
-        String gradeName = courseLevelRepository
-                .findAllByCourse(course)
-                .stream()
-                .findFirst()
-                .map(cl -> cl.getLevel().getName())
-                .orElse(null);
+        String gradeName = resolveGradeName(request, course);
 
         // 4. Resolve competency / capacity names (best-effort, never fail).
         List<String> competencyNames = resolveCompetencyNames(request.competencyIds());
         List<String> capacityNames = resolveCapacityNames(request.capacityIds());
 
         // 5. Build the prompt (this also normalises the inputs).
+        List<String> phaseTokens = resolvePhaseTokens(request.templateUuid());
         LlmRequest llmRequest = promptBuilder.build(
-                request, course.getName(), gradeName, competencyNames, capacityNames);
+                request, course.getName(), gradeName, competencyNames, capacityNames, phaseTokens);
 
         // 6. Persist a PENDING audit row BEFORE the call. If the JVM
         //    dies mid-call, we still have a record of the attempt.
@@ -165,22 +165,36 @@ public class SessionGeneratorService {
         gen.setStatus(AiGeneration.Status.PENDING);
         generationRepo.saveAndFlush(gen);
 
-        return runGeneration(gen, llmRequest, request, userId, course, tenantId);
+        return runGeneration(gen, llmRequest, request, userId, course, tenantId, phaseTokens);
     }
 
-    @Transactional
     public SessionGeneratorResult runGeneration(AiGeneration gen,
                                                 LlmRequest llmRequest,
                                                 GenerateSessionRequest request,
                                                 UUID userId,
                                                 Course course,
                                                 UUID tenantId) {
+        return runGeneration(gen, llmRequest, request, userId, course, tenantId,
+                GenerateSessionResponse.DEFAULT_PHASES);
+    }
+
+    public SessionGeneratorResult runGeneration(AiGeneration gen,
+                                                LlmRequest llmRequest,
+                                                GenerateSessionRequest request,
+                                                UUID userId,
+                                                Course course,
+                                                UUID tenantId,
+                                                List<String> phaseTokens) {
         gen.setStatus(AiGeneration.Status.PROCESSING);
         generationRepo.saveAndFlush(gen);
 
         long start = System.nanoTime();
         LlmResponse llmResponse;
         try {
+            // #region agent log
+            agentLog("B", "SessionGeneratorService.runGeneration", "before-llm",
+                    "{\"txActive\":" + TransactionSynchronizationManager.isActualTransactionActive() + "}");
+            // #endregion
             llmResponse = llmClient.complete(llmRequest);
         } catch (LlmException e) {
             long latency = (System.nanoTime() - start) / 1_000_000L;
@@ -200,7 +214,7 @@ public class SessionGeneratorService {
         // Parse the LLM JSON + validate against the contract.
         GenerateSessionResponse parsed;
         try {
-            parsed = parseAndValidate(llmResponse.text(), request.durationMinutes());
+            parsed = parseAndValidate(llmResponse.text(), request.durationMinutes(), phaseTokens);
         } catch (AiParseException e) {
             long latency = (System.nanoTime() - start) / 1_000_000L;
             log.warn("Session-generation returned unparseable JSON (latency={}ms): {}",
@@ -243,7 +257,6 @@ public class SessionGeneratorService {
      * {@link RagContextService}) over the course's competencies and
      * capacities.
      */
-    @Transactional
     public SessionGeneratorResult streamSession(GenerateSessionRequest request,
                                                 java.util.function.Function<String, Boolean> onChunk) {
         // 1. Quota gate.
@@ -256,21 +269,18 @@ public class SessionGeneratorService {
                 .orElseThrow(() -> new com.edushift.shared.exception.ResourceNotFoundException(
                         "Course", request.courseId().toString()));
 
-        // 3. Resolve grade + competency/capacity names.
-        String gradeName = courseLevelRepository
-                .findAllByCourse(course)
-                .stream()
-                .findFirst()
-                .map(cl -> cl.getLevel().getName())
-                .orElse(null);
+        // 3. Resolve the section grade. The course may be offered at several
+        //    levels; the first one (often Inicial) is not the section grade.
+        String gradeName = resolveGradeName(request, course);
         List<String> competencyNames = resolveCompetencyNames(request.competencyIds());
         List<String> capacityNames = resolveCapacityNames(request.capacityIds());
 
         // 4. RAG context (Sprint cierre-A / B11). Top-K BM25 over the
         //    course's competencies + capacities. Null course = skip.
         List<RagSnippet> ragSnippets = ragContextService.retrieveForCourse(course.getPublicUuid(), request.topic());
+        List<String> phaseTokens = resolvePhaseTokens(request.templateUuid());
         LlmRequest llmRequest = promptBuilder.buildWithRag(
-                request, course.getName(), gradeName, competencyNames, capacityNames, ragSnippets);
+                request, course.getName(), gradeName, competencyNames, capacityNames, ragSnippets, phaseTokens);
 
         // 5. Persist a PENDING audit row.
         AiGeneration gen = newGeneration(tenantId, userId, llmRequest, course.getPublicUuid());
@@ -297,6 +307,11 @@ public class SessionGeneratorService {
 			}
 		};
         try {
+            // #region agent log
+            agentLog("B", "SessionGeneratorService.streamSession", "before-llm",
+                    "{\"txActive\":" + TransactionSynchronizationManager.isActualTransactionActive()
+                            + ",\"grade\":\"" + jsonEscape(gradeName) + "\"}");
+            // #endregion
             streamResult = llmClient.stream(llmRequest, observer);
         }
         catch (LlmException e) {
@@ -314,7 +329,7 @@ public class SessionGeneratorService {
         // 7. Parse the buffered text and validate.
         GenerateSessionResponse parsed;
         try {
-            parsed = parseAndValidate(buffer.toString(), request.durationMinutes());
+            parsed = parseAndValidate(buffer.toString(), request.durationMinutes(), phaseTokens);
         }
         catch (AiParseException e) {
             long latency = (System.nanoTime() - start) / 1_000_000L;
@@ -345,7 +360,7 @@ public class SessionGeneratorService {
     private void markCompletedFromStream(AiGeneration gen, LlmClient.StreamResult result,
                                          GenerateSessionResponse parsed) {
         gen.setStatus(AiGeneration.Status.COMPLETED);
-        gen.setResponseText(truncate(objectMapper.convertValue(parsed, String.class), 60_000));
+        gen.setResponseText(truncate(writeJson(parsed), 60_000));
         Map<String, Object> parsedMap = objectMapper.convertValue(parsed,
                 new com.fasterxml.jackson.core.type.TypeReference<Map<String, Object>>() {});
         gen.setResponseParsed(parsedMap);
@@ -414,7 +429,8 @@ public class SessionGeneratorService {
                             request.durationMinutes(),
                             content,
                             request.competencyIds(),
-                            request.capacityIds());
+                            request.capacityIds(),
+                            request.templateUuid());
             var created = learningSessionService.create(createReq);
             log.info("[ai/generate-session] persisted draft session -- publicUuid={} title={}",
                     created.publicUuid(), createReq.title());
@@ -439,11 +455,13 @@ public class SessionGeneratorService {
         var activities = new java.util.ArrayList<String>();
         if (parsed.activities() != null) {
             for (var a : parsed.activities()) {
-                String phase = a.phase() != null ? a.phase().name() : "-";
+                String phase = a.phase() != null ? a.phase() : "-";
                 String name = a.name() == null ? "" : a.name();
-                String dur = a.durationMinutes() > 0 ? a.durationMinutes() + " min" : "";
                 String desc = a.description() == null ? "" : a.description();
-                activities.add(String.format("[%s] %s (%s) — %s", phase, name, dur, desc));
+                String durLabel = a.durationMinutes() > 0 ? a.durationMinutes() + " min" : "";
+                String head = "[" + phase + "] " + name
+                        + (durLabel.isEmpty() ? "" : " (" + durLabel + ")");
+                activities.add(desc.isBlank() ? head.trim() : head.trim() + "\n" + desc.trim());
             }
         }
         var materials = new java.util.ArrayList<String>();
@@ -476,6 +494,61 @@ public class SessionGeneratorService {
     // ---------------------------------------------------------------------
     // Input resolution.
     // ---------------------------------------------------------------------
+
+    /**
+     * Prefer the section grade sent by the form. The course can be linked
+     * to Inicial, Primaria and Secundaria at once; the first row is not
+     * the grade of the assignment.
+     */
+    private String resolveGradeName(GenerateSessionRequest request, Course course) {
+        String requested = request.gradeName();
+        if (requested != null && !requested.isBlank()) {
+            String grade = requested.trim();
+            log.info("[ai/generate-session] grade='{}' source=assignment", grade);
+            // #region agent log
+            agentLog("A", "SessionGeneratorService.resolveGradeName", "grade-from-assignment",
+                    "{\"grade\":\"" + jsonEscape(grade) + "\",\"source\":\"assignment\"}");
+            // #endregion
+            return grade;
+        }
+        String fromCourse = tx.execute(status -> courseLevelRepository
+                .findAllByCourse(course)
+                .stream()
+                .findFirst()
+                .map(cl -> cl.getLevel().getName())
+                .orElse(null));
+        log.info("[ai/generate-session] grade='{}' source=course-first-level", fromCourse);
+        // #region agent log
+        agentLog("A", "SessionGeneratorService.resolveGradeName", "grade-from-course-level",
+                "{\"grade\":\"" + jsonEscape(fromCourse) + "\",\"source\":\"course-first-level\"}");
+        // #endregion
+        return fromCourse;
+    }
+
+    // #region agent log
+    private static void agentLog(String hypothesisId, String location, String message, String dataJson) {
+        try {
+            String line = "{\"sessionId\":\"325667\",\"runId\":\"post-fix\",\"hypothesisId\":\""
+                    + hypothesisId + "\",\"location\":\"" + location + "\",\"message\":\""
+                    + message + "\",\"data\":" + dataJson + ",\"timestamp\":"
+                    + System.currentTimeMillis() + "}\n";
+            java.nio.file.Files.writeString(
+                    java.nio.file.Path.of("C:\\Users\\USUARIO\\Desktop\\personales\\proyectos\\new - proyecto multi school\\edushift\\debug-325667.log"),
+                    line,
+                    java.nio.file.StandardOpenOption.CREATE,
+                    java.nio.file.StandardOpenOption.APPEND);
+        } catch (Exception ignored) {
+            // debug sink must not affect generation
+        }
+    }
+
+    private static String jsonEscape(String value) {
+        if (value == null) {
+            return "";
+        }
+        return value.replace("\\", "\\\\").replace("\"", "\\\"");
+    }
+    // #endregion
 
     /**
      * Verifies the course is in the caller's tenant. The
@@ -579,7 +652,33 @@ public class SessionGeneratorService {
     // Output parsing.
     // ---------------------------------------------------------------------
 
+    private List<String> resolvePhaseTokens(UUID templateUuid) {
+        if (templateUuid == null) {
+            return GenerateSessionResponse.DEFAULT_PHASES;
+        }
+        try {
+            var template = sessionTemplateService.requireTenantOrSystem(templateUuid);
+            List<String> names = com.edushift.modules.sessions.template.service.SessionTemplateService
+                    .phaseNamesFromSchema(template.getSchema());
+            if (names.isEmpty()) {
+                return GenerateSessionResponse.DEFAULT_PHASES;
+            }
+            return names.stream()
+                    .map(GenerateSessionResponse::phaseToken)
+                    .distinct()
+                    .toList();
+        } catch (Exception e) {
+            log.warn("[ai/generate-session] templateUuid={} not resolved, using default phases: {}",
+                    templateUuid, e.getMessage());
+            return GenerateSessionResponse.DEFAULT_PHASES;
+        }
+    }
+
     private GenerateSessionResponse parseAndValidate(String text, int expectedDuration) {
+        return parseAndValidate(text, expectedDuration, GenerateSessionResponse.DEFAULT_PHASES);
+    }
+
+    private GenerateSessionResponse parseAndValidate(String text, int expectedDuration, List<String> phaseTokens) {
         String sanitized = LlmJsonSanitizer.sanitize(text);
         GenerateSessionResponse parsed;
         try {
@@ -588,13 +687,20 @@ public class SessionGeneratorService {
             throw new AiParseException(
                     "LLM response is not valid JSON: " + firstLine(e.getMessage()), e);
         }
-        // validate() throws AiParseException on any structural problem.
-        parsed.validate(text, expectedDuration);
+        parsed.validate(text, expectedDuration, phaseTokens);
         return parsed;
     }
 
     private static long longOrZero(Integer i) {
         return i == null ? 0L : i.longValue();
+    }
+
+    private String writeJson(Object value) {
+        try {
+            return objectMapper.writeValueAsString(value);
+        } catch (JsonProcessingException e) {
+            return value == null ? "" : value.toString();
+        }
     }
 
     private static String truncate(String s, int max) {

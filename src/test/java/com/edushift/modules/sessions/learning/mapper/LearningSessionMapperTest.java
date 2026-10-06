@@ -214,7 +214,7 @@ class LearningSessionMapperTest {
                 unit.getPublicUuid(), "Sesión 2", "Obj",
                 LocalDate.of(2026, 3, 2), 50, dto,
                 List.of(competency.getPublicUuid()),
-                List.of(capacity.getPublicUuid()));
+                List.of(capacity.getPublicUuid()), null);
             var entity = mapper.fromCreate(req, assignment, unit);
 
             assertThat(entity.getTeacherAssignment()).isEqualTo(assignment);
@@ -234,7 +234,7 @@ class LearningSessionMapperTest {
         void partialUpdate() {
             var dto = new SessionContentDto("New Obj", List.of(), List.of(), "Obs");
             var patch = new UpdateLearningSessionRequest(null, "Updated",
-                "New Obj", LocalDate.of(2026, 3, 5), 60, dto, null, null);
+                "New Obj", LocalDate.of(2026, 3, 5), 60, dto, null, null, null);
             mapper.applyUpdate(patch, session);
 
             assertThat(session.getTitle()).isEqualTo("Updated");
@@ -247,7 +247,7 @@ class LearningSessionMapperTest {
         @DisplayName("blank objective becomes null")
         void blankObjective() {
             var patch = new UpdateLearningSessionRequest(null, null, "  ",
-                null, null, null, null, null);
+                null, null, null, null, null, null);
             mapper.applyUpdate(patch, session);
             assertThat(session.getObjective()).isNull();
         }

@@ -2,6 +2,7 @@ package com.edushift.modules.quizzes.repository;
 
 import com.edushift.modules.quizzes.entity.QuizOption;
 import com.edushift.modules.quizzes.entity.QuizQuestion;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -20,6 +21,8 @@ public interface QuizOptionRepository extends JpaRepository<QuizOption, UUID> {
 	boolean existsByPublicUuid(UUID publicUuid);
 
 	List<QuizOption> findAllByQuestionOrderByPositionAsc(QuizQuestion question);
+
+	List<QuizOption> findAllByQuestionInOrderByPositionAsc(Collection<QuizQuestion> questions);
 
 	long countByQuestionAndCorrectIsTrue(QuizQuestion question);
 }

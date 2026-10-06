@@ -3,7 +3,9 @@ package com.edushift.modules.ai.prompt;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.edushift.modules.ai.config.ActiveLlmSettings;
 import com.edushift.modules.ai.config.MiniMaxProperties;
+import com.edushift.modules.ai.config.OllamaProperties;
 import com.edushift.modules.ai.llm.LlmClient.LlmRequest;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -27,7 +29,9 @@ class QuizQuestionPromptBuilderTest {
     void setUp() {
         props = new MiniMaxProperties();
         props.setDefaultModel("minimax/MiniMax-M3");
-        builder = new QuizQuestionPromptBuilder(props);
+        OllamaProperties ollama = new OllamaProperties();
+        ollama.setEnabled(false);
+        builder = new QuizQuestionPromptBuilder(new ActiveLlmSettings(props, ollama));
     }
 
     @Test

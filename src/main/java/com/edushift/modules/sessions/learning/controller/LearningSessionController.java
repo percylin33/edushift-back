@@ -1,12 +1,19 @@
 package com.edushift.modules.sessions.learning.controller;
 
+import com.edushift.modules.sessions.learning.dto.ApplicationSheetResponse;
+import com.edushift.modules.sessions.learning.dto.ApplicationSheetWriteRequest;
+import com.edushift.modules.sessions.learning.dto.CopyLearningSessionRequest;
+import com.edushift.modules.sessions.learning.dto.GenerateStoredApplicationSheetRequest;
 import com.edushift.modules.sessions.learning.dto.CreateLearningSessionRequest;
 import com.edushift.modules.sessions.learning.dto.LearningSessionFilters;
 import com.edushift.modules.sessions.learning.dto.LearningSessionListItem;
 import com.edushift.modules.sessions.learning.dto.LearningSessionResponse;
+import com.edushift.modules.sessions.learning.dto.SharedLearningSessionResponse;
 import com.edushift.modules.sessions.learning.dto.LifecycleRequest;
 import com.edushift.modules.sessions.learning.dto.UpdateLearningSessionRequest;
+import com.edushift.modules.sessions.learning.entity.ApplicationSheetKind;
 import com.edushift.modules.sessions.learning.entity.SessionStatus;
+import com.edushift.modules.sessions.learning.service.ApplicationSheetService;
 import com.edushift.modules.sessions.learning.service.LearningSessionService;
 import com.edushift.modules.sessions.learning.service.SessionsPdfExportService;
 import com.edushift.shared.api.ApiResponse;
@@ -64,8 +71,12 @@ import org.springframework.web.bind.annotation.RestController;
 				+ "(Sprint 5A - BE-5A.4)")
 public class LearningSessionController {
 
+	private static final String ADMIN_OR_TEACHER =
+			"hasAnyRole('TENANT_ADMIN', 'TEACHER')";
+
 	private final LearningSessionService service;
 	private final SessionsPdfExportService pdfExportService;
+	private final ApplicationSheetService applicationSheetService;
 
 	// =========================================================================
 	// CRUD
@@ -73,7 +84,7 @@ public class LearningSessionController {
 
 	@GetMapping("/learning-sessions")
 	@SecurityRequirement(name = "bearerAuth")
-	@PreAuthorize("hasRole('TENANT_ADMIN')")
+	@PreAuthorize(ADMIN_OR_TEACHER)
 	@Operation(
 			summary = "List learning sessions with filters (TENANT_ADMIN)",
 			description = "Filters are AND-combined and skip-on-null. "
@@ -104,10 +115,23 @@ public class LearningSessionController {
 		return ResponseEntity.ok(service.list(filters));
 	}
 
+	@GetMapping("/learning-sessions/shared")
+	@SecurityRequirement(name = "bearerAuth")
+	@PreAuthorize(ADMIN_OR_TEACHER)
+	@Operation(
+			summary = "List session plans shared with the caller's grade",
+			description = "Teachers see colleagues' shared sessions of the same course, "
+					+ "grade and period. Admins see every shared session in the tenant. "
+					+ "Observations are omitted. Cancelled sessions are excluded."
+	)
+	public ResponseEntity<List<SharedLearningSessionResponse>> listShared() {
+		return ResponseEntity.ok(service.listShared());
+	}
+
 	@PostMapping("/learning-sessions")
 	@ResponseStatus(HttpStatus.CREATED)
 	@SecurityRequirement(name = "bearerAuth")
-	@PreAuthorize("hasRole('TENANT_ADMIN')")
+	@PreAuthorize(ADMIN_OR_TEACHER)
 	@Operation(
 			summary = "Create a learning session (TENANT_ADMIN)",
 			description = "400 SESSION_DATE_OUT_OF_PERIOD if scheduledDate is outside "
@@ -123,9 +147,28 @@ public class LearningSessionController {
 		return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.ok(response));
 	}
 
+	@PostMapping("/learning-sessions/{publicUuid}/copy")
+	@ResponseStatus(HttpStatus.CREATED)
+	@SecurityRequirement(name = "bearerAuth")
+	@PreAuthorize(ADMIN_OR_TEACHER)
+	@Operation(
+			summary = "Copy a session plan into another section of the same grade",
+			description = "Creates a PLANNED session on the target assignment with the "
+					+ "same title, objective, activities, materials, unit and competencies. "
+					+ "Observations are dropped. 404 when the caller cannot see the source "
+					+ "or the target is a different course, grade or period."
+	)
+	public ResponseEntity<ApiResponse<LearningSessionResponse>> copy(
+			@PathVariable UUID publicUuid,
+			@Valid @RequestBody CopyLearningSessionRequest request
+	) {
+		return ResponseEntity.status(HttpStatus.CREATED)
+				.body(ApiResponse.ok(service.copy(publicUuid, request)));
+	}
+
 	@GetMapping("/learning-sessions/{publicUuid}")
 	@SecurityRequirement(name = "bearerAuth")
-	@PreAuthorize("hasRole('TENANT_ADMIN')")
+	@PreAuthorize(ADMIN_OR_TEACHER)
 	@Operation(summary = "Get a learning session by publicUuid (TENANT_ADMIN)")
 	public ResponseEntity<ApiResponse<LearningSessionResponse>> getOne(
 			@PathVariable UUID publicUuid
@@ -135,7 +178,7 @@ public class LearningSessionController {
 
 	@GetMapping("/learning-sessions/{publicUuid}/export")
 	@SecurityRequirement(name = "bearerAuth")
-	@PreAuthorize("hasRole('TENANT_ADMIN')")
+	@PreAuthorize(ADMIN_OR_TEACHER)
 	@Operation(
 			summary = "Export a learning session as PDF (BE-18.2)",
 			description = "Generates a PDF with the session title, objective, content "
@@ -158,7 +201,7 @@ public class LearningSessionController {
 
 	@PutMapping("/learning-sessions/{publicUuid}")
 	@SecurityRequirement(name = "bearerAuth")
-	@PreAuthorize("hasRole('TENANT_ADMIN')")
+	@PreAuthorize(ADMIN_OR_TEACHER)
 	@Operation(
 			summary = "Update a learning session (TENANT_ADMIN)",
 			description = "Partial-merge. Lifecycle (status / timestamps) cannot be "
@@ -177,7 +220,7 @@ public class LearningSessionController {
 	@DeleteMapping("/learning-sessions/{publicUuid}")
 	@ResponseStatus(HttpStatus.NO_CONTENT)
 	@SecurityRequirement(name = "bearerAuth")
-	@PreAuthorize("hasRole('TENANT_ADMIN')")
+	@PreAuthorize(ADMIN_OR_TEACHER)
 	@Operation(
 			summary = "Soft-delete a learning session (TENANT_ADMIN)",
 			description = "Future Sprint 6 will reject deletion when attendance "
@@ -194,7 +237,7 @@ public class LearningSessionController {
 
 	@PostMapping("/learning-sessions/{publicUuid}/start")
 	@SecurityRequirement(name = "bearerAuth")
-	@PreAuthorize("hasRole('TENANT_ADMIN')")
+	@PreAuthorize(ADMIN_OR_TEACHER)
 	@Operation(
 			summary = "Transition PLANNED -> IN_PROGRESS (TENANT_ADMIN)",
 			description = "Stamps started_at = now(). 409 SESSION_TRANSITION_INVALID if "
@@ -210,7 +253,7 @@ public class LearningSessionController {
 
 	@PostMapping("/learning-sessions/{publicUuid}/complete")
 	@SecurityRequirement(name = "bearerAuth")
-	@PreAuthorize("hasRole('TENANT_ADMIN')")
+	@PreAuthorize(ADMIN_OR_TEACHER)
 	@Operation(
 			summary = "Transition IN_PROGRESS -> COMPLETED (TENANT_ADMIN)",
 			description = "Stamps ended_at = now(). 409 SESSION_TRANSITION_INVALID if "
@@ -225,7 +268,7 @@ public class LearningSessionController {
 
 	@PostMapping("/learning-sessions/{publicUuid}/cancel")
 	@SecurityRequirement(name = "bearerAuth")
-	@PreAuthorize("hasRole('TENANT_ADMIN')")
+	@PreAuthorize(ADMIN_OR_TEACHER)
 	@Operation(
 			summary = "Cancel a learning session (TENANT_ADMIN)",
 			description = "Allowed from PLANNED or IN_PROGRESS; rejected from terminal "
@@ -239,13 +282,59 @@ public class LearningSessionController {
 		return ResponseEntity.ok(ApiResponse.ok(service.cancel(publicUuid, request)));
 	}
 
+	@GetMapping("/learning-sessions/{publicUuid}/application-sheets")
+	@SecurityRequirement(name = "bearerAuth")
+	@PreAuthorize(ADMIN_OR_TEACHER)
+	@Operation(summary = "List printable worksheets of a session, one per grade")
+	public ResponseEntity<ApiResponse<List<ApplicationSheetResponse>>> listSheets(
+			@PathVariable UUID publicUuid) {
+		return ResponseEntity.ok(ApiResponse.ok(applicationSheetService.list(publicUuid)));
+	}
+
+	@PutMapping("/learning-sessions/{publicUuid}/application-sheets")
+	@SecurityRequirement(name = "bearerAuth")
+	@PreAuthorize(ADMIN_OR_TEACHER)
+	@Operation(summary = "Replace the worksheets of a session")
+	public ResponseEntity<ApiResponse<List<ApplicationSheetResponse>>> replaceSheets(
+			@PathVariable UUID publicUuid,
+			@Valid @RequestBody List<ApplicationSheetWriteRequest> sheets) {
+		return ResponseEntity.ok(ApiResponse.ok(applicationSheetService.replace(publicUuid, sheets)));
+	}
+
+	@PostMapping("/learning-sessions/{publicUuid}/application-sheets/generate")
+	@SecurityRequirement(name = "bearerAuth")
+	@PreAuthorize("hasAuthority('" + com.edushift.shared.security.LmsAuthorities.LMS_AI_GENERATE + "')")
+	@Operation(summary = "Generate one worksheet for one grade from the saved session")
+	public ResponseEntity<ApiResponse<ApplicationSheetResponse>> generateSheet(
+			@PathVariable UUID publicUuid,
+			@Valid @RequestBody GenerateStoredApplicationSheetRequest request) {
+		return ResponseEntity.ok(ApiResponse.ok(
+				applicationSheetService.generateForSession(publicUuid, request)));
+	}
+
+	@GetMapping("/learning-sessions/{publicUuid}/application-sheets/{kind}/export")
+	@SecurityRequirement(name = "bearerAuth")
+	@PreAuthorize(ADMIN_OR_TEACHER)
+	@Operation(summary = "Download one worksheet PDF for a single grade")
+	public ResponseEntity<byte[]> exportSheet(
+			@PathVariable UUID publicUuid,
+			@PathVariable ApplicationSheetKind kind,
+			@RequestParam String grade) {
+		byte[] pdf = applicationSheetService.exportPdf(publicUuid, kind, grade);
+		HttpHeaders headers = new HttpHeaders();
+		headers.setContentType(MediaType.APPLICATION_PDF);
+		headers.setContentDispositionFormData("attachment",
+				"ficha-" + kind.name().toLowerCase() + ".pdf");
+		return ResponseEntity.ok().headers(headers).body(pdf);
+	}
+
 	// =========================================================================
 	// Reverse views
 	// =========================================================================
 
 	@GetMapping("/teacher-assignments/{assignmentUuid}/sessions")
 	@SecurityRequirement(name = "bearerAuth")
-	@PreAuthorize("hasRole('TENANT_ADMIN')")
+	@PreAuthorize(ADMIN_OR_TEACHER)
 	@Operation(
 			summary = "List sessions of an assignment (TENANT_ADMIN)",
 			description = "Sorted by (scheduledDate asc, createdAt asc). 404 if "
@@ -259,7 +348,7 @@ public class LearningSessionController {
 
 	@GetMapping("/academic/units/{unitUuid}/sessions")
 	@SecurityRequirement(name = "bearerAuth")
-	@PreAuthorize("hasRole('TENANT_ADMIN')")
+	@PreAuthorize(ADMIN_OR_TEACHER)
 	@Operation(
 			summary = "List sessions of a unit (TENANT_ADMIN)",
 			description = "Drives the 'lessons in this unit' tab on the unit-detail "

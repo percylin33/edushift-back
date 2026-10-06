@@ -19,6 +19,7 @@ public record EnrollmentListItem(
 
 		UUID sectionPublicUuid,
 		String sectionName,
+		String gradeName,
 
 		UUID academicYearPublicUuid,
 		String academicYearName,

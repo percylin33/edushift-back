@@ -76,6 +76,26 @@ public final class DayPlanCalculator {
 			LocalTime sliceEnd = cursor.plusMinutes(periodMinutes);
 			Interval blocking = firstOverlap(sorted, cursor, sliceEnd);
 			if (blocking != null) {
+				if (cursor.isBefore(blocking.start())) {
+					if (!periods.isEmpty()) {
+						SuggestedPeriodItem last = periods.get(periods.size() - 1);
+						if (last.endTime().equals(cursor)) {
+							periods.set(periods.size() - 1, new SuggestedPeriodItem(
+									last.ordinal(),
+									last.startTime(),
+									blocking.start(),
+									last.label()));
+						} else {
+							periods.add(new SuggestedPeriodItem(
+									ordinal, cursor, blocking.start(), "Periodo " + ordinal));
+							ordinal++;
+						}
+					} else {
+						periods.add(new SuggestedPeriodItem(
+								ordinal, cursor, blocking.start(), "Periodo " + ordinal));
+						ordinal++;
+					}
+				}
 				cursor = blocking.end();
 				if (cursor.isBefore(dayStart) || !cursor.isBefore(dayEnd)) {
 					break;

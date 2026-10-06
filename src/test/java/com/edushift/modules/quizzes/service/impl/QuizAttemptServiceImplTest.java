@@ -7,6 +7,9 @@ import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.edushift.modules.academic.section.entity.Section;
@@ -32,11 +35,13 @@ import com.edushift.modules.quizzes.exception.QuizNotFoundException;
 import com.edushift.modules.quizzes.exception.QuizNotPublishedException;
 import com.edushift.modules.quizzes.exception.StudentNotEnrolledException;
 import com.edushift.modules.quizzes.mapper.QuizAttemptMapper;
+import com.edushift.modules.quizzes.repository.AttemptPendingCount;
 import com.edushift.modules.quizzes.repository.QuizAnswerRepository;
 import com.edushift.modules.quizzes.repository.QuizAttemptRepository;
 import com.edushift.modules.quizzes.repository.QuizOptionRepository;
 import com.edushift.modules.quizzes.repository.QuizQuestionRepository;
 import com.edushift.modules.quizzes.repository.QuizRepository;
+import com.edushift.modules.auth.repository.UserRepository;
 import com.edushift.modules.students.entity.Student;
 import com.edushift.modules.students.enrollments.repository.StudentEnrollmentRepository;
 import com.edushift.modules.students.repository.StudentRepository;
@@ -68,6 +73,7 @@ class QuizAttemptServiceImplTest {
     @Mock SectionRepository sectionRepository;
     @Mock StudentRepository studentRepository;
     @Mock StudentEnrollmentRepository enrollmentRepository;
+    @Mock UserRepository userRepository;
     @Mock QuizAttemptMapper attemptMapper;
     @Mock CurrentUserProvider currentUserProvider;
     @Mock ApplicationEventPublisher eventPublisher;
@@ -176,7 +182,7 @@ class QuizAttemptServiceImplTest {
         when(enrollmentRepository.existsActiveAt(any(), any(), any())).thenReturn(true);
         when(attemptRepository.countByQuizAndStudentUserId(any(), any())).thenReturn(0L);
         when(attemptRepository.save(any(QuizAttempt.class))).thenAnswer(inv -> inv.getArgument(0));
-        when(attemptMapper.toResponse(any(), any(), anyBoolean(), anyInt())).thenReturn(mock(AttemptResponse.class));
+        when(attemptMapper.toResponse(any(), any(), anyBoolean())).thenReturn(mock(AttemptResponse.class));
 
         var resp = service.startAttempt(UUID.randomUUID(), studentUuid, studentUuid);
         assertThat(resp).isNotNull();
@@ -222,8 +228,7 @@ class QuizAttemptServiceImplTest {
     @DisplayName("saveAnswers — empty list returns current attempt (no-op)")
     void saveAnswers_emptyList() {
         when(attemptRepository.findByPublicUuid(any())).thenReturn(Optional.of(attempt));
-        when(answerRepository.findAllByAttemptOrderByQuestionPositionAsc(attempt)).thenReturn(List.of());
-        when(attemptMapper.toResponse(any(), any(), anyBoolean(), anyInt())).thenReturn(mock(AttemptResponse.class));
+        when(attemptMapper.toResponse(any(), any(), anyBoolean())).thenReturn(mock(AttemptResponse.class));
         var resp = service.saveAnswers(UUID.randomUUID(), studentUuid, List.of());
         assertThat(resp).isNotNull();
     }
@@ -264,7 +269,7 @@ class QuizAttemptServiceImplTest {
         when(answerRepository.findAllByAttemptOrderByQuestionPositionAsc(attempt)).thenReturn(List.of());
         when(questionRepository.findAllByQuizOrderByPositionAsc(any())).thenReturn(List.of());
         when(attemptRepository.save(any(QuizAttempt.class))).thenAnswer(inv -> inv.getArgument(0));
-        when(attemptMapper.toResponse(any(), any(), anyBoolean(), anyInt())).thenReturn(mock(AttemptResponse.class));
+        when(attemptMapper.toResponse(any(), any(), anyBoolean())).thenReturn(mock(AttemptResponse.class));
 
         service.submitAttempt(UUID.randomUUID(), studentUuid);
         assertThat(attempt.getStatus()).isIn(AttemptStatus.AUTO_GRADED, AttemptStatus.GRADED);
@@ -293,22 +298,86 @@ class QuizAttemptServiceImplTest {
     }
 
     @Test
-    @DisplayName("getGradingQueue — collects SHORT_ANSWER rows with no grade yet")
+    @DisplayName("getGradingQueue — one query returns every pending short answer")
     void getGradingQueue() {
         when(quizRepository.findByPublicUuid(any())).thenReturn(Optional.of(publishedQuiz));
-        when(attemptRepository.findAllByQuizOrderByAttemptNumberAsc(any(), any()))
-                .thenReturn(new org.springframework.data.domain.PageImpl<>(List.of(attempt)));
         var q = mcQuestion();
         var ans = new QuizAnswer();
         ans.setPublicUuid(UUID.randomUUID());
+        ans.setAttempt(attempt);
         ans.setQuestion(q);
         ans.setTextAnswer("Paris");
-        when(answerRepository.findAllByAttemptAndTextAnswerIsNotNullAndGradedAtIsNull(attempt))
+        when(answerRepository.findPendingShortAnswersByQuiz(publishedQuiz))
                 .thenReturn(List.of(ans));
 
-        var items = service.getGradingQueue(UUID.randomUUID());
+        var items = service.getGradingQueue(publishedQuiz.getPublicUuid());
         assertThat(items).hasSize(1);
         assertThat(items.get(0).textAnswer()).isEqualTo("Paris");
+        verify(answerRepository, times(1)).findPendingShortAnswersByQuiz(publishedQuiz);
+        verify(answerRepository, never())
+                .findAllByAttemptAndTextAnswerIsNotNullAndGradedAtIsNull(any());
+    }
+
+    @Test
+    @DisplayName("listAttempts — one grouped count for the whole page")
+    void listAttempts_groupsPendingCounts() {
+        var a1 = new QuizAttempt();
+        a1.setId(UUID.randomUUID());
+        var a2 = new QuizAttempt();
+        a2.setId(UUID.randomUUID());
+        var a3 = new QuizAttempt();
+        a3.setId(UUID.randomUUID());
+        when(quizRepository.findByPublicUuid(any())).thenReturn(Optional.of(publishedQuiz));
+        when(attemptRepository.findAllByQuizOrderByAttemptNumberAsc(any(), any()))
+                .thenReturn(new org.springframework.data.domain.PageImpl<>(List.of(a1, a2, a3)));
+        when(answerRepository.countPendingShortAnswersByAttemptIds(any()))
+                .thenReturn(List.of(new AttemptPendingCount(a1.getId(), 2L)));
+        when(attemptMapper.toSummary(any(), any(), anyInt()))
+                .thenReturn(mock(com.edushift.modules.quizzes.dto.AttemptSummary.class));
+
+        var page = service.listAttempts(publishedQuiz.getPublicUuid(), PageRequest.of(0, 10));
+
+        assertThat(page.getContent()).hasSize(3);
+        verify(answerRepository, times(1)).countPendingShortAnswersByAttemptIds(any());
+        verify(answerRepository, never()).findAllByAttemptOrderByQuestionPositionAsc(any());
+        verify(attemptMapper).toSummary(a1, publishedQuiz, 2);
+        verify(attemptMapper).toSummary(a2, publishedQuiz, 0);
+        verify(attemptMapper).toSummary(a3, publishedQuiz, 0);
+    }
+
+    @Test
+    @DisplayName("saveAnswers — one saveAll, no per-answer lookup")
+    void saveAnswers_batchesUpsert() {
+        var q1 = tfQuestion();
+        var q2 = tfQuestion();
+        var q3 = tfQuestion();
+        when(attemptRepository.findByPublicUuid(any())).thenReturn(Optional.of(attempt));
+        when(questionRepository.findAllByQuizOrderByPositionAsc(any()))
+                .thenReturn(List.of(q1, q2, q3));
+        when(answerRepository.findAllByAttemptOrderByQuestionPositionAsc(attempt))
+                .thenReturn(List.of());
+        when(attemptMapper.toResponse(any(), any(), anyBoolean()))
+                .thenReturn(mock(AttemptResponse.class));
+
+        service.saveAnswers(attempt.getPublicUuid(), studentUuid, List.of(
+                new AnswerInput(q1.getPublicUuid(), QuestionType.TF, null, true, null),
+                new AnswerInput(q2.getPublicUuid(), QuestionType.TF, null, false, null),
+                new AnswerInput(q3.getPublicUuid(), QuestionType.TF, null, true, null)));
+
+        verify(answerRepository, times(1)).saveAll(any());
+        verify(answerRepository, never()).findByAttemptAndQuestion(any(), any());
+        verify(answerRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("getAttempt — does not scan answers before the mapper")
+    void getAttempt_skipsDuplicateAnswerLoad() {
+        when(attemptRepository.findByPublicUuid(any())).thenReturn(Optional.of(attempt));
+        when(attemptMapper.toResponse(any(), any(), anyBoolean()))
+                .thenReturn(mock(AttemptResponse.class));
+
+        assertThat(service.getAttempt(attempt.getPublicUuid(), studentUuid)).isNotNull();
+        verify(answerRepository, never()).findAllByAttemptOrderByQuestionPositionAsc(any());
     }
 
     // ------------------------------------------------------------------
@@ -389,7 +458,7 @@ class QuizAttemptServiceImplTest {
         lenient().when(answerRepository.findAllByAttemptOrderByQuestionPositionAsc(attempt))
                 .thenReturn(List.of(ans));
         when(attemptRepository.save(any(QuizAttempt.class))).thenAnswer(inv -> inv.getArgument(0));
-        when(attemptMapper.toResponse(any(), any(), anyBoolean(), anyInt())).thenReturn(mock(AttemptResponse.class));
+        when(attemptMapper.toResponse(any(), any(), anyBoolean())).thenReturn(mock(AttemptResponse.class));
 
         var req = new ManualGradeAttemptRequest(
                 List.of(new ManualGradeAnswerRequest(ans.getPublicUuid(), 5)), "fb");
@@ -474,6 +543,16 @@ class QuizAttemptServiceImplTest {
     // ------------------------------------------------------------------
     // helpers
     // ------------------------------------------------------------------
+
+    private static QuizQuestion tfQuestion() {
+        var q = new QuizQuestion();
+        q.setId(UUID.randomUUID());
+        q.setPublicUuid(UUID.randomUUID());
+        q.setQuestionType(QuestionType.TF);
+        q.setPoints((short) 1);
+        q.setPrompt("T/F");
+        return q;
+    }
 
     private static QuizQuestion mcQuestion() {
         var q = new QuizQuestion();

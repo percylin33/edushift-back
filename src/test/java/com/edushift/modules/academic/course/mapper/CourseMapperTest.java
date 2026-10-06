@@ -2,6 +2,7 @@ package com.edushift.modules.academic.course.mapper;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.edushift.modules.academic.course.CourseVisualDefaults;
 import com.edushift.modules.academic.course.dto.CreateCourseRequest;
 import com.edushift.modules.academic.course.dto.UpdateCourseRequest;
 import com.edushift.modules.academic.course.entity.Course;
@@ -33,6 +34,8 @@ class CourseMapperTest {
         course.setCredits(4);
         course.setHoursPerWeek(5);
         course.setIsActive(true);
+        course.setColor("#3B82F6");
+        course.setIcon("target");
         course.setCreatedAt(Instant.parse("2026-01-01T00:00:00Z"));
         course.setUpdatedAt(Instant.parse("2026-01-01T00:00:00Z"));
 
@@ -60,6 +63,8 @@ class CourseMapperTest {
             assertThat(resp.code()).isEqualTo("MAT");
             assertThat(resp.name()).isEqualTo("Matemática");
             assertThat(resp.credits()).isEqualTo(4);
+            assertThat(resp.color()).isEqualTo("#3B82F6");
+            assertThat(resp.icon()).isEqualTo("target");
             assertThat(resp.levels()).hasSize(1);
             assertThat(resp.levels().get(0).code()).isEqualTo("PRIMARIA");
         }
@@ -83,6 +88,8 @@ class CourseMapperTest {
 
             assertThat(item.publicUuid()).isEqualTo(course.getPublicUuid());
             assertThat(item.code()).isEqualTo("MAT");
+            assertThat(item.color()).isEqualTo("#3B82F6");
+            assertThat(item.icon()).isEqualTo("target");
             assertThat(item.levels()).hasSize(1);
         }
     }
@@ -94,21 +101,35 @@ class CourseMapperTest {
         @Test
         @DisplayName("creates entity from request")
         void createsEntity() {
-            var req = new CreateCourseRequest("COMU", "Comunicación", null, 4, 5, true, List.of());
+            var req = new CreateCourseRequest("COMU", "Comunicación", null, 4, 5, true, null, null, List.of());
             var entity = mapper.fromCreate(req);
 
             assertThat(entity.getCode()).isEqualTo("COMU");
             assertThat(entity.getName()).isEqualTo("Comunicación");
             assertThat(entity.getCredits()).isEqualTo(4);
             assertThat(entity.getIsActive()).isTrue();
+            assertThat(entity.getIcon()).isEqualTo("book-open");
+            assertThat(entity.getColor()).isEqualTo("#DC2626");
         }
 
         @Test
         @DisplayName("defaults isActive to true when null")
         void defaultsIsActive() {
-            var req = new CreateCourseRequest("X", "X", null, null, null, null, List.of());
+            var req = new CreateCourseRequest("X", "X", null, null, null, null, null, null, List.of());
             var entity = mapper.fromCreate(req);
             assertThat(entity.getIsActive()).isTrue();
+            assertThat(entity.getIcon()).isEqualTo(CourseVisualDefaults.DEFAULT_ICON);
+            assertThat(entity.getColor()).isEqualTo(CourseVisualDefaults.DEFAULT_COLOR);
+        }
+
+        @Test
+        @DisplayName("respects explicit color and icon")
+        void explicitVisual() {
+            var req = new CreateCourseRequest(
+                    "MAT", "Mat", null, null, null, true, "#111111", "globe", List.of());
+            var entity = mapper.fromCreate(req);
+            assertThat(entity.getColor()).isEqualTo("#111111");
+            assertThat(entity.getIcon()).isEqualTo("globe");
         }
     }
 
@@ -119,16 +140,17 @@ class CourseMapperTest {
         @Test
         @DisplayName("updates only non-null fields")
         void partialUpdate() {
-            var patch = new UpdateCourseRequest(null, "Updated name", null, null, null, null);
+            var patch = new UpdateCourseRequest(null, "Updated name", null, null, null, null, null, null);
             mapper.applyUpdate(patch, course);
             assertThat(course.getName()).isEqualTo("Updated name");
             assertThat(course.getCode()).isEqualTo("MAT");
+            assertThat(course.getColor()).isEqualTo("#3B82F6");
         }
 
         @Test
         @DisplayName("blank description clears to null")
         void blankDescription() {
-            var patch = new UpdateCourseRequest(null, null, "  ", null, null, null);
+            var patch = new UpdateCourseRequest(null, null, "  ", null, null, null, null, null);
             mapper.applyUpdate(patch, course);
             assertThat(course.getDescription()).isNull();
         }
@@ -136,9 +158,18 @@ class CourseMapperTest {
         @Test
         @DisplayName("all-null patch does nothing")
         void noop() {
-            var patch = new UpdateCourseRequest(null, null, null, null, null, null);
+            var patch = new UpdateCourseRequest(null, null, null, null, null, null, null, null);
             mapper.applyUpdate(patch, course);
             assertThat(course.getCode()).isEqualTo("MAT");
+        }
+
+        @Test
+        @DisplayName("updates color and icon when provided")
+        void updateVisual() {
+            var patch = new UpdateCourseRequest(null, null, null, null, null, null, "#ABCDEF", "layers");
+            mapper.applyUpdate(patch, course);
+            assertThat(course.getColor()).isEqualTo("#ABCDEF");
+            assertThat(course.getIcon()).isEqualTo("layers");
         }
     }
 }

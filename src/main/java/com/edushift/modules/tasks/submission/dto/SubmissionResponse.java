@@ -20,6 +20,7 @@ public record SubmissionResponse(
 		UUID submitterPublicUuid,
 		String textBody,
 		UUID attachmentPublicUuid,
+		SubmissionAttachmentResponse attachment,
 		SubmissionStatus status,
 		Integer grade,
 		String feedback,

@@ -1,7 +1,10 @@
 package com.edushift.modules.schedule.daytemplate.service.impl;
 
 import com.edushift.modules.academic.period.repository.AcademicPeriodRepository;
+import com.edushift.modules.academic.section.entity.Section;
 import com.edushift.modules.schedule.daytemplate.dto.TeacherWorkloadItem;
+import com.edushift.modules.schedule.daytemplate.entity.DayScheduleTemplate;
+import com.edushift.modules.schedule.daytemplate.service.DayScheduleTemplateService;
 import com.edushift.modules.schedule.daytemplate.service.TeacherWorkloadService;
 import com.edushift.modules.schedule.timeslot.entity.TimeSlot;
 import com.edushift.modules.schedule.timeslot.repository.TimeSlotRepository;
@@ -27,9 +30,12 @@ import org.springframework.transaction.annotation.Transactional;
 @RequiredArgsConstructor
 public class TeacherWorkloadServiceImpl implements TeacherWorkloadService {
 
+	private static final int DEFAULT_PERIOD_MINUTES = 45;
+
 	private final TimeSlotRepository timeSlotRepository;
 	private final AcademicPeriodRepository periodRepository;
 	private final TeacherRepository teacherRepository;
+	private final DayScheduleTemplateService dayScheduleTemplateService;
 
 	@Override
 	@Transactional(readOnly = true)
@@ -56,7 +62,7 @@ public class TeacherWorkloadServiceImpl implements TeacherWorkloadService {
 				teacher.getPublicUuid(),
 				teacher.getFirstName(),
 				teacher.getLastName(),
-				0, 0, 0, 0);
+				0, 0.0, 0, 0, 0);
 	}
 
 	private void requirePeriod(UUID periodUuid) {
@@ -67,7 +73,7 @@ public class TeacherWorkloadServiceImpl implements TeacherWorkloadService {
 				.orElseThrow(() -> new ResourceNotFoundException("AcademicPeriod", periodUuid));
 	}
 
-	private static List<TeacherWorkloadItem> aggregate(List<TimeSlot> slots) {
+	private List<TeacherWorkloadItem> aggregate(List<TimeSlot> slots) {
 		Map<UUID, Acc> byTeacher = new LinkedHashMap<>();
 		for (TimeSlot slot : slots) {
 			TeacherAssignment assignment = slot.getTeacherAssignment();
@@ -77,8 +83,13 @@ public class TeacherWorkloadServiceImpl implements TeacherWorkloadService {
 			Teacher teacher = assignment.getTeacher();
 			Acc acc = byTeacher.computeIfAbsent(teacher.getPublicUuid(),
 					id -> new Acc(teacher));
-			acc.minutes += minutesBetween(slot.getStartTime(), slot.getEndTime());
+			int minutes = minutesBetween(slot.getStartTime(), slot.getEndTime());
+			acc.minutes += minutes;
 			acc.slotCount++;
+			int periodMinutes = resolvePeriodMinutes(assignment.getSection());
+			if (periodMinutes > 0 && minutes > 0) {
+				acc.academicHours += (double) minutes / (double) periodMinutes;
+			}
 			if (assignment.getSection() != null) {
 				acc.sectionUuids.add(assignment.getSection().getPublicUuid());
 			}
@@ -93,11 +104,26 @@ public class TeacherWorkloadServiceImpl implements TeacherWorkloadService {
 					acc.teacher.getFirstName(),
 					acc.teacher.getLastName(),
 					acc.minutes,
+					round1(acc.academicHours),
 					acc.slotCount,
 					acc.sectionUuids.size(),
 					acc.courseUuids.size()));
 		}
 		return result;
+	}
+
+	private int resolvePeriodMinutes(Section section) {
+		if (section == null) {
+			return DEFAULT_PERIOD_MINUTES;
+		}
+		return dayScheduleTemplateService.resolveTemplateForSection(section)
+				.map(DayScheduleTemplate::getPeriodMinutes)
+				.filter(m -> m != null && m >= 15)
+				.orElse(DEFAULT_PERIOD_MINUTES);
+	}
+
+	private static double round1(double value) {
+		return Math.round(value * 10.0d) / 10.0d;
 	}
 
 	private static int minutesBetween(LocalTime start, LocalTime end) {
@@ -110,6 +136,7 @@ public class TeacherWorkloadServiceImpl implements TeacherWorkloadService {
 	private static final class Acc {
 		final Teacher teacher;
 		int minutes;
+		double academicHours;
 		int slotCount;
 		final Set<UUID> sectionUuids = new HashSet<>();
 		final Set<UUID> courseUuids = new HashSet<>();

@@ -1,5 +1,6 @@
 package com.edushift.modules.users.dto;
 
+import com.edushift.modules.auth.entity.EmailSource;
 import com.edushift.modules.auth.entity.UserStatus;
 import java.time.Instant;
 import java.util.Set;
@@ -27,6 +28,7 @@ public record UserDetailResponse(
 		UserStatus status,
 		boolean emailVerified,
 		boolean mfaEnabled,
+		EmailSource emailSource,
 		Set<String> roles,
 		Instant lastLoginAt,
 		Instant createdAt,

@@ -71,7 +71,9 @@ class AuthDtoTest {
     void userResponseAccessors() {
         UUID id = UUID.randomUUID();
         var resp = new UserResponse(id, "Ana", "Diaz", "Ana Diaz", "ana@acme.test",
-                "+51 999", null, UserStatus.ACTIVE, true, false, java.util.Set.of("TENANT_ADMIN"),
+                "+51 999", null, UserStatus.ACTIVE, true,
+                com.edushift.modules.auth.entity.EmailSource.REAL, false, false,
+                java.util.Set.of("TENANT_ADMIN"),
                 java.util.Set.of("LMS_USERS_MANAGE"), null, null, null);
         assertThat(resp.publicUuid()).isEqualTo(id);
         assertThat(resp.fullName()).isEqualTo("Ana Diaz");

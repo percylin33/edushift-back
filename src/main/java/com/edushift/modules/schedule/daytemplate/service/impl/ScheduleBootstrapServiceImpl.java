@@ -2,9 +2,8 @@ package com.edushift.modules.schedule.daytemplate.service.impl;
 
 import com.edushift.modules.academic.year.entity.AcademicYear;
 import com.edushift.modules.academic.year.repository.AcademicYearRepository;
-import com.edushift.modules.files.storage.StoragePutRequest;
-import com.edushift.modules.files.storage.StorageService;
-import com.edushift.modules.files.storage.StoredObject;
+import com.edushift.modules.files.entity.FileObject;
+import com.edushift.modules.files.service.FileObjectService;
 import com.edushift.modules.schedule.daytemplate.dto.CommitBootstrapRequest;
 import com.edushift.modules.schedule.daytemplate.dto.DayTemplateResponse;
 import com.edushift.modules.schedule.daytemplate.dto.ScheduleSourceDocumentResponse;
@@ -19,7 +18,6 @@ import com.edushift.shared.exception.BadRequestException;
 import com.edushift.shared.exception.ResourceNotFoundException;
 import com.edushift.shared.multitenancy.TenantContext;
 import java.io.BufferedReader;
-import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
@@ -46,7 +44,7 @@ public class ScheduleBootstrapServiceImpl implements ScheduleBootstrapService {
 	private final ScheduleSourceDocumentRepository documentRepository;
 	private final ScheduleSourceDocumentMapper documentMapper;
 	private final DayScheduleTemplateService templateService;
-	private final StorageService storageService;
+	private final FileObjectService fileObjectService;
 
 	@Override
 	@Transactional
@@ -61,38 +59,25 @@ public class ScheduleBootstrapServiceImpl implements ScheduleBootstrapService {
 				? file.getOriginalFilename() : "upload.bin";
 		String contentType = file.getContentType();
 		ScheduleSourceKind kind = detectKind(originalName, contentType);
-		UUID publicUuid = UUID.randomUUID();
 		UUID tenantId = TenantContext.currentRequired();
 
-		String storageKey;
-		long sizeBytes = file.getSize();
-		try (InputStream in = file.getInputStream()) {
-			String ext = extensionOf(originalName);
-			StoredObject stored = storageService.put(new StoragePutRequest(
-					tenantId, MODULE, publicUuid, originalName, contentType, in, sizeBytes));
-			storageKey = stored.remoteKey();
-			sizeBytes = stored.sizeBytes();
-		} catch (Exception ex) {
-			log.warn("[schedule.bootstrap] storage put failed, using synthetic key: {}",
-					ex.getMessage());
-			storageKey = "schedule-bootstrap/%s/%s/%s".formatted(
-					tenantId, publicUuid, sanitizeFilename(originalName));
-		}
+		FileObject stored = fileObjectService.store(tenantId, MODULE, file);
+		fileObjectService.acquireReference(stored.getPublicUuid());
 
 		ScheduleSourceDocument doc = new ScheduleSourceDocument();
-		doc.setPublicUuid(publicUuid);
+		doc.setPublicUuid(stored.getPublicUuid());
 		doc.setAcademicYear(year);
 		doc.setKind(kind);
 		doc.setOriginalFilename(originalName);
 		doc.setContentType(contentType);
-		doc.setStorageKey(storageKey);
-		doc.setFileSizeBytes(sizeBytes);
+		doc.setStorageKey(stored.getRemoteKey());
+		doc.setFileSizeBytes(stored.getSizeBytes());
 
 		applyParse(doc, file, kind);
 
 		ScheduleSourceDocument saved = documentRepository.saveAndFlush(doc);
-		log.info("[schedule.bootstrap] uploaded -- uuid={} kind={} status={}",
-				saved.getPublicUuid(), kind, saved.getParseStatus());
+		log.info("[schedule.bootstrap] uploaded -- uuid={} kind={} status={} key={}",
+				saved.getPublicUuid(), kind, saved.getParseStatus(), saved.getStorageKey());
 		return documentMapper.toResponse(saved);
 	}
 
@@ -214,21 +199,6 @@ public class ScheduleBootstrapServiceImpl implements ScheduleBootstrapService {
 		}
 		throw new BadRequestException("UNSUPPORTED_SCHEDULE_FILE",
 				"Supported types: csv, xlsx, pdf, png/jpg/webp");
-	}
-
-	private static String extensionOf(String filename) {
-		if (filename == null) {
-			return "";
-		}
-		int idx = filename.lastIndexOf('.');
-		if (idx < 0 || idx == filename.length() - 1) {
-			return "";
-		}
-		return filename.substring(idx + 1);
-	}
-
-	private static String sanitizeFilename(String name) {
-		return name.replaceAll("[^A-Za-z0-9._-]", "_");
 	}
 
 	private static String trimError(String message) {

@@ -2,23 +2,31 @@ package com.edushift.modules.me.controller;
 
 import com.edushift.modules.me.dto.MeAttendanceRecordResponse;
 import com.edushift.modules.me.dto.MeGradeResponse;
+import com.edushift.modules.me.dto.MeGradesSummaryResponse;
 import com.edushift.modules.me.dto.MeProfileResponse;
 import com.edushift.modules.me.dto.MeQrResponse;
 import com.edushift.modules.me.dto.MeSectionDetailResponse;
+import com.edushift.modules.me.dto.MeSectionPeriodResponse;
 import com.edushift.modules.me.dto.MeSectionResponse;
 import com.edushift.modules.me.service.MeAcademicService;
 import com.edushift.modules.me.service.MeSelfService;
 import com.edushift.modules.me.service.MeService;
 import com.edushift.modules.payments.dto.InvoiceResponse;
+import com.edushift.modules.reports.entity.ReportJob;
 import com.edushift.modules.schedule.timeslot.dto.ScheduleSlotItem;
 import com.edushift.modules.schedule.timeslot.dto.ScheduleWeekView;
 import com.edushift.shared.api.ApiResponse;
 import com.edushift.shared.security.LmsAuthorities;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
+import org.springframework.format.annotation.DateTimeFormat;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -75,14 +83,26 @@ public class MeController {
      */
     @GetMapping("/sections")
     @PreAuthorize("hasAuthority('" + LmsAuthorities.ME_READ + "')")
-    @Operation(summary = "List the caller's enrolled sections",
-            description = "Returns one row per ACTIVE enrollment. Each row "
-                    + "carries the section header (grade, level, year, "
-                    + "teacher, course) and the material / task / quiz "
-                    + "counts so the FE renders the 'Mis cursos' grid "
-                    + "without a second request per section.")
-    public ApiResponse<List<MeSectionResponse>> mySections() {
-        return ApiResponse.ok(meAcademicService.listMySections());
+    @Operation(summary = "List the caller's enrolled course cards",
+            description = "Returns one row per ACTIVE teacher assignment in the "
+                    + "caller's enrolled sections for the selected academic period. "
+                    + "When period is omitted, the current period is used.")
+    public ApiResponse<List<MeSectionResponse>> mySections(
+            @RequestParam(required = false) UUID period) {
+        return ApiResponse.ok(meAcademicService.listMySections(period));
+    }
+
+    /**
+     * Academic periods available in the caller's enrolled sections (for the
+     * period picker on "Mis cursos").
+     */
+    @GetMapping("/sections/periods")
+    @PreAuthorize("hasAuthority('" + LmsAuthorities.ME_READ + "')")
+    @Operation(summary = "List academic periods for the caller's courses",
+            description = "Distinct periods where the student has at least one "
+                    + "active teacher assignment. The current period is flagged.")
+    public ApiResponse<List<MeSectionPeriodResponse>> mySectionPeriods() {
+        return ApiResponse.ok(meAcademicService.listMySectionPeriods());
     }
 
     /**
@@ -90,17 +110,18 @@ public class MeController {
      * section header + the materials / tasks / quizzes visible to the
      * caller. Returns 404 when the caller has no ACTIVE enrollment on
      * the section (anti-enumeration: same shape as a non-existent
-     * section).
+     * section). Optional {@code assignment} filters to one materia.
      */
     @GetMapping("/sections/{sectionPublicUuid}")
     @PreAuthorize("hasAuthority('" + LmsAuthorities.ME_READ + "')")
-    @Operation(summary = "Get the caller's section detail",
-            description = "Identity derived from the JWT. Returns the section "
-                    + "header + the materials + the tasks + the quizzes the "
-                    + "caller is allowed to see as the ACTIVE-enrolled student.")
+    @Operation(summary = "Get the caller's section/course detail",
+            description = "Identity derived from the JWT. Optional assignment "
+                    + "query scopes content to one TeacherAssignment. Only "
+                    + "PUBLISHED tasks/quizzes are returned.")
     public ApiResponse<MeSectionDetailResponse> mySection(
-            @PathVariable UUID sectionPublicUuid) {
-        return ApiResponse.ok(meAcademicService.getMySection(sectionPublicUuid));
+            @PathVariable UUID sectionPublicUuid,
+            @RequestParam(required = false) UUID assignment) {
+        return ApiResponse.ok(meAcademicService.getMySection(sectionPublicUuid, assignment));
     }
 
     /**
@@ -119,11 +140,54 @@ public class MeController {
         return ApiResponse.ok(meAcademicService.listMyGrades());
     }
 
+    /**
+     * Grades grouped by course for one academic period, with the same
+     * averages the teacher sees in the grade book.
+     */
+    @GetMapping("/grades/summary")
+    @PreAuthorize("hasAuthority('" + LmsAuthorities.ME_READ + "')")
+    @Operation(summary = "Summarize the caller's grades for a period",
+            description = "Identity derived from the JWT. Optional period "
+                    + "query selects an academic period; omitted means the "
+                    + "current period. Returns course averages and the caller's "
+                    + "own grade rows. LMS task grades are listed and do not "
+                    + "change the official average.")
+    public ApiResponse<MeGradesSummaryResponse> myGradesSummary(
+            @RequestParam(required = false) UUID period) {
+        return ApiResponse.ok(meAcademicService.summarizeMyGrades(period));
+    }
+
     @GetMapping("/attendance")
     @PreAuthorize("hasAuthority('" + LmsAuthorities.ME_ATTENDANCE_READ + "')")
     @Operation(summary = "List the caller's attendance records")
-    public ApiResponse<List<MeAttendanceRecordResponse>> myAttendance() {
-        return ApiResponse.ok(meSelfService.listMyAttendance());
+    public ApiResponse<List<MeAttendanceRecordResponse>> myAttendance(
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to) {
+        return ApiResponse.ok(meSelfService.listMyAttendance(from, to));
+    }
+
+    @GetMapping("/attendance/export")
+    @PreAuthorize("hasAuthority('" + LmsAuthorities.ME_ATTENDANCE_READ + "')")
+    @Operation(summary = "Download the caller's attendance as PDF/CSV/XLSX")
+    public ResponseEntity<byte[]> exportMyAttendance(
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
+            @RequestParam(defaultValue = "PDF") ReportJob.Format format) throws java.io.IOException {
+        byte[] body = meSelfService.exportMyAttendance(from, to, format);
+        String ext = format.name().toLowerCase();
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=mi-asistencia." + ext)
+                .contentType(contentTypeFor(format))
+                .body(body);
+    }
+
+    private static MediaType contentTypeFor(ReportJob.Format format) {
+        return switch (format) {
+            case PDF -> MediaType.APPLICATION_PDF;
+            case XLSX -> MediaType.parseMediaType(
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+            case CSV -> MediaType.parseMediaType("text/csv");
+        };
     }
 
     @GetMapping("/qr")

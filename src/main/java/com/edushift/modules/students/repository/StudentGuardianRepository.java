@@ -85,4 +85,19 @@ public interface StudentGuardianRepository extends JpaRepository<StudentGuardian
 			""")
 	List<StudentGuardian> findActiveByStudentIdsWithLinkedGuardian(
 			@Param("studentIds") Collection<UUID> studentIds);
+
+	@Query("""
+			select sg from StudentGuardian sg
+			join fetch sg.student s
+			join fetch sg.guardian g
+			where sg.guardian.id = :guardianId
+			""")
+	List<StudentGuardian> findActiveByGuardianId(@Param("guardianId") UUID guardianId);
+
+	@Query("""
+			select sg from StudentGuardian sg
+			join fetch sg.student s
+			join fetch sg.guardian g
+			""")
+	List<StudentGuardian> findAllActiveWithStudentAndGuardian();
 }

@@ -2,6 +2,7 @@ package com.edushift.config;
 
 import com.edushift.modules.admin.impersonation.ImpersonationFilter;
 import com.edushift.modules.auth.security.JwtAuthenticationFilter;
+import com.edushift.modules.payments.security.PaymentLmsAccessFilter;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -154,10 +155,6 @@ public class SecurityConfig {
 			"/v1/files/public/*"
 	};
 
-	private final JwtAuthenticationFilter jwtAuthenticationFilter;
-
-	private final ImpersonationFilter impersonationFilter;
-
 	private final HandlerExceptionResolver handlerExceptionResolver;
 
 	private final CorsConfigurationSource corsConfigurationSource;
@@ -177,18 +174,25 @@ public class SecurityConfig {
 	 * filter and the security chain's pre-flight handling.
 	 */
 	public SecurityConfig(
-			JwtAuthenticationFilter jwtAuthenticationFilter,
-			ImpersonationFilter impersonationFilter,
 			@Qualifier("handlerExceptionResolver") HandlerExceptionResolver handlerExceptionResolver,
 			CorsConfigurationSource corsConfigurationSource) {
-		this.jwtAuthenticationFilter = jwtAuthenticationFilter;
-		this.impersonationFilter = impersonationFilter;
 		this.handlerExceptionResolver = handlerExceptionResolver;
 		this.corsConfigurationSource = corsConfigurationSource;
 	}
 
 	@Bean
-	SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+	SecurityFilterChain securityFilterChain(
+			HttpSecurity http,
+			com.edushift.modules.auth.service.JwtService jwtService,
+			com.edushift.shared.security.LmsRoleAuthorityMapper lmsRoleAuthorityMapper,
+			com.edushift.modules.tenants.service.TenantStatusCache tenantStatusCache,
+			com.edushift.modules.auth.repository.UserRepository userRepository,
+			ImpersonationFilter impersonationFilter,
+			PaymentLmsAccessFilter paymentLmsAccessFilter,
+			RateLimitFilter rateLimitFilter) throws Exception {
+
+		JwtAuthenticationFilter jwtAuthenticationFilter = new JwtAuthenticationFilter(
+				jwtService, lmsRoleAuthorityMapper, tenantStatusCache, userRepository);
 		http
 				.csrf(csrf -> csrf.disable())
 				.cors(cors -> cors.configurationSource(corsConfigurationSource))
@@ -267,8 +271,14 @@ public class SecurityConfig {
 								response.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
 							}
 						}))
+				// Spring Security 6.5 only accepts an anchor class that already has an
+				// order. UsernamePasswordAuthenticationFilter is built-in; the custom
+				// filters get an order only after they are added. Register JWT first,
+				// then place the others relative to it.
 				.addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)
-				.addFilterAfter(impersonationFilter, JwtAuthenticationFilter.class);
+				.addFilterBefore(rateLimitFilter, JwtAuthenticationFilter.class)
+				.addFilterAfter(impersonationFilter, JwtAuthenticationFilter.class)
+				.addFilterAfter(paymentLmsAccessFilter, ImpersonationFilter.class);
 
 		return http.build();
 	}

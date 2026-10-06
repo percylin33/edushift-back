@@ -1,12 +1,18 @@
 package com.edushift.modules.notifications.job;
 
+import com.edushift.modules.notifications.email.EmailBrandingContext;
+import com.edushift.modules.notifications.email.EmailBrandingResolver;
 import com.edushift.modules.notifications.entity.EmailOutbox;
 import com.edushift.modules.notifications.entity.Notification;
 import com.edushift.modules.notifications.repository.EmailOutboxRepository;
 import com.edushift.modules.notifications.repository.NotificationRepository;
 import com.edushift.modules.notifications.service.EmailSender;
 import java.time.Instant;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -47,6 +53,7 @@ public class EmailOutboxProcessor {
     private final EmailOutboxRepository outboxRepo;
     private final NotificationRepository notificationRepo;
     private final EmailSender emailSender;
+    private final EmailBrandingResolver brandingResolver;
 
     @Value("${app.notifications.email.batch-size:50}")
     private int batchSize;
@@ -59,23 +66,64 @@ public class EmailOutboxProcessor {
         if (batch.isEmpty()) return;
 
         log.info("[EmailOutbox] processing batch of {} emails", batch.size());
+        Map<UUID, Notification> notifications = loadNotifications(batch);
+        Map<UUID, EmailBrandingContext> brandingByTenant = loadBranding(batch);
         for (EmailOutbox row : batch) {
-            processOne(row.getId());
+            processOne(row.getId(), notifications, brandingByTenant);
         }
     }
 
+    /**
+     * One transaction per row so a failure does not roll back the rest
+     * of the batch. The notification and branding maps were loaded once
+     * for the whole batch.
+     */
     @Transactional(propagation = Propagation.REQUIRES_NEW)
-    public void processOne(java.util.UUID id) {
-        outboxRepo.findById(id).ifPresent(this::attemptSend);
+    public void processOne(
+            UUID id,
+            Map<UUID, Notification> notifications,
+            Map<UUID, EmailBrandingContext> brandingByTenant) {
+        outboxRepo.findById(id).ifPresent(row -> attemptSend(row, notifications, brandingByTenant));
     }
 
-    private void attemptSend(EmailOutbox row) {
-        // SEC-9.1: fetch the originating notification to build the
-        // per-recipient unsubscribe token. If the row has no
-        // notification (orphaned outbox), we still send — just no
-        // unsubscribe link.
-        Notification n = row.getNotificationId() == null ? null
-                : notificationRepo.findById(row.getNotificationId()).orElse(null);
+    private Map<UUID, Notification> loadNotifications(List<EmailOutbox> batch) {
+        List<UUID> ids = batch.stream()
+                .map(EmailOutbox::getNotificationId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .toList();
+        if (ids.isEmpty()) {
+            return Map.of();
+        }
+        Map<UUID, Notification> byId = new HashMap<>();
+        for (Notification notification : notificationRepo.findAllById(ids)) {
+            byId.put(notification.getId(), notification);
+        }
+        return byId;
+    }
+
+    private Map<UUID, EmailBrandingContext> loadBranding(List<EmailOutbox> batch) {
+        Map<UUID, EmailBrandingContext> branding = new HashMap<>();
+        for (EmailOutbox row : batch) {
+            UUID tenantId = row.getTenantId();
+            if (tenantId != null && !branding.containsKey(tenantId)) {
+                branding.put(tenantId, brandingResolver.forTenantId(tenantId));
+            }
+        }
+        return branding;
+    }
+
+    private void attemptSend(
+            EmailOutbox row,
+            Map<UUID, Notification> notifications,
+            Map<UUID, EmailBrandingContext> brandingByTenant) {
+        EmailBrandingContext branding = brandingByTenant.get(row.getTenantId());
+        if (log.isDebugEnabled() && branding != null) {
+            log.debug("[EmailOutbox] using branding snapshot tenant={}", branding.nameOrDefault());
+        }
+        Notification n = row.getNotificationId() == null
+                ? null
+                : notifications.get(row.getNotificationId());
         try {
             if (n == null) {
                 emailSender.send(row.getToEmail(), row.getSubject(), row.getBodyHtml());

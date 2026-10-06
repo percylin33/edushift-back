@@ -186,7 +186,8 @@ public class TimeSlotMapper {
 	private static ScheduleSlotItem.CourseRef toScheduleCourseRef(Course c) {
 		if (c == null) return null;
 		return new ScheduleSlotItem.CourseRef(
-				c.getPublicUuid(), c.getCode(), c.getName());
+				c.getPublicUuid(), c.getCode(), c.getName(),
+				c.getColor(), c.getIcon());
 	}
 
 	private static ScheduleSlotItem.SectionRef toScheduleSectionRef(Section s) {

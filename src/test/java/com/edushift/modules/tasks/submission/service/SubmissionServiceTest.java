@@ -37,7 +37,7 @@ class SubmissionServiceTest {
 
         // Reference for compile-time type assertions
         SubmissionSummary ss = new SubmissionSummary(
-                UUID.randomUUID(), UUID.randomUUID(), null, null, false, null);
+                UUID.randomUUID(), UUID.randomUUID(), "Estudiante", null, null, false, null, null);
         assertThat(ss.hasAttachment()).isFalse();
     }
 }

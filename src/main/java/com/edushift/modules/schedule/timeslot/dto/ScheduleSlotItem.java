@@ -45,7 +45,11 @@ public record ScheduleSlotItem(
 	public record CourseRef(
 			UUID publicUuid,
 			String code,
-			String name
+			String name,
+			/** Optional hex {@code #RRGGBB}; null → FE resolves by code. */
+			String color,
+			/** Optional Lucide icon key; null → FE resolves by code. */
+			String icon
 	) {
 	}
 

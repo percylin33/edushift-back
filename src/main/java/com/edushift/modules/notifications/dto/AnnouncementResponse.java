@@ -38,9 +38,15 @@ public record AnnouncementResponse(
         boolean pinned,
         Instant publishAt,
         Instant publishedAt,
-        Instant createdAt
+        Instant createdAt,
+        boolean includeGuardians,
+        Boolean read
 ) {
     public static AnnouncementResponse from(Announcement a) {
+        return from(a, null);
+    }
+
+    public static AnnouncementResponse from(Announcement a, Boolean read) {
         return new AnnouncementResponse(
                 a.getPublicUuid(),
                 a.getAuthorUserId(),
@@ -52,7 +58,9 @@ public record AnnouncementResponse(
                 a.isPinned(),
                 a.getPublishAt(),
                 a.getPublishedAt(),
-                a.getCreatedAt()
+                a.getCreatedAt(),
+                a.isIncludeGuardians(),
+                read
         );
     }
 }

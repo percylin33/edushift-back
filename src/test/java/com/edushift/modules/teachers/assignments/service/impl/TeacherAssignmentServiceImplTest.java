@@ -409,6 +409,31 @@ class TeacherAssignmentServiceImplTest {
 	}
 
 	@Test
+	@DisplayName("listFiltered — admin with all null filters hits findAllFiltered")
+	void listFilteredAdminAllNull() {
+		when(assignmentRepository.findAllFiltered(null, null, null, null, true))
+				.thenReturn(java.util.List.of(newAssignment()));
+
+		assertThat(service.listFiltered(null, null, null, null, true)).hasSize(1);
+		verify(assignmentRepository).findAllFiltered(null, null, null, null, true);
+	}
+
+	@Test
+	@DisplayName("listFiltered — admin with section+period loads anchors")
+	void listFilteredAdminWithFilters() {
+		when(sectionRepository.findByPublicUuid(section.getPublicUuid()))
+				.thenReturn(Optional.of(section));
+		when(periodRepository.findByPublicUuid(period.getPublicUuid()))
+				.thenReturn(Optional.of(period));
+		when(assignmentRepository.findAllFiltered(null, section, null, period, true))
+				.thenReturn(java.util.List.of(newAssignment()));
+
+		assertThat(service.listFiltered(
+				null, section.getPublicUuid(), null, period.getPublicUuid(), true))
+				.hasSize(1);
+	}
+
+	@Test
 	@DisplayName("listForSection — explicit period passed through to repo")
 	void listForSectionWithPeriod() {
 		when(sectionRepository.findByPublicUuid(section.getPublicUuid()))

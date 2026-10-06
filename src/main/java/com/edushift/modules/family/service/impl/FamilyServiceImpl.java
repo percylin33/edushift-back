@@ -2,6 +2,7 @@ package com.edushift.modules.family.service.impl;
 
 import com.edushift.modules.attendance.entity.AttendanceRecord;
 import com.edushift.modules.attendance.repository.AttendanceRecordRepository;
+import com.edushift.modules.attendance.service.AttendanceExportService;
 import com.edushift.modules.evaluations.graderecord.entity.GradeRecord;
 import com.edushift.modules.evaluations.graderecord.repository.GradeRecordRepository;
 import com.edushift.modules.family.dto.FamilyActivityItemDto;
@@ -27,8 +28,15 @@ import com.edushift.modules.students.service.StudentGuardianService;
 import com.edushift.modules.tasks.entity.Task;
 import com.edushift.modules.tasks.entity.TaskStatus;
 import com.edushift.modules.tasks.repository.TaskRepository;
+import com.edushift.modules.tasks.submission.entity.Submission;
+import com.edushift.modules.tasks.submission.entity.SubmissionStatus;
+import com.edushift.modules.tasks.submission.repository.SubmissionRepository;
 import java.math.BigDecimal;
+import com.edushift.modules.reports.entity.ReportJob;
+import java.io.IOException;
 import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -50,7 +58,9 @@ public class FamilyServiceImpl implements FamilyService {
 	private final StudentGuardianRepository studentGuardianRepository;
 	private final StudentGuardianService studentGuardianService;
 	private final AttendanceRecordRepository attendanceRecordRepository;
+	private final AttendanceExportService attendanceExportService;
 	private final GradeRecordRepository gradeRecordRepository;
+	private final SubmissionRepository submissionRepository;
 	private final StudentEnrollmentRepository enrollmentRepository;
 	private final TaskRepository taskRepository;
 	private final QuizRepository quizRepository;
@@ -72,10 +82,18 @@ public class FamilyServiceImpl implements FamilyService {
 	@Override
 	@Transactional(readOnly = true)
 	public Page<FamilyAttendanceRecordDto> getChildAttendance(
-			UUID studentPublicUuid, UUID parentUserPublicUuid, Pageable pageable) {
+			UUID studentPublicUuid,
+			UUID parentUserPublicUuid,
+			LocalDate from,
+			LocalDate to,
+			Pageable pageable) {
 		Student student = loadLinkedStudent(studentPublicUuid, parentUserPublicUuid);
+		Instant fromInstant = from != null
+				? from.atStartOfDay(ZoneOffset.UTC).toInstant() : null;
+		Instant toInstant = to != null
+				? to.plusDays(1).atStartOfDay(ZoneOffset.UTC).toInstant() : null;
 		List<FamilyAttendanceRecordDto> items = attendanceRecordRepository
-				.findByStudentInRange(student, null, null)
+				.findByStudentInRange(student, fromInstant, toInstant)
 				.stream()
 				.map(this::toFamilyAttendanceRecord)
 				.toList();
@@ -84,11 +102,43 @@ public class FamilyServiceImpl implements FamilyService {
 
 	@Override
 	@Transactional(readOnly = true)
+	public byte[] exportChildAttendance(
+			UUID studentPublicUuid,
+			UUID parentUserPublicUuid,
+			LocalDate from,
+			LocalDate to,
+			ReportJob.Format format) throws IOException {
+		Student student = loadLinkedStudent(studentPublicUuid, parentUserPublicUuid);
+		Instant fromInstant = from != null
+				? from.atStartOfDay(ZoneOffset.UTC).toInstant() : null;
+		Instant toInstant = to != null
+				? to.plusDays(1).atStartOfDay(ZoneOffset.UTC).toInstant() : null;
+		List<AttendanceRecord> records =
+				attendanceRecordRepository.findByStudentInRange(student, fromInstant, toInstant);
+		return attendanceExportService.exportRecords(
+				records, format, "Asistencia — " + student.fullName());
+	}
+
+	@Override
+	@Transactional(readOnly = true)
 	public List<FamilyGradeItemDto> getChildGrades(UUID studentPublicUuid, UUID parentUserPublicUuid) {
-		loadLinkedStudent(studentPublicUuid, parentUserPublicUuid);
-		return gradeRecordRepository.findAllByStudentPublicUuid(studentPublicUuid).stream()
-				.map(this::toFamilyGradeItem)
-				.toList();
+		Student student = loadLinkedStudent(studentPublicUuid, parentUserPublicUuid);
+		List<FamilyGradeItemDto> items = new ArrayList<>();
+		for (GradeRecord record : gradeRecordRepository.findAllByStudentPublicUuid(studentPublicUuid)) {
+			items.add(toFamilyGradeItem(record));
+		}
+		if (student.getUserId() != null) {
+			for (Submission submission : submissionRepository.findAllByStudentUserIdAndStatus(
+					student.getUserId(), SubmissionStatus.GRADED)) {
+				FamilyGradeItemDto mapped = toFamilyGradeItem(submission);
+				if (mapped != null) {
+					items.add(mapped);
+				}
+			}
+		}
+		items.sort(Comparator.comparing(
+				FamilyGradeItemDto::recordedAt, Comparator.nullsLast(Comparator.reverseOrder())));
+		return items;
 	}
 
 	@Override
@@ -200,6 +250,33 @@ public class FamilyServiceImpl implements FamilyService {
 				record.getRecordedAt());
 	}
 
+	private static FamilyGradeItemDto toFamilyGradeItem(Submission submission) {
+		Task task = submission.getTask();
+		if (task == null) {
+			return null;
+		}
+		var assignment = task.getTeacherAssignment();
+		String sectionName = task.getSection() != null ? task.getSection().getName() : null;
+		String courseName = assignment != null && assignment.getCourse() != null
+				? assignment.getCourse().getName() : null;
+		BigDecimal score = submission.getGrade() == null
+				? null : BigDecimal.valueOf(submission.getGrade().intValue());
+		Instant recordedAt = submission.getGradedAt() != null
+				? submission.getGradedAt() : submission.getUpdatedAt();
+		return new FamilyGradeItemDto(
+				submission.getPublicUuid(),
+				task.getPublicUuid(),
+				task.getTitle(),
+				sectionName,
+				courseName,
+				score,
+				BigDecimal.valueOf(task.getMaxScore()),
+				null,
+				submission.getFeedback(),
+				task.getDueAt(),
+				recordedAt);
+	}
+
 	private FamilyPaymentItemDto toFamilyPayment(Invoice invoice) {
 		return new FamilyPaymentItemDto(
 				invoice.getPublicUuid(),
@@ -237,7 +314,7 @@ public class FamilyServiceImpl implements FamilyService {
 		if (record.getEvaluation() == null) return null;
 		return switch (record.getEvaluation().getScale()) {
 			case SCORE_0_20 -> BigDecimal.valueOf(20);
-			case LITERAL_AD, LITERAL_NA, LITERAL_A_B_C_D -> null;
+			case LITERAL_AD, LITERAL_NA, LITERAL_A_B_C_D, LITERAL_CNEB -> null;
 		};
 	}
 

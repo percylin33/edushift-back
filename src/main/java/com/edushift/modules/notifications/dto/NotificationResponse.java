@@ -45,7 +45,7 @@ public record NotificationResponse(
         );
     }
 
-    static Map<String, Object> parsePayload(String json) {
+    public static Map<String, Object> parsePayload(String json) {
         if (json == null || json.isBlank()) {
             return Map.of();
         }

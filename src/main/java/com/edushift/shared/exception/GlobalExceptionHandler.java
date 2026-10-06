@@ -335,6 +335,13 @@ public class GlobalExceptionHandler {
 				|| lower.contains("apikey")
 				|| lower.contains("api_key")
 				|| lower.contains("credential")
+				|| lower.contains("authorization")
+				|| lower.contains("cookie")
+				|| lower.contains("session")
+				|| lower.contains("csrf")
+				|| lower.contains("xsrf")
+				|| lower.contains("refresh")
+				|| lower.contains("access")
 				|| lower.endsWith("pwd");
 	}
 

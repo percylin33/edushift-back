@@ -20,6 +20,8 @@ import com.edushift.modules.tasks.submission.mapper.SubmissionMapper;
 import com.edushift.modules.tasks.submission.repository.SubmissionRepository;
 import com.edushift.modules.tasks.submission.repository.SubmissionRevisionRepository;
 import com.edushift.modules.tasks.submission.service.SubmissionService;
+import com.edushift.modules.students.entity.Student;
+import com.edushift.modules.students.repository.StudentRepository;
 import com.edushift.modules.students.service.StudentGuardianService;
 import com.edushift.shared.multitenancy.TenantContext;
 import com.edushift.shared.security.CurrentUserProvider;
@@ -76,6 +78,7 @@ public class SubmissionServiceImpl implements SubmissionService {
 	private final SubmissionMapper submissionMapper;
 	private final ApplicationEventPublisher eventPublisher; // Sprint 9 / BE-9.3
 	private final StudentGuardianService studentGuardianService;
+	private final StudentRepository studentRepository;
 	private final CurrentUserProvider currentUserProvider;
 
 	@Override
@@ -83,6 +86,11 @@ public class SubmissionServiceImpl implements SubmissionService {
 	public SubmissionResponse submit(UUID taskPublicUuid, CreateSubmissionRequest request,
 			UUID submitterUserId) {
 		Task task = requireTask(taskPublicUuid);
+		if (task.getStatus() != com.edushift.modules.tasks.entity.TaskStatus.PUBLISHED) {
+			throw new com.edushift.shared.exception.BadRequestException(
+					"TASK_NOT_PUBLISHED",
+					"Only PUBLISHED tasks accept submissions");
+		}
 		validatePayloadNotEmpty(request);
 		validateNotPastDue(task);
 		if (isParent() && request.studentPublicUuid() != null) {
@@ -91,8 +99,10 @@ public class SubmissionServiceImpl implements SubmissionService {
 					request.studentPublicUuid());
 		}
 
+		UUID studentUserPublicUuid = resolveStudentUserPublicUuid(request.studentPublicUuid());
+
 		Optional<Submission> existing = submissionRepository.findByTaskAndStudentUserId(
-				task, request.studentPublicUuid());
+				task, studentUserPublicUuid);
 		boolean isReSubmit = existing.isPresent();
 
 		if (isReSubmit && !task.isAllowResubmission()) {
@@ -113,7 +123,7 @@ public class SubmissionServiceImpl implements SubmissionService {
 		}
 
 		entity.setTask(task);
-		entity.setStudentUserId(request.studentPublicUuid());
+		entity.setStudentUserId(studentUserPublicUuid);
 		entity.setSubmitterUserId(submitterUserId);
 		entity.setTextBody(request.textBody());
 		entity.setAttachmentPublicUuid(request.attachmentPublicUuid());
@@ -158,8 +168,9 @@ public class SubmissionServiceImpl implements SubmissionService {
 	@Transactional(readOnly = true)
 	public SubmissionResponse getMine(UUID taskPublicUuid, UUID studentPublicUuid) {
 		Task task = requireTask(taskPublicUuid);
+		UUID studentUserPublicUuid = resolveStudentUserPublicUuid(studentPublicUuid);
 		Optional<Submission> entity = submissionRepository
-				.findByTaskAndStudentUserId(task, studentPublicUuid);
+				.findByTaskAndStudentUserId(task, studentUserPublicUuid);
 		// Spec: 200 with data=null when no submission exists.
 		return entity.map(submissionMapper::toResponse).orElse(null);
 	}
@@ -168,13 +179,14 @@ public class SubmissionServiceImpl implements SubmissionService {
 	@Transactional
 	public SubmissionResponse grade(UUID submissionPublicUuid, GradeSubmissionRequest request,
 			UUID graderUserId) {
-		// Range re-checked in the service because Bean Validation
-		// does not guard against bad controller input.
-		if (request.grade() < 0 || request.grade() > 100) {
-			throw new GradeOutOfRangeException(request.grade());
-		}
 		Submission entity = submissionRepository.findByPublicUuid(submissionPublicUuid)
 				.orElseThrow(() -> new SubmissionNotFoundException(submissionPublicUuid.toString()));
+
+		Task task = entity.getTask();
+		int maxScore = task != null ? task.getMaxScore() : 100;
+		if (request.grade() < 0 || request.grade() > maxScore) {
+			throw new GradeOutOfRangeException(request.grade());
+		}
 
 		entity.setGrade((short) request.grade().intValue());
 		entity.setFeedback(request.feedback());
@@ -191,7 +203,7 @@ public class SubmissionServiceImpl implements SubmissionService {
 		UUID studentUserInternal = saved.getStudentUserId();
 		if (studentUserInternal != null) {
 			java.util.Optional<com.edushift.modules.auth.entity.User> studentUser =
-					userRepository.findById(studentUserInternal);
+					userRepository.findByPublicUuid(studentUserInternal);
 			if (studentUser.isEmpty()) {
 				log.warn("[tasks.notifications] skip TASK_RETURNED -- student user_id={} not found in users (orphaned link)",
 						studentUserInternal);
@@ -204,7 +216,7 @@ public class SubmissionServiceImpl implements SubmissionService {
 			payload.put("studentName", "");
 			payload.put("taskTitle", taskTitle);
 			payload.put("grade", saved.getGrade() == null ? "" : saved.getGrade().toString());
-			payload.put("maxGrade", "100");
+			payload.put("maxGrade", String.valueOf(maxScore));
 			payload.put("teacherComment", saved.getFeedback() == null ? "" : saved.getFeedback());
 			payload.put("taskPublicUuid", saved.getTask() == null || saved.getTask().getPublicUuid() == null
 					? "" : saved.getTask().getPublicUuid().toString());
@@ -274,5 +286,30 @@ public class SubmissionServiceImpl implements SubmissionService {
 	private short nextRevisionNumber(Submission submission) {
 		Short current = revisionRepository.findMaxRevisionNumber(submission);
 		return (short) (current == null ? 1 : current + 1);
+	}
+
+	/**
+	 * {@code lms_submissions.student_user_id} is a FK to
+	 * {@code users.public_uuid}. Callers may pass either the student's
+	 * {@code users.public_uuid} or the {@code students.public_uuid}.
+	 */
+	private UUID resolveStudentUserPublicUuid(UUID studentOrUserPublicUuid) {
+		if (userRepository.findByPublicUuid(studentOrUserPublicUuid).isPresent()) {
+			return studentOrUserPublicUuid;
+		}
+		Student student = studentRepository.findByPublicUuid(studentOrUserPublicUuid)
+				.orElseThrow(() -> new com.edushift.shared.exception.NotFoundException(
+						"STUDENT_NOT_FOUND",
+						"Student not found in the current tenant"));
+		if (student.getUserId() == null) {
+			throw new com.edushift.shared.exception.BadRequestException(
+					"STUDENT_HAS_NO_USER",
+					"Student has no linked user account for submissions");
+		}
+		return userRepository.findById(student.getUserId())
+				.map(com.edushift.modules.auth.entity.User::getPublicUuid)
+				.orElseThrow(() -> new com.edushift.shared.exception.NotFoundException(
+						"STUDENT_NOT_FOUND",
+						"Linked user account was not found"));
 	}
 }

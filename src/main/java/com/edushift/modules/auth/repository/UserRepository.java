@@ -3,6 +3,8 @@ package com.edushift.modules.auth.repository;
 import com.edushift.modules.auth.entity.User;
 import com.edushift.modules.auth.entity.UserStatus;
 import java.time.Instant;
+import java.util.Collection;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.data.domain.Page;
@@ -32,6 +34,12 @@ public interface UserRepository extends JpaRepository<User, UUID>,
 		JpaSpecificationExecutor<User> {
 
 	Optional<User> findByPublicUuid(UUID publicUuid);
+
+	/**
+	 * Batch lookup by public id. Callers skip this when the collection
+	 * is empty so an empty {@code IN} is never sent.
+	 */
+	List<User> findAllByPublicUuidIn(Collection<UUID> publicUuids);
 
 	Optional<User> findByEmail(String email);
 
@@ -108,5 +116,21 @@ public interface UserRepository extends JpaRepository<User, UUID>,
 			  and deleted = false
 			""", nativeQuery = true)
 	long countActiveTenantAdmins(@Param("tenantId") UUID tenantId);
+
+	/**
+	 * Active users who can reconcile payments (TENANT_ADMIN or STAFF).
+	 * Native because roles are a Postgres {@code varchar[]}.
+	 */
+	@Query(value = """
+			select * from edushift.users
+			where tenant_id = :tenantId
+			  and status = 'ACTIVE'
+			  and deleted = false
+			  and (
+			    'TENANT_ADMIN' = any(roles)
+			    or 'STAFF' = any(roles)
+			  )
+			""", nativeQuery = true)
+	List<User> findActivePaymentAdmins(@Param("tenantId") UUID tenantId);
 
 }

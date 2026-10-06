@@ -19,6 +19,8 @@ public record CourseResponse(
 		Integer credits,
 		Integer hoursPerWeek,
 		Boolean isActive,
+		String color,
+		String icon,
 		List<CourseLevelRef> levels,
 		Instant createdAt,
 		Instant updatedAt

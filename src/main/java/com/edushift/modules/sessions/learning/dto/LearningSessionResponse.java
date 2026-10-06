@@ -38,7 +38,9 @@ public record LearningSessionResponse(
 		Instant cancelledAt,
 
 		Instant createdAt,
-		Instant updatedAt
+		Instant updatedAt,
+
+		boolean sharedWithGrade
 ) {
 
 	public record AssignmentRef(
@@ -66,7 +68,8 @@ public record LearningSessionResponse(
 
 	public record SectionRef(
 			UUID publicUuid,
-			String name
+			String name,
+			String gradeName
 	) {
 	}
 

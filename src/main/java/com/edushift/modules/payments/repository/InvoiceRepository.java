@@ -79,4 +79,29 @@ public interface InvoiceRepository extends JpaRepository<Invoice, Long> {
               AND i.dueAt < :now
             """)
     List<Invoice> findOverduePending(@Param("now") Instant now, Pageable pageable);
+
+    @Query("""
+            SELECT i FROM Invoice i
+            WHERE i.status = com.edushift.modules.payments.entity.Invoice$Status.PENDING
+              AND i.dueAt >= :from
+              AND i.dueAt < :to
+            """)
+    List<Invoice> findPendingDueBetween(
+            @Param("from") Instant from,
+            @Param("to") Instant to,
+            Pageable pageable);
+
+    @Query("""
+            SELECT i FROM Invoice i
+            WHERE i.studentId = :studentPublicUuid
+              AND i.status = com.edushift.modules.payments.entity.Invoice$Status.OVERDUE
+            """)
+    List<Invoice> findOverdueForStudent(@Param("studentPublicUuid") UUID studentPublicUuid);
+
+    Page<Invoice> findByStatusOrderByEvidenceSubmittedAtDesc(
+            Invoice.Status status, Pageable pageable);
+
+    Page<Invoice> findByStatusOrderByIssuedAtDesc(Invoice.Status status, Pageable pageable);
+
+    Page<Invoice> findAllByOrderByIssuedAtDesc(Pageable pageable);
 }

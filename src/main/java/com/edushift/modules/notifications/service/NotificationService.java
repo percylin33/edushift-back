@@ -1,5 +1,6 @@
 package com.edushift.modules.notifications.service;
 
+import com.edushift.modules.notifications.dto.NotificationResponse;
 import com.edushift.modules.notifications.entity.EmailOutbox;
 import com.edushift.modules.notifications.entity.Notification;
 import com.edushift.modules.notifications.entity.Notification.Category;
@@ -7,19 +8,27 @@ import com.edushift.modules.notifications.entity.Notification.Channel;
 import com.edushift.modules.notifications.entity.Notification.Status;
 import com.edushift.modules.notifications.entity.NotificationPreference;
 import com.edushift.modules.notifications.entity.NotificationTemplate;
+import com.edushift.modules.notifications.email.EmailBrandingContext;
+import com.edushift.modules.notifications.email.EmailBrandingResolver;
 import com.edushift.modules.notifications.email.EmailLayoutRenderer;
 import com.edushift.modules.notifications.fcm.FcmSender;
 import com.edushift.modules.notifications.repository.EmailOutboxRepository;
 import com.edushift.modules.notifications.repository.NotificationPreferenceRepository;
 import com.edushift.modules.notifications.repository.NotificationRepository;
 import com.edushift.modules.notifications.repository.NotificationTemplateRepository;
+import com.edushift.modules.students.provision.SyntheticEmailFactory;
 import com.edushift.shared.multitenancy.TenantContext;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.EnumMap;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -63,6 +72,7 @@ public class NotificationService {
     private final EmailOutboxRepository outboxRepo;
     private final NotificationTemplateEngine engine;
     private final ObjectMapper objectMapper;
+    private final RecipientEmailResolver recipientEmailResolver;
 
     /**
      * Sprint cierre-C / B8 -- FCM push notifications. Injected
@@ -76,6 +86,9 @@ public class NotificationService {
     @Autowired(required = false)
     private EmailLayoutRenderer emailLayoutRenderer;
 
+    @Autowired(required = false)
+    private EmailBrandingResolver emailBrandingResolver;
+
     @org.springframework.beans.factory.annotation.Value("${app.notifications.email.enabled:false}")
     private boolean emailEnabled;
 
@@ -87,100 +100,122 @@ public class NotificationService {
      */
     @Transactional
     public Optional<UUID> notify(NotifyCommand cmd) {
-        UUID tenantId = TenantContext.currentRequired();
-
-        // 1) Check preferences. If opted out of BOTH channels, skip.
-        if (isOptedOut(cmd.recipientUserId(), Channel.IN_APP, cmd.category())
-                && isOptedOut(cmd.recipientUserId(), Channel.EMAIL, cmd.category())) {
-            log.debug("[Notify] user={} opted out of all channels for category={}, skipping",
-                    cmd.recipientUserId(), cmd.category());
-            return Optional.empty();
-        }
-
-        // 2) Resolve the template.
-        NotificationTemplate template = templateRepo
-                .findByKeyAndLocale(cmd.templateKey(), "es-PE")
-                .orElse(null);
-        if (template == null) {
-            log.warn("[Notify] no template for tenant={} key={}; recording FAILED audit row",
-                    tenantId, cmd.templateKey());
-            Notification failed = persistFailed(tenantId, cmd, "TEMPLATE_NOT_FOUND",
-                    "Template " + cmd.templateKey() + " not found in this tenant");
-            return Optional.of(failed.getPublicUuid());
-        }
-
-        // 3) Render subject + body (interpolate payload).
-        String payloadJson = serializePayload(cmd.payload());
-        NotificationTemplateEngine.Rendered rendered = engine.render(template, payloadJson);
-
-        // 4) Persist the in-app notification row.
-        Channel channel = resolveChannel(cmd.recipientUserId(), cmd.category(), cmd.preferredChannel());
-        Notification n = new Notification();
-        n.setTenantId(tenantId);
-        n.setRecipientUserId(cmd.recipientUserId());
-        n.setTemplateKey(cmd.templateKey());
-        n.setCategory(cmd.category());
-        n.setChannel(channel);
-        n.setPayload(payloadJson);
-        n.setStatus(isOptedOut(cmd.recipientUserId(), Channel.IN_APP, cmd.category())
-                ? Status.SKIPPED : Status.SENT);
-        n.setSentAt(java.time.Instant.now());
-        n = notificationRepo.save(n);
-
-        // 5) If the channel includes EMAIL (and not opted-out), enqueue.
-        //    Skip when SMTP is disabled — otherwise rows stay PENDING forever
-        //    because EmailOutboxProcessor is @ConditionalOnProperty.
-        if ((channel == Channel.EMAIL || channel == Channel.BOTH)
-                && !isOptedOut(cmd.recipientUserId(), Channel.EMAIL, cmd.category())) {
-            String toEmail = cmd.recipientEmail();
-            if (toEmail != null && !toEmail.isBlank()) {
-                if (!emailEnabled) {
-                    log.warn("[Notify] SMTP disabled (app.notifications.email.enabled=false) — "
-                                    + "skipping email_outbox for template={} to={}",
-                            cmd.templateKey(), toEmail);
-                } else {
-                    String bodyHtml = rendered.bodyHtml();
-                    if (emailLayoutRenderer != null) {
-                        bodyHtml = emailLayoutRenderer.wrapBody(bodyHtml, null);
-                    }
-                    EmailOutbox row = new EmailOutbox();
-                    row.setTenantId(tenantId);
-                    row.setNotificationId(n.getId());
-                    row.setToEmail(toEmail);
-                    row.setSubject(rendered.subject());
-                    row.setBodyHtml(bodyHtml);
-                    outboxRepo.save(row);
-                }
-            }
-        }
-
-        // 6) Sprint cierre-C / B8 -- FCM push (best-effort). The sender is
-        //    only present when app.integrations.firebase.enabled=true;
-        //    otherwise this no-ops so the in-app history still ships.
-        if (fcmSender != null && !isOptedOut(cmd.recipientUserId(), Channel.EMAIL, cmd.category())) {
-            Map<String, String> data = new HashMap<>();
-            data.put("notificationPublicUuid", n.getPublicUuid().toString());
-            data.put("templateKey", cmd.templateKey());
-            data.put("category", cmd.category().name());
-            data.put("channel", channel.name());
-            fcmSender.send(cmd.recipientUserId(), rendered.subject(), rendered.bodyHtml(), data);
-        }
-
-        return Optional.of(n.getPublicUuid());
+        List<UUID> ids = notifyAll(cmd == null ? List.of() : List.of(cmd));
+        return ids.isEmpty() ? Optional.empty() : Optional.of(ids.get(0));
     }
 
     /**
      * Notify many recipients in a single transaction (bulk). Used by
      * the attendance and grade hooks (1 teacher marks 30 students
-     * absent → 30 emails).
+     * absent → 30 emails). One template read per distinct key, one
+     * preference read per category, and one user read for addresses
+     * the commands did not already carry.
      */
     @Transactional
     public List<UUID> notifyAll(List<NotifyCommand> cmds) {
-        return cmds.stream()
-                .map(this::notify)
-                .filter(Optional::isPresent)
-                .map(Optional::get)
-                .toList();
+        if (cmds == null || cmds.isEmpty()) {
+            return List.of();
+        }
+        UUID tenantId = TenantContext.currentRequired();
+        Map<UUID, String> lookedUpEmails = recipientEmailResolver.resolveEmails(usersNeedingEmail(cmds));
+        Map<String, NotificationTemplate> templates = loadTemplatesForSend(distinctKeys(cmds));
+        Map<Category, Map<UUID, EnumMap<Channel, Boolean>>> optedOut = loadOptOuts(cmds);
+
+        List<PendingDelivery> pending = new ArrayList<>();
+        for (NotifyCommand cmd : cmds) {
+            Map<UUID, EnumMap<Channel, Boolean>> byUser =
+                    optedOut.getOrDefault(cmd.category(), Map.of());
+            boolean inAppOptOut = optedOut(byUser, cmd.recipientUserId(), Channel.IN_APP);
+            boolean emailOptOut = optedOut(byUser, cmd.recipientUserId(), Channel.EMAIL);
+            if (inAppOptOut && emailOptOut) {
+                log.debug("[Notify] user={} opted out of all channels for category={}, skipping",
+                        cmd.recipientUserId(), cmd.category());
+                continue;
+            }
+
+            NotificationTemplate template = templates.get(cmd.templateKey());
+            if (template == null) {
+                log.warn("[Notify] no template for tenant={} key={}; recording FAILED audit row",
+                        tenantId, cmd.templateKey());
+                pending.add(PendingDelivery.failed(buildFailed(tenantId, cmd)));
+                continue;
+            }
+
+            String payloadJson = serializePayload(cmd.payload());
+            NotificationTemplateEngine.Rendered rendered = engine.render(template, payloadJson);
+            Channel channel = resolveChannel(inAppOptOut, emailOptOut, cmd.preferredChannel());
+            Notification n = new Notification();
+            n.setTenantId(tenantId);
+            n.setRecipientUserId(cmd.recipientUserId());
+            n.setTemplateKey(cmd.templateKey());
+            n.setCategory(cmd.category());
+            n.setChannel(channel);
+            n.setPayload(payloadJson);
+            n.setStatus(inAppOptOut ? Status.SKIPPED : Status.SENT);
+            n.setSentAt(java.time.Instant.now());
+            assignPublicUuid(n);
+
+            String toEmail = null;
+            boolean enqueue = false;
+            if ((channel == Channel.EMAIL || channel == Channel.BOTH) && !emailOptOut) {
+                toEmail = deliverableEmail(cmd.recipientEmail(), lookedUpEmails.get(cmd.recipientUserId()));
+                if (toEmail != null) {
+                    if (!emailEnabled) {
+                        log.warn("[Notify] SMTP disabled (app.notifications.email.enabled=false) — "
+                                        + "skipping email_outbox for template={} to={}",
+                                cmd.templateKey(), toEmail);
+                    } else {
+                        enqueue = true;
+                    }
+                }
+            }
+            pending.add(new PendingDelivery(
+                    n, enqueue, toEmail, rendered.subject(), rendered.bodyHtml(), cmd, channel, emailOptOut));
+        }
+
+        if (pending.isEmpty()) {
+            return List.of();
+        }
+
+        EmailBrandingContext branding = brandingFor(tenantId, pending);
+        List<Notification> rows = pending.stream().map(PendingDelivery::notification).toList();
+        notificationRepo.saveAll(rows);
+
+        List<EmailOutbox> outbox = new ArrayList<>();
+        for (PendingDelivery delivery : pending) {
+            if (!delivery.enqueueEmail()) {
+                continue;
+            }
+            String bodyHtml = delivery.bodyHtml();
+            if (emailLayoutRenderer != null) {
+                bodyHtml = emailLayoutRenderer.wrap(bodyHtml, null, branding);
+            }
+            EmailOutbox row = new EmailOutbox();
+            row.setTenantId(tenantId);
+            row.setNotificationId(delivery.notification().getId());
+            row.setToEmail(delivery.toEmail());
+            row.setSubject(delivery.subject());
+            row.setBodyHtml(bodyHtml);
+            outbox.add(row);
+        }
+        if (!outbox.isEmpty()) {
+            outboxRepo.saveAll(outbox);
+        }
+
+        for (PendingDelivery delivery : pending) {
+            if (delivery.failed() || fcmSender == null || delivery.emailOptOut()) {
+                continue;
+            }
+            NotifyCommand cmd = delivery.command();
+            Map<String, String> data = new HashMap<>();
+            data.put("notificationPublicUuid", delivery.notification().getPublicUuid().toString());
+            data.put("templateKey", cmd.templateKey());
+            data.put("category", cmd.category().name());
+            data.put("channel", delivery.channel().name());
+            fcmSender.send(cmd.recipientUserId(), delivery.subject(), delivery.bodyHtml(), data);
+        }
+
+        return pending.stream().map(d -> d.notification().getPublicUuid()).toList();
     }
 
     /**
@@ -251,28 +286,114 @@ public class NotificationService {
     // Rendering helpers
     // ------------------------------------------------------------------
 
+    /**
+     * Render a page with one template query for the distinct keys.
+     * Missing keys fall back to the in-memory system seed, same text as
+     * a single-notification render.
+     */
+    @Transactional(readOnly = true)
+    public List<NotificationResponse> toResponses(List<Notification> notifications) {
+        if (notifications == null || notifications.isEmpty()) {
+            return List.of();
+        }
+        Map<String, NotificationTemplate> templates = loadTemplatesForRender(distinctKeysOf(notifications));
+        List<NotificationResponse> responses = new ArrayList<>(notifications.size());
+        for (Notification n : notifications) {
+            NotificationTemplate template = n.getTemplateKey() == null
+                    ? null
+                    : templates.get(n.getTemplateKey());
+            String subject;
+            String body;
+            if (template == null) {
+                subject = fallbackSubject(n);
+                body = "";
+            } else {
+                NotificationTemplateEngine.Rendered rendered = engine.render(template, n.getPayload());
+                subject = rendered.subject();
+                body = rendered.bodyHtml();
+            }
+            responses.add(NotificationResponse.from(n, subject, body));
+        }
+        return responses;
+    }
+
     @Transactional(readOnly = true)
     public String renderSubject(Notification n) {
         if (n == null) return null;
-        NotificationTemplate template = templateRepo
-                .findByKeyAndLocale(n.getTemplateKey(), "es-PE")
-                .orElse(null);
-        if (template == null) {
-            return n.getTemplateKey() + " · " + n.getSentAt();
-        }
-        return engine.render(template, n.getPayload()).subject();
+        return toResponses(List.of(n)).get(0).subject();
     }
 
     @Transactional(readOnly = true)
     public String renderBody(Notification n) {
         if (n == null) return "";
-        NotificationTemplate template = templateRepo
-                .findByKeyAndLocale(n.getTemplateKey(), "es-PE")
-                .orElse(null);
-        if (template == null) {
-            return "";
+        return toResponses(List.of(n)).get(0).bodyHtml();
+    }
+
+    /** Persist missing built-in templates for the current tenant (idempotent). */
+    private void ensureSystemTemplates() {
+        UUID tenantId = TenantContext.currentRequired();
+        for (NotificationTemplate seed : com.edushift.modules.notifications.seed.NotificationTemplateSeed.all("es-PE")) {
+            boolean exists = templateRepo
+                    .findByKeyAndLocale(seed.getTemplateKey(), seed.getLocale())
+                    .isPresent();
+            if (exists) {
+                continue;
+            }
+            NotificationTemplate row = new NotificationTemplate();
+            row.setTenantId(tenantId);
+            row.setTemplateKey(seed.getTemplateKey());
+            row.setLocale(seed.getLocale());
+            row.setSubject(seed.getSubject());
+            row.setBodyHtml(seed.getBodyHtml());
+            row.setSystem(true);
+            row.setVersion(1);
+            templateRepo.save(row);
+            log.info("[Notify] seeded missing template key={} tenant={}",
+                    seed.getTemplateKey(), tenantId);
         }
-        return engine.render(template, n.getPayload()).bodyHtml();
+    }
+
+    private String fallbackSubject(Notification n) {
+        Map<String, Object> payload = NotificationResponse.parsePayload(n.getPayload());
+        String detail = firstPayloadString(payload,
+                "quizTitle", "taskTitle", "evaluationTitle", "title", "invoiceNumber");
+        String base = switch (n.getTemplateKey() == null ? "" : n.getTemplateKey()) {
+            case "QUIZ_PUBLISHED" -> "Nueva práctica disponible";
+            case "GRADE_PUBLISHED" -> "Nueva calificación publicada";
+            case "TASK_RETURNED" -> "Tu tarea fue devuelta";
+            case "TASK_PUBLISHED" -> "Nueva tarea disponible";
+            case "AI_FEEDBACK_READY" -> "Retroalimentación disponible";
+            case "STUDENT_ABSENT" -> "Ausencia registrada";
+            case "PAYMENT_DUE" -> "Pago pendiente";
+            case "PAYMENT_EVIDENCE_SUBMITTED" -> "Voucher por revisar";
+            case "PAYMENT_EVIDENCE_REJECTED" -> "Voucher rechazado";
+            case "PAYMENT_RECEIVED" -> "Pago registrado";
+            case "PAYMENT_OVERDUE" -> "Cuota vencida";
+            case "PAYMENT_REMINDER" -> "Recordatorio de pago";
+            case "ANNOUNCEMENT" -> "Anuncio";
+            case "TEACHER_ASSIGNED" -> "Nueva asignación académica";
+            case "SECTION_NEW_TEACHER" -> "Nuevo docente en tu sección";
+            case "PASSWORD_RESET" -> "Restablece tu contraseña";
+            case "WELCOME_TENANT" -> "Bienvenido a EduShift";
+            default -> "Notificación";
+        };
+        if (detail != null && !detail.isBlank()) {
+            return base + " — " + detail;
+        }
+        return base;
+    }
+
+    private static String firstPayloadString(Map<String, Object> payload, String... keys) {
+        if (payload == null || payload.isEmpty()) {
+            return null;
+        }
+        for (String key : keys) {
+            Object v = payload.get(key);
+            if (v instanceof String s && !s.isBlank()) {
+                return s;
+            }
+        }
+        return null;
     }
 
     // ------------------------------------------------------------------
@@ -299,34 +420,153 @@ public class NotificationService {
     // Helpers
     // ------------------------------------------------------------------
 
-    /**
-     * Default-enabled rule: if no row exists for the triple, treat as enabled.
-     * This matches the "default = everything on" UX.
-     */
-    private boolean isOptedOut(UUID userId, Channel channel, Category category) {
-        return preferenceRepo.findByUserIdAndChannelAndCategory(userId, channel, category)
-                .map(p -> !p.isEnabled())
-                .orElse(false);
-    }
-
-    private Channel resolveChannel(UUID userId, Category category, Channel preferred) {
-        boolean inApp = !isOptedOut(userId, Channel.IN_APP, category);
-        boolean email = !isOptedOut(userId, Channel.EMAIL, category);
-
-        // Honour an explicit single-channel preference (e.g. announcements
-        // force IN_APP to avoid Gmail fan-out rate-limits).
+    private static Channel resolveChannel(boolean inAppOptOut, boolean emailOptOut, Channel preferred) {
+        boolean inApp = !inAppOptOut;
+        boolean email = !emailOptOut;
         if (preferred == Channel.IN_APP) {
-            return inApp ? Channel.IN_APP : Channel.IN_APP;
+            return Channel.IN_APP;
         }
         if (preferred == Channel.EMAIL) {
-            return email ? Channel.EMAIL : Channel.EMAIL;
+            return Channel.EMAIL;
         }
-
         if (inApp && email) return Channel.BOTH;
         if (inApp) return Channel.IN_APP;
         if (email) return Channel.EMAIL;
-        // both opted out — caller should have already short-circuited
         return preferred == null ? Channel.IN_APP : preferred;
+    }
+
+    private List<UUID> usersNeedingEmail(List<NotifyCommand> cmds) {
+        LinkedHashSet<UUID> ids = new LinkedHashSet<>();
+        for (NotifyCommand cmd : cmds) {
+            if (cmd.preferredChannel() == Channel.IN_APP || cmd.recipientUserId() == null) {
+                continue;
+            }
+            if (deliverableEmail(cmd.recipientEmail(), null) != null) {
+                continue;
+            }
+            ids.add(cmd.recipientUserId());
+        }
+        return List.copyOf(ids);
+    }
+
+    private static String deliverableEmail(String explicit, String lookedUp) {
+        if (explicit != null && !explicit.isBlank()
+                && !SyntheticEmailFactory.isSyntheticAddress(explicit.trim())) {
+            return explicit.trim();
+        }
+        if (lookedUp == null || lookedUp.isBlank()
+                || SyntheticEmailFactory.isSyntheticAddress(lookedUp.trim())) {
+            return null;
+        }
+        return lookedUp.trim();
+    }
+
+    private static Set<String> distinctKeys(List<NotifyCommand> cmds) {
+        LinkedHashSet<String> keys = new LinkedHashSet<>();
+        for (NotifyCommand cmd : cmds) {
+            if (cmd.templateKey() != null && !cmd.templateKey().isBlank()) {
+                keys.add(cmd.templateKey());
+            }
+        }
+        return keys;
+    }
+
+    private static Set<String> distinctKeysOf(List<Notification> notifications) {
+        LinkedHashSet<String> keys = new LinkedHashSet<>();
+        for (Notification n : notifications) {
+            if (n.getTemplateKey() != null && !n.getTemplateKey().isBlank()) {
+                keys.add(n.getTemplateKey());
+            }
+        }
+        return keys;
+    }
+
+    private Map<String, NotificationTemplate> loadTemplatesForSend(Set<String> keys) {
+        Map<String, NotificationTemplate> found = persistedTemplates(keys);
+        List<String> missing = keys.stream().filter(key -> !found.containsKey(key)).toList();
+        if (missing.isEmpty()) {
+            return found;
+        }
+        ensureSystemTemplates();
+        found.putAll(persistedTemplates(new LinkedHashSet<>(missing)));
+        return found;
+    }
+
+    private Map<String, NotificationTemplate> loadTemplatesForRender(Set<String> keys) {
+        Map<String, NotificationTemplate> found = new HashMap<>(persistedTemplates(keys));
+        for (String key : keys) {
+            if (found.containsKey(key)) {
+                continue;
+            }
+            inMemorySeed(key).ifPresent(seed -> found.put(key, seed));
+        }
+        return found;
+    }
+
+    private Map<String, NotificationTemplate> persistedTemplates(Collection<String> keys) {
+        if (keys == null || keys.isEmpty()) {
+            return new HashMap<>();
+        }
+        Map<String, NotificationTemplate> found = new HashMap<>();
+        for (NotificationTemplate template : templateRepo.findAllByTemplateKeyInAndLocale(keys, "es-PE")) {
+            if (template.getId() != null && template.getTemplateKey() != null) {
+                found.put(template.getTemplateKey(), template);
+            }
+        }
+        return found;
+    }
+
+    private static Optional<NotificationTemplate> inMemorySeed(String templateKey) {
+        return com.edushift.modules.notifications.seed.NotificationTemplateSeed.all("es-PE")
+                .stream()
+                .filter(t -> templateKey.equals(t.getTemplateKey()))
+                .findFirst();
+    }
+
+    private Map<Category, Map<UUID, EnumMap<Channel, Boolean>>> loadOptOuts(List<NotifyCommand> cmds) {
+        Map<Category, LinkedHashSet<UUID>> usersByCategory = new HashMap<>();
+        for (NotifyCommand cmd : cmds) {
+            if (cmd.category() == null || cmd.recipientUserId() == null) {
+                continue;
+            }
+            usersByCategory
+                    .computeIfAbsent(cmd.category(), ignored -> new LinkedHashSet<>())
+                    .add(cmd.recipientUserId());
+        }
+        Map<Category, Map<UUID, EnumMap<Channel, Boolean>>> optedOut = new HashMap<>();
+        for (Map.Entry<Category, LinkedHashSet<UUID>> entry : usersByCategory.entrySet()) {
+            if (entry.getValue().isEmpty()) {
+                continue;
+            }
+            Map<UUID, EnumMap<Channel, Boolean>> byUser = new HashMap<>();
+            for (NotificationPreference pref : preferenceRepo.findAllByUserIdInAndCategory(
+                    entry.getValue(), entry.getKey())) {
+                byUser.computeIfAbsent(pref.getUserId(), ignored -> new EnumMap<>(Channel.class))
+                        .put(pref.getChannel(), !pref.isEnabled());
+            }
+            optedOut.put(entry.getKey(), byUser);
+        }
+        return optedOut;
+    }
+
+    private static boolean optedOut(
+            Map<UUID, EnumMap<Channel, Boolean>> byUser, UUID userId, Channel channel) {
+        EnumMap<Channel, Boolean> channels = byUser.get(userId);
+        return channels != null && Boolean.TRUE.equals(channels.get(channel));
+    }
+
+    private EmailBrandingContext brandingFor(UUID tenantId, List<PendingDelivery> pending) {
+        boolean anyEmail = pending.stream().anyMatch(PendingDelivery::enqueueEmail);
+        if (!anyEmail || emailLayoutRenderer == null || emailBrandingResolver == null) {
+            return null;
+        }
+        return emailBrandingResolver.forTenantId(tenantId);
+    }
+
+    private static void assignPublicUuid(Notification n) {
+        if (n.getPublicUuid() == null) {
+            n.setPublicUuid(UUID.randomUUID());
+        }
     }
 
     private String serializePayload(Map<String, Object> payload) {
@@ -339,7 +579,7 @@ public class NotificationService {
         }
     }
 
-    private Notification persistFailed(UUID tenantId, NotifyCommand cmd, String code, String msg) {
+    private Notification buildFailed(UUID tenantId, NotifyCommand cmd) {
         Notification n = new Notification();
         n.setTenantId(tenantId);
         n.setRecipientUserId(cmd.recipientUserId());
@@ -348,9 +588,29 @@ public class NotificationService {
         n.setChannel(Channel.IN_APP);
         n.setPayload(serializePayload(cmd.payload()));
         n.setStatus(Status.FAILED);
-        n.setErrorCode(code);
-        n.setErrorMessage(msg);
-        return notificationRepo.save(n);
+        n.setErrorCode("TEMPLATE_NOT_FOUND");
+        n.setErrorMessage("Template " + cmd.templateKey() + " not found in this tenant");
+        assignPublicUuid(n);
+        return n;
+    }
+
+    private record PendingDelivery(
+            Notification notification,
+            boolean enqueueEmail,
+            String toEmail,
+            String subject,
+            String bodyHtml,
+            NotifyCommand command,
+            Channel channel,
+            boolean emailOptOut
+    ) {
+        static PendingDelivery failed(Notification notification) {
+            return new PendingDelivery(notification, false, null, null, null, null, null, true);
+        }
+
+        boolean failed() {
+            return notification.getStatus() == Status.FAILED;
+        }
     }
 
     /**

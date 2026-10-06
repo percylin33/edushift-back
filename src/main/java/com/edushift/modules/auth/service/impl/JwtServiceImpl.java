@@ -200,6 +200,16 @@ public class JwtServiceImpl implements JwtService {
 					.parseSignedClaims(token);
 
 			Claims body = jws.getPayload();
+			
+			// SECURITY FIX: Validate audience if configured
+			String expectedAudience = properties.getAudience();
+			if (expectedAudience != null && !expectedAudience.isBlank()) {
+				var audiences = body.getAudience();
+				if (audiences == null || !audiences.contains(expectedAudience)) {
+					throw new UnauthorizedException("INVALID_TOKEN", "Token audience mismatch");
+				}
+			}
+			
 			TokenType type = parseTokenType(body.get(CLAIM_TYPE, String.class));
 			UUID tenantId = parseUuid(body.get(CLAIM_TENANT_ID, String.class), CLAIM_TENANT_ID);
 			Set<String> roles = parseRoles(body.get(CLAIM_ROLES));
@@ -257,12 +267,14 @@ public class JwtServiceImpl implements JwtService {
 	}
 
 	private static TokenType parseTokenType(String raw) {
-		if (raw == null) return TokenType.ACCESS;
+		if (raw == null) {
+			throw new UnauthorizedException("INVALID_TOKEN", "Token type claim is missing");
+		}
 		try {
 			return TokenType.valueOf(raw.toUpperCase());
 		}
 		catch (IllegalArgumentException e) {
-			return TokenType.ACCESS;
+			throw new UnauthorizedException("INVALID_TOKEN", "Unknown token type: " + raw);
 		}
 	}
 

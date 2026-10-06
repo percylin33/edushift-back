@@ -35,4 +35,7 @@ public interface UnitRepository extends JpaRepository<Unit, UUID> {
 
 	@Query("select coalesce(max(u.displayOrder), 0) from Unit u where u.course = :course")
 	Integer findMaxDisplayOrderForCourse(@Param("course") Course course);
+
+	@Query("select count(u) from Unit u where u.course = :course")
+	long countByCourse(@Param("course") Course course);
 }

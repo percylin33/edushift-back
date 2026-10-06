@@ -19,6 +19,8 @@ package com.edushift.modules.evaluations.entity;
  *       for competency tracking.</li>
  *   <li>{@link #LITERAL_A_B_C_D} — four-level literal grading, the
  *       classic qualitative scale.</li>
+ *   <li>{@link #LITERAL_CNEB} — SIAGIE / CNEB achievement levels
+ *       AD, A, B, C.</li>
  * </ul>
  */
 public enum EvaluationScale {
@@ -33,5 +35,8 @@ public enum EvaluationScale {
 	LITERAL_NA,
 
 	/** Four-level literal: "A", "B", "C", "D". */
-	LITERAL_A_B_C_D
+	LITERAL_A_B_C_D,
+
+	/** CNEB achievement levels: "AD", "A", "B", "C". */
+	LITERAL_CNEB
 }

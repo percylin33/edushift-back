@@ -1,19 +1,36 @@
 package com.edushift.modules.students.service.impl;
 
+import com.edushift.modules.academic.section.dto.SectionResponse;
+import com.edushift.modules.academic.section.service.SectionService;
 import com.edushift.modules.students.dto.BulkImportJobResponse;
+import com.edushift.modules.students.dto.BulkImportPreviewResponse;
 import com.edushift.modules.students.entity.BulkImportJob;
 import com.edushift.modules.students.entity.BulkImportJobType;
 import com.edushift.modules.students.mapper.BulkImportJobMapper;
 import com.edushift.modules.students.repository.BulkImportJobRepository;
 import com.edushift.modules.students.service.BulkImportService;
+import com.edushift.modules.students.service.bulk.BulkImportException;
+import com.edushift.modules.students.service.bulk.BulkImportHeaderAliases;
+import com.edushift.modules.students.service.bulk.StudentBulkImportOptions;
+import com.edushift.modules.students.service.bulk.StudentBulkImportParser;
 import com.edushift.modules.students.service.bulk.StudentBulkImportRunner;
 import com.edushift.modules.students.service.bulk.StudentTemplateGenerator;
+import com.edushift.modules.teachers.bulk.TeacherBulkImportHeaderAliases;
+import com.edushift.modules.teachers.bulk.TeacherBulkImportParser;
 import com.edushift.modules.teachers.bulk.TeacherBulkImportRunner;
+import com.edushift.modules.teachers.bulk.TeacherTemplateGenerator;
 import com.edushift.shared.exception.BusinessException;
 import com.edushift.shared.exception.ResourceNotFoundException;
 import com.edushift.shared.multitenancy.TenantContext;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.time.LocalDate;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
@@ -26,27 +43,12 @@ import org.springframework.web.multipart.MultipartFile;
 
 /**
  * Default {@link BulkImportService}.
- *
- * <h3>Where the work happens</h3>
- * This class only does the synchronous bookkeeping: it validates the
- * upload envelope, creates the {@code PENDING} job row, and hands the
- * payload off to {@link StudentBulkImportRunner#run(UUID, UUID, byte[])},
- * which is {@code @Async} on the {@code bulkImportExecutor} pool. The
- * caller therefore returns immediately with the new job's handle —
- * critical for big spreadsheets that would otherwise blow past the
- * HTTP timeout.
  */
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class BulkImportServiceImpl implements BulkImportService {
 
-	/**
-	 * Hard ceiling so a malicious or accidental upload can't consume
-	 * the worker pool indefinitely. The application-level limit
-	 * complements (does not replace) Spring's
-	 * {@code spring.servlet.multipart.max-file-size}.
-	 */
 	private static final long MAX_FILE_BYTES = 10L * 1024 * 1024;
 
 	private static final Set<String> ALLOWED_EXTENSIONS = Set.of("xlsx");
@@ -56,38 +58,157 @@ public class BulkImportServiceImpl implements BulkImportService {
 	private final StudentBulkImportRunner runner;
 	private final TeacherBulkImportRunner teacherRunner;
 	private final StudentTemplateGenerator templateGenerator;
+	private final TeacherTemplateGenerator teacherTemplateGenerator;
+	private final StudentBulkImportParser parser;
+	private final TeacherBulkImportParser teacherParser;
+	private final SectionService sectionService;
+	private final ObjectMapper objectMapper;
 
-	// ===========================================================================
-	// Upload + enqueue
-	// ===========================================================================
+	@Override
+	public BulkImportPreviewResponse previewStudentsImport(MultipartFile file) {
+		validateUpload(file);
+		byte[] payload = readPayload(file);
+		try {
+			return parser.preview(new ByteArrayInputStream(payload));
+		}
+		catch (BulkImportException e) {
+			throw new BusinessException(e.getCode(), e.getMessage());
+		}
+	}
 
 	@Override
 	@Transactional
 	public BulkImportJobResponse enqueueStudentsImport(MultipartFile file) {
+		return enqueueStudentsImport(file, StudentBulkImportOptions.none());
+	}
+
+	@Override
+	@Transactional
+	public BulkImportJobResponse enqueueStudentsImport(MultipartFile file,
+			StudentBulkImportOptions options) {
 		validateUpload(file);
+		StudentBulkImportOptions resolved = resolveOptions(options);
 		byte[] payload = readPayload(file);
 		BulkImportJob saved = persistPendingJob(BulkImportJobType.STUDENTS, file);
-		dispatchAfterCommit(saved, payload, runner);
-		log.info("[bulk-import] enqueued -- jobId={} fileName={} size={} bytes",
+		dispatchStudentsAfterCommit(saved, payload, resolved);
+		log.info("[bulk-import] enqueued -- jobId={} fileName={} size={} bytes section={}",
+				saved.getPublicUuid(), saved.getFileName(), saved.getFileSizeBytes(),
+				resolved.sectionPublicUuid());
+		return mapper.toResponse(saved);
+	}
+
+	@Override
+	@Transactional
+	public BulkImportJobResponse enqueueTeachersImport(MultipartFile file) {
+		return enqueueTeachersImport(file, null);
+	}
+
+	@Override
+	@Transactional
+	public BulkImportJobResponse enqueueTeachersImport(MultipartFile file,
+			Map<String, String> columnMapping) {
+		validateUpload(file);
+		Map<String, String> mapping = normalizeTeacherMapping(columnMapping);
+		byte[] payload = readPayload(file);
+		BulkImportJob saved = persistPendingJob(BulkImportJobType.TEACHERS, file);
+		dispatchTeachersAfterCommit(saved, payload, mapping);
+		log.info("[bulk-import/teachers] enqueued -- jobId={} fileName={} size={} bytes",
 				saved.getPublicUuid(), saved.getFileName(), saved.getFileSizeBytes());
 		return mapper.toResponse(saved);
 	}
 
-	/**
-	 * Cierre-B / F7 — teacher counterpart. Same envelope validation,
-	 * same {@code PENDING} row + {@code @Async} dispatch; the only
-	 * differences are the {@code jobType} value and the runner class.
-	 */
 	@Override
-	@Transactional
-	public BulkImportJobResponse enqueueTeachersImport(MultipartFile file) {
+	public BulkImportPreviewResponse previewTeachersImport(MultipartFile file) {
 		validateUpload(file);
 		byte[] payload = readPayload(file);
-		BulkImportJob saved = persistPendingJob(BulkImportJobType.TEACHERS, file);
-		dispatchAfterCommit(saved, payload, teacherRunner);
-		log.info("[bulk-import/teachers] enqueued -- jobId={} fileName={} size={} bytes",
-				saved.getPublicUuid(), saved.getFileName(), saved.getFileSizeBytes());
-		return mapper.toResponse(saved);
+		try {
+			return teacherParser.preview(new ByteArrayInputStream(payload));
+		}
+		catch (BulkImportException e) {
+			throw new BusinessException(e.getCode(), e.getMessage());
+		}
+	}
+
+	private StudentBulkImportOptions resolveOptions(StudentBulkImportOptions options) {
+		StudentBulkImportOptions base = options == null
+				? StudentBulkImportOptions.none() : options;
+
+		Map<String, String> mapping = base.columnMapping();
+		if (mapping != null && !mapping.isEmpty()) {
+			validateColumnMapping(mapping);
+		}
+
+		UUID sectionUuid = base.sectionPublicUuid();
+		UUID yearUuid = base.academicYearPublicUuid();
+		LocalDate enrolledAt = base.enrolledAt();
+
+		if (sectionUuid != null) {
+			SectionResponse section = sectionService.getSection(sectionUuid);
+			if (yearUuid == null) {
+				yearUuid = section.academicYearPublicUuid();
+			}
+			else if (!yearUuid.equals(section.academicYearPublicUuid())) {
+				throw new BusinessException("SECTION_YEAR_MISMATCH",
+						"academicYearPublicUuid does not match the section's year");
+			}
+			if (enrolledAt == null) {
+				enrolledAt = LocalDate.now();
+			}
+		}
+		else if (yearUuid != null) {
+			throw new BusinessException("INVALID_FILE",
+					"academicYearPublicUuid requires sectionPublicUuid");
+		}
+
+		return new StudentBulkImportOptions(mapping, sectionUuid, yearUuid, enrolledAt);
+	}
+
+	private void validateColumnMapping(Map<String, String> mapping) {
+		Set<String> known = Set.copyOf(BulkImportHeaderAliases.allCanonical());
+		for (String key : mapping.keySet()) {
+			if (!known.contains(key)) {
+				throw new BusinessException("UNKNOWN_COLUMN",
+						"Unknown canonical field in columnMapping: " + key);
+			}
+		}
+		List<String> missingStudent = BulkImportHeaderAliases.unmappedRequired(mapping);
+		if (!missingStudent.isEmpty()) {
+			throw new BusinessException("MISSING_COLUMN_MAPPING",
+					"columnMapping must include required field: " + missingStudent.getFirst());
+		}
+		if (BulkImportHeaderAliases.hasAnyGuardianMapping(mapping)) {
+			List<String> missingGuardian = BulkImportHeaderAliases.unmappedGuardianRequired(mapping);
+			if (!missingGuardian.isEmpty()) {
+				throw new BusinessException("MISSING_COLUMN_MAPPING",
+						"guardian columns require mapping for: " + missingGuardian.getFirst());
+			}
+		}
+	}
+
+	@Override
+	public Map<String, String> parseColumnMappingJson(String json) {
+		if (json == null || json.isBlank()) {
+			return null;
+		}
+		try {
+			Map<String, String> raw = objectMapper.readValue(json,
+					new TypeReference<Map<String, String>>() { });
+			Map<String, String> cleaned = new LinkedHashMap<>();
+			for (Map.Entry<String, String> e : raw.entrySet()) {
+				if (e.getKey() == null || e.getKey().isBlank()) {
+					continue;
+				}
+				if (e.getValue() == null || e.getValue().isBlank()) {
+					continue;
+				}
+				cleaned.put(e.getKey().trim(), e.getValue().trim());
+			}
+			return cleaned.isEmpty() ? null : cleaned;
+		}
+		catch (IOException e) {
+			throw new BusinessException("INVALID_FILE",
+					"columnMapping must be a JSON object of string→string");
+		}
 	}
 
 	private byte[] readPayload(MultipartFile file) {
@@ -108,13 +229,8 @@ public class BulkImportServiceImpl implements BulkImportService {
 		return jobRepository.saveAndFlush(job);
 	}
 
-	/**
-	 * Defer the {@code @Async} dispatch until AFTER the enclosing
-	 * transaction commits — otherwise the worker can race the commit and
-	 * look up the job via {@code findById} before the row is visible to
-	 * other connections, surfacing as a phantom 404 in the worker.
-	 */
-	private void dispatchAfterCommit(BulkImportJob saved, byte[] payload, Object runnerBean) {
+	private void dispatchStudentsAfterCommit(BulkImportJob saved, byte[] payload,
+			StudentBulkImportOptions options) {
 		final UUID tenantId = TenantContext.currentRequired();
 		final UUID jobId = saved.getId();
 		if (TransactionSynchronizationManager.isSynchronizationActive()) {
@@ -122,30 +238,59 @@ public class BulkImportServiceImpl implements BulkImportService {
 					new TransactionSynchronization() {
 						@Override
 						public void afterCommit() {
-							invokeRunner(runnerBean, jobId, tenantId, payload);
+							runner.run(jobId, tenantId, payload, options);
 						}
 					});
 		}
 		else {
-			invokeRunner(runnerBean, jobId, tenantId, payload);
+			runner.run(jobId, tenantId, payload, options);
 		}
 	}
 
-	private static void invokeRunner(Object runner, UUID jobId, UUID tenantId, byte[] payload) {
-		if (runner instanceof StudentBulkImportRunner s) {
-			s.run(jobId, tenantId, payload);
+	private Map<String, String> normalizeTeacherMapping(Map<String, String> columnMapping) {
+		if (columnMapping == null || columnMapping.isEmpty()) {
+			return null;
 		}
-		else if (runner instanceof TeacherBulkImportRunner t) {
-			t.run(jobId, tenantId, payload);
+		Map<String, String> cleaned = new LinkedHashMap<>();
+		for (Map.Entry<String, String> e : columnMapping.entrySet()) {
+			String canonical = e.getKey();
+			String header = e.getValue();
+			if (canonical == null || canonical.isBlank() || header == null || header.isBlank()) {
+				continue;
+			}
+			if (!TeacherBulkImportHeaderAliases.allCanonical().contains(canonical)) {
+				throw new BusinessException("INVALID_MAPPING",
+						"Unknown canonical field in columnMapping: " + canonical);
+			}
+			cleaned.put(canonical, header);
+		}
+		List<String> missing = TeacherBulkImportHeaderAliases.unmappedRequired(cleaned);
+		if (!missing.isEmpty()) {
+			throw new BusinessException("INVALID_MAPPING",
+					"columnMapping must include required field: "
+							+ TeacherBulkImportHeaderAliases.displayLabelEs(missing.getFirst()));
+		}
+		return cleaned;
+	}
+
+	private void dispatchTeachersAfterCommit(BulkImportJob saved, byte[] payload,
+			Map<String, String> columnMapping) {
+		final UUID tenantId = TenantContext.currentRequired();
+		final UUID jobId = saved.getId();
+		final Map<String, String> mapping = columnMapping;
+		if (TransactionSynchronizationManager.isSynchronizationActive()) {
+			TransactionSynchronizationManager.registerSynchronization(
+					new TransactionSynchronization() {
+						@Override
+						public void afterCommit() {
+							teacherRunner.run(jobId, tenantId, payload, mapping);
+						}
+					});
 		}
 		else {
-			throw new IllegalStateException("Unknown bulk-import runner: " + runner.getClass());
+			teacherRunner.run(jobId, tenantId, payload, mapping);
 		}
 	}
-
-	// ===========================================================================
-	// Read
-	// ===========================================================================
 
 	@Override
 	@Transactional(readOnly = true)
@@ -160,9 +305,10 @@ public class BulkImportServiceImpl implements BulkImportService {
 		return templateGenerator.generate();
 	}
 
-	// ===========================================================================
-	// Internals
-	// ===========================================================================
+	@Override
+	public byte[] generateTeachersTemplate() {
+		return teacherTemplateGenerator.generate();
+	}
 
 	private void validateUpload(MultipartFile file) {
 		if (file == null || file.isEmpty()) {
@@ -181,9 +327,13 @@ public class BulkImportServiceImpl implements BulkImportService {
 	}
 
 	private static String extensionOf(String name) {
-		if (name == null) return "";
+		if (name == null) {
+			return "";
+		}
 		int idx = name.lastIndexOf('.');
-		if (idx < 0 || idx == name.length() - 1) return "";
+		if (idx < 0 || idx == name.length() - 1) {
+			return "";
+		}
 		return name.substring(idx + 1).toLowerCase(Locale.ROOT);
 	}
 
@@ -192,7 +342,6 @@ public class BulkImportServiceImpl implements BulkImportService {
 		if (original == null || original.isBlank()) {
 			return "upload.xlsx";
 		}
-		// Strip any leading path segments a browser may have included.
 		int slash = Math.max(original.lastIndexOf('/'), original.lastIndexOf('\\'));
 		String trimmed = slash >= 0 ? original.substring(slash + 1) : original;
 		return trimmed.length() > 255 ? trimmed.substring(0, 255) : trimmed;

@@ -22,6 +22,7 @@ import com.edushift.modules.tenants.exception.TenantNotFoundException;
 import com.edushift.modules.tenants.mapper.TenantMapper;
 import com.edushift.modules.tenants.repository.TenantRepository;
 import com.edushift.modules.tenants.service.TenantService;
+import com.edushift.modules.tenants.service.TenantStatusCache;
 import com.edushift.shared.exception.ConflictException;
 import com.edushift.shared.exception.UnauthorizedException;
 import com.edushift.shared.multitenancy.TenantContext;
@@ -108,6 +109,8 @@ public class TenantServiceImpl implements TenantService {
 
 	private final SchoolInvitationService schoolInvitationService;
 
+	private final TenantStatusCache tenantStatusCache;
+
 	public TenantServiceImpl(
 			TenantRepository tenantRepository,
 			TenantMapper tenantMapper,
@@ -117,7 +120,8 @@ public class TenantServiceImpl implements TenantService {
 			AcademicSeedService academicSeedService,
 			PlatformPlanRepository platformPlanRepository,
 			SchoolInvitationService schoolInvitationService,
-			PlatformTransactionManager transactionManager) {
+			PlatformTransactionManager transactionManager,
+			TenantStatusCache tenantStatusCache) {
 		this.tenantRepository = tenantRepository;
 		this.tenantMapper = tenantMapper;
 		this.userRepository = userRepository;
@@ -127,6 +131,7 @@ public class TenantServiceImpl implements TenantService {
 		this.platformPlanRepository = platformPlanRepository;
 		this.schoolInvitationService = schoolInvitationService;
 		this.txTemplate = new TransactionTemplate(transactionManager);
+		this.tenantStatusCache = tenantStatusCache;
 	}
 
 	@Override
@@ -221,6 +226,7 @@ public class TenantServiceImpl implements TenantService {
 
 		tenant.setStatus(TenantStatus.ACTIVE);
 		Tenant saved = tenantRepository.save(tenant);
+		tenantStatusCache.put(saved.getId(), TenantStatus.ACTIVE);
 		log.info("[tenants] activated tenant id={} slug='{}'", saved.getId(), saved.getSlug());
 		return tenantMapper.toResponse(saved);
 	}

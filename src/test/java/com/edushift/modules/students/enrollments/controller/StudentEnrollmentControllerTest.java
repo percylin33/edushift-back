@@ -93,7 +93,7 @@ private static final String STUDENTS_BASE = "/v1/students";
 		return new EnrollmentResponse(
 				publicUuid,
 				studentUuid, "Ana Garcia", "12345678",
-				UUID.randomUUID(), "A",
+				UUID.randomUUID(), "A", "1ro Primaria",
 				UUID.randomUUID(), "2026",
 				LocalDate.of(2026, 3, 1), null,
 				StudentEnrollmentStatus.ACTIVE, true, null,
@@ -105,7 +105,7 @@ private static final String STUDENTS_BASE = "/v1/students";
 		return new EnrollmentListItem(
 				UUID.randomUUID(),
 				UUID.randomUUID(), "Ana Garcia",
-				UUID.randomUUID(), "A",
+				UUID.randomUUID(), "A", "1ro Primaria",
 				UUID.randomUUID(), "2026",
 				LocalDate.of(2026, 3, 1), null,
 				StudentEnrollmentStatus.ACTIVE, true);

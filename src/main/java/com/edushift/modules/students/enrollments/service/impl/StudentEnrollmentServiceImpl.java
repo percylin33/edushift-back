@@ -8,6 +8,7 @@ import com.edushift.modules.students.enrollments.dto.CreateEnrollmentRequest;
 import com.edushift.modules.students.enrollments.dto.EnrollmentListItem;
 import com.edushift.modules.students.enrollments.dto.EnrollmentResponse;
 import com.edushift.modules.students.enrollments.dto.SectionStudentRosterItem;
+import com.edushift.modules.students.enrollments.dto.UpdateEnrollmentRequest;
 import com.edushift.modules.students.enrollments.dto.WithdrawEnrollmentRequest;
 import com.edushift.modules.students.enrollments.entity.StudentEnrollment;
 import com.edushift.modules.students.enrollments.entity.StudentEnrollmentStatus;
@@ -167,6 +168,36 @@ public class StudentEnrollmentServiceImpl implements StudentEnrollmentService {
 				saved.getStatus(),
 				saved.getWithdrawnAt());
 
+		return mapper.toResponse(saved);
+	}
+
+	@Override
+	@Transactional
+	public EnrollmentResponse updateEnrollment(UUID enrollmentPublicUuid,
+			UpdateEnrollmentRequest request) {
+
+		StudentEnrollment enrollment = enrollmentRepository.findByPublicUuid(enrollmentPublicUuid)
+				.orElseThrow(() -> new ResourceNotFoundException(
+						"StudentEnrollment", enrollmentPublicUuid));
+
+		if (enrollment.getStatus() != StudentEnrollmentStatus.ACTIVE) {
+			throw new ConflictException("ENROLLMENT_NOT_ACTIVE",
+					"Only ACTIVE enrollments can change enrolledAt; current status is "
+							+ enrollment.getStatus());
+		}
+
+		LocalDate enrolledAt = request.enrolledAt();
+		validateEnrolledAtInYear(enrollment.getAcademicYear(), enrolledAt);
+		if (enrollment.getWithdrawnAt() != null) {
+			validateWithdrawDateOrder(enrolledAt, enrollment.getWithdrawnAt());
+		}
+
+		enrollment.setEnrolledAt(enrolledAt);
+		StudentEnrollment saved = enrollmentRepository.saveAndFlush(enrollment);
+		log.info("[students.enrollments] enrolledAt updated -- publicUuid={} student={} enrolledAt={}",
+				saved.getPublicUuid(),
+				saved.getStudent().getPublicUuid(),
+				saved.getEnrolledAt());
 		return mapper.toResponse(saved);
 	}
 

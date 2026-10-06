@@ -538,12 +538,15 @@ public class AuthServiceImpl implements AuthService {
 
 		return TenantContext.runAs(tenant.getId(), () ->
 				txTemplate.execute(status -> {
-					// Verify the TOTP / recovery code.
-					mfaService.verifyChallenge(userPublicUuid, mfaCode);
-
+					// Verify user exists and can authenticate BEFORE issuing session
 					User user = userRepository.findByPublicUuid(userPublicUuid)
 							.orElseThrow(() -> new UnauthorizedException("USER_NOT_FOUND",
 									"User not found"));
+					assertUserCanAuthenticate(user, tenantSlug);
+
+					// Verify the TOTP / recovery code.
+					mfaService.verifyChallenge(userPublicUuid, mfaCode);
+
 					user.recordSuccessfulLogin();
 					userRepository.saveAndFlush(user);
 					loginAttemptService.recordSuccessfulLogin(user.getEmail());
@@ -560,6 +563,83 @@ public class AuthServiceImpl implements AuthService {
 		return userRepository;
 	}
 
+	@Override
+	@Transactional
+	public UserResponse changePassword(com.edushift.modules.auth.dto.ChangePasswordRequest request) {
+		User user = requireCurrentUserEntity();
+		if (!passwordEncoder.matches(request.currentPassword(), user.getPasswordHash())) {
+			throw new UnauthorizedException("BAD_CREDENTIALS",
+					"Current password is incorrect");
+		}
+		if (request.newPassword().equals(request.currentPassword())) {
+			throw new com.edushift.shared.exception.BadRequestException(
+					"PASSWORD_UNCHANGED",
+					"New password must be different from the current one");
+		}
+		user.setPasswordHash(passwordEncoder.encode(request.newPassword()));
+		user.setMustChangePassword(false);
+		User saved = userRepository.saveAndFlush(user);
+		log.info("[auth] password changed -- publicUuid={}", saved.getPublicUuid());
+		return userMapper.toResponse(saved);
+	}
+
+	@Override
+	@Transactional
+	public UserResponse updateMe(com.edushift.modules.auth.dto.UpdateMeRequest request) {
+		User user = requireCurrentUserEntity();
+		if (request.firstName() != null && !request.firstName().isBlank()) {
+			user.setFirstName(request.firstName().trim());
+		}
+		if (request.lastName() != null && !request.lastName().isBlank()) {
+			user.setLastName(request.lastName().trim());
+		}
+		if (request.phone() != null) {
+			String phone = request.phone().trim();
+			user.setPhone(phone.isEmpty() ? null : phone);
+		}
+		if (request.email() != null && !request.email().isBlank()) {
+			String nextEmail = request.email().trim().toLowerCase();
+			if (com.edushift.modules.students.provision.SyntheticEmailFactory
+					.isSyntheticAddress(nextEmail)) {
+				throw new com.edushift.shared.exception.BadRequestException(
+						"EMAIL_SYNTHETIC_NOT_ALLOWED",
+						"Provide a real email address");
+			}
+			if (!nextEmail.equalsIgnoreCase(user.getEmail())) {
+				if (userRepository.existsByEmail(nextEmail)) {
+					throw new com.edushift.shared.exception.ConflictException(
+							"EMAIL_ALREADY_EXISTS",
+							"That email is already in use");
+				}
+				user.setEmail(nextEmail);
+				user.setEmailSource(com.edushift.modules.auth.entity.EmailSource.REAL);
+				user.setEmailVerified(false);
+			}
+			// Unchanged address that is still synthetic must stay SYNTHETIC
+			// (CRED-7 first-login: real email is optional).
+		}
+		User saved = userRepository.saveAndFlush(user);
+		return userMapper.toResponse(saved);
+	}
+
+	private User requireCurrentUserEntity() {
+		Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+		if (auth == null || !auth.isAuthenticated() || auth.getPrincipal() == null) {
+			throw new UnauthorizedException("Authentication required");
+		}
+		UUID publicUuid;
+		try {
+			publicUuid = UUID.fromString(auth.getName());
+		}
+		catch (IllegalArgumentException e) {
+			throw new UnauthorizedException("INVALID_PRINCIPAL",
+					"Authenticated principal is not a valid UUID");
+		}
+		return userRepository.findByPublicUuid(publicUuid)
+				.orElseThrow(() -> new UnauthorizedException("USER_NOT_FOUND",
+						"Authenticated user no longer exists"));
+	}
+
 	private void persistRefreshToken(String rawToken, User user, UUID parentTokenId) {
 		String hash = sha256Hex(rawToken);
 		// Pre-check: si este hash ya existe para este user, es una rotación
@@ -572,6 +652,16 @@ public class AuthServiceImpl implements AuthService {
 					user.getId());
 			return;
 		}
+
+		// SECURITY FIX: Limit active refresh tokens per user (DoS prevention)
+		long activeCountLong = refreshTokenRepository.countByUserIdAndRevokedAtIsNullAndExpiresAtAfter(
+				user.getId(), Instant.now());
+		int activeCount = (int) Math.min(activeCountLong, Integer.MAX_VALUE);
+		if (activeCount >= 10) {
+			int pruned = refreshTokenRepository.revokeOldestActiveTokens(user.getId(), Instant.now(), activeCount - 9);
+			log.info("[auth] pruned {} oldest refresh tokens for user {}", pruned, user.getId());
+		}
+
 		RefreshToken token = new RefreshToken();
 		token.setTokenHash(hash);
 		token.setUserId(user.getId());

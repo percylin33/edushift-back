@@ -34,6 +34,8 @@ public final class AttendanceAuditEventTypes {
 
 	public static final String SESSION_OPENED  = "AttendanceSessionOpened";
 	public static final String SESSION_CLOSED  = "AttendanceSessionClosed";
+	/** Empty ACTIVE session abandoned (0 check-ins) — soft-delete, no ABSENT. */
+	public static final String SESSION_ABANDONED = "AttendanceSessionAbandoned";
 	public static final String CHECKED_IN      = "AttendanceCheckedIn";
 	public static final String MANUAL_CHECKED_IN = "AttendanceManualCheckedIn";
 	public static final String RECORD_EDITED   = "AttendanceRecordEdited";

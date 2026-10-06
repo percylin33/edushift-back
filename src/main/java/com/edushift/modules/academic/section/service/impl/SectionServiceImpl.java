@@ -104,8 +104,7 @@ public class SectionServiceImpl implements
 			sections = sectionRepository.findAllByYearAndLevel(year, level);
 		}
 		else {
-			sections = sectionRepository
-					.findAllByAcademicYearOrderByDisplayOrderAscNameAsc(year);
+			sections = sectionRepository.findAllByYearGrouped(year);
 		}
 
 		return sections.stream().map(mapper::toListItem).toList();

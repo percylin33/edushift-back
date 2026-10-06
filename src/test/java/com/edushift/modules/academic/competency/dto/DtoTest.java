@@ -2,6 +2,7 @@ package com.edushift.modules.academic.competency.dto;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.edushift.modules.academic.competency.entity.CompetencyOrigin;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
@@ -21,7 +22,7 @@ class DtoTest {
         var updated = Instant.parse("2026-01-02T00:00:00Z");
 
         var resp = new CompetencyResponse(id, courseRef, "MAT_C1", "Resuelve", null, 1, true,
-            List.of(capRef), created, updated);
+            List.of(capRef), created, updated, CompetencyOrigin.INSTITUTIONAL, null);
 
         assertThat(resp.publicUuid()).isEqualTo(id);
         assertThat(resp.code()).isEqualTo("MAT_C1");
@@ -35,7 +36,9 @@ class DtoTest {
     @Test
     @DisplayName("CompetencyListItem — constructor + accessors")
     void competencyListItem() {
-        var item = new CompetencyListItem(UUID.randomUUID(), "MAT_C1", "Resuelve", 1, true, 2L);
+        var item = new CompetencyListItem(UUID.randomUUID(), "MAT_C1", "Resuelve", 1, true, 2L,
+            CompetencyOrigin.MINEDU, null);
+        assertThat(item.origin()).isEqualTo(CompetencyOrigin.MINEDU);
         assertThat(item.code()).isEqualTo("MAT_C1");
         assertThat(item.capacityCount()).isEqualTo(2L);
     }

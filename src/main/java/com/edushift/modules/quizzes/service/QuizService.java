@@ -55,6 +55,9 @@ public interface QuizService {
 
 	Page<QuizSummary> listBySection(UUID sectionPublicUuid, Pageable pageable);
 
+	Page<QuizSummary> listBySection(
+			UUID sectionPublicUuid, UUID assignmentPublicUuid, Pageable pageable);
+
 	// ------------------------------------------------------------------
 	// Grading (LMS_QUIZ_GRADE)
 	// ------------------------------------------------------------------

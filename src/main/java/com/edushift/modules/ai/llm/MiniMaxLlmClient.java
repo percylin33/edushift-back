@@ -43,6 +43,7 @@ import org.springframework.stereotype.Component;
  */
 @Component
 @ConditionalOnProperty(prefix = "app.llm.minimax", name = "enabled", havingValue = "true")
+@ConditionalOnProperty(prefix = "app.llm.ollama", name = "enabled", havingValue = "false", matchIfMissing = true)
 @org.springframework.boot.autoconfigure.condition.ConditionalOnExpression(
         "!'${app.llm.minimax.api-key:}'.isEmpty()")
 public class MiniMaxLlmClient implements LlmClient {

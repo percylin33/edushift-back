@@ -8,9 +8,12 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import org.mockito.ArgumentCaptor;
+
 import com.edushift.modules.academic.competency.dto.SeedCompetenciesResponse;
 import com.edushift.modules.academic.competency.entity.Capacity;
 import com.edushift.modules.academic.competency.entity.Competency;
+import com.edushift.modules.academic.competency.entity.CompetencyOrigin;
 import com.edushift.modules.academic.competency.mapper.CompetencyMapper;
 import com.edushift.modules.academic.competency.repository.CapacityRepository;
 import com.edushift.modules.academic.competency.repository.CompetencyRepository;
@@ -130,7 +133,10 @@ class CompetencySeedServiceImplTest {
 		assertThat(response.created().get(0).capacityCount()).isEqualTo(2L);
 		assertThat(response.created().get(1).code()).isEqualTo("MAT_C2");
 		assertThat(response.created().get(1).capacityCount()).isEqualTo(1L);
-		verify(competencyRepository, times(2)).save(any(Competency.class));
+		ArgumentCaptor<Competency> saved = ArgumentCaptor.forClass(Competency.class);
+		verify(competencyRepository, times(2)).save(saved.capture());
+		assertThat(saved.getAllValues())
+				.allMatch(c -> c.getOrigin() == CompetencyOrigin.MINEDU);
 		verify(capacityRepository, times(3)).save(any(Capacity.class));
 	}
 

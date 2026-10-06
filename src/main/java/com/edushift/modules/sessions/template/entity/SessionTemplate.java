@@ -3,6 +3,8 @@ package com.edushift.modules.sessions.template.entity;
 import com.edushift.shared.domain.TenantAwareEntity;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import jakarta.persistence.Index;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.Table;
@@ -30,13 +32,15 @@ import org.hibernate.type.SqlTypes;
     },
     indexes = {
         @Index(name = "idx_session_templates_tenant_system",
-                columnList = "tenant_id, is_system")
+                columnList = "tenant_id, is_system"),
+        @Index(name = "idx_session_templates_tenant_family",
+                columnList = "tenant_id, family")
     }
 )
 @Getter
 @Setter
 @NoArgsConstructor
-@ToString(callSuper = true, of = {"publicUuid", "templateKey", "name"})
+@ToString(callSuper = true, of = {"publicUuid", "templateKey", "name", "family"})
 @SQLDelete(sql = "UPDATE edushift.session_templates "
         + "SET deleted = true, deleted_at = NOW(), updated_at = NOW() "
         + "WHERE id = ?")
@@ -62,6 +66,16 @@ public class SessionTemplate extends TenantAwareEntity {
     @Column(name = "is_system", nullable = false)
     private Boolean isSystem = false;
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "family", nullable = false, length = 40)
+    private SessionTemplateFamily family = SessionTemplateFamily.CUSTOM;
+
+    @Column(name = "source_template_uuid", columnDefinition = "uuid")
+    private UUID sourceTemplateUuid;
+
+    @Column(name = "is_default", nullable = false)
+    private Boolean isDefault = false;
+
     @Column(name = "deleted_at")
     private Instant deletedAt;
 
@@ -72,6 +86,12 @@ public class SessionTemplate extends TenantAwareEntity {
         }
         if (isSystem == null) {
             isSystem = false;
+        }
+        if (isDefault == null) {
+            isDefault = false;
+        }
+        if (family == null) {
+            family = SessionTemplateFamily.fromTemplateKey(templateKey);
         }
     }
 }

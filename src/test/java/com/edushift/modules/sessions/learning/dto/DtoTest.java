@@ -18,7 +18,7 @@ class DtoTest {
     void learningSessionResponse() {
         var teacherRef = new LearningSessionResponse.TeacherRef(UUID.randomUUID(), "Juan", "Pérez");
         var courseRef = new LearningSessionResponse.CourseRef(UUID.randomUUID(), "MAT", "Mat");
-        var sectionRef = new LearningSessionResponse.SectionRef(UUID.randomUUID(), "A");
+        var sectionRef = new LearningSessionResponse.SectionRef(UUID.randomUUID(), "A", "1ro");
         var periodRef = new LearningSessionResponse.PeriodRef(UUID.randomUUID(), "BIMESTRE", 1,
             "I Bimestre", LocalDate.of(2026, 3, 1), LocalDate.of(2026, 5, 31));
         var assignmentRef = new LearningSessionResponse.AssignmentRef(
@@ -33,7 +33,7 @@ class DtoTest {
             assignmentRef, unitRef, "Sesión 1", "Obj",
             LocalDate.of(2026, 3, 1), 45, SessionStatus.PLANNED,
             content, List.of(compRef), List.of(capRef),
-            null, null, null, Instant.now(), Instant.now());
+            null, null, null, Instant.now(), Instant.now(), false);
         assertThat(resp.title()).isEqualTo("Sesión 1");
         assertThat(resp.status()).isEqualTo(SessionStatus.PLANNED);
         assertThat(resp.competencies()).hasSize(1);
@@ -62,7 +62,7 @@ class DtoTest {
         var content = new SessionContentDto("Obj", List.of("Act"), null, null);
         var req = new CreateLearningSessionRequest(UUID.randomUUID(), UUID.randomUUID(),
             "Sesión 1", "Obj", LocalDate.of(2026, 3, 1), 45, content,
-            List.of(UUID.randomUUID()), List.of(UUID.randomUUID()));
+            List.of(UUID.randomUUID()), List.of(UUID.randomUUID()), null);
         assertThat(req.title()).isEqualTo("Sesión 1");
         assertThat(req.durationMinutes()).isEqualTo(45);
     }
@@ -70,11 +70,11 @@ class DtoTest {
     @Test
     @DisplayName("UpdateLearningSessionRequest — isEmpty checks")
     void updateLearningSessionRequest() {
-        var empty = new UpdateLearningSessionRequest(null, null, null, null, null, null, null, null);
+        var empty = new UpdateLearningSessionRequest(null, null, null, null, null, null, null, null, null);
         assertThat(empty.isEmpty()).isTrue();
 
         var nonEmpty = new UpdateLearningSessionRequest(UUID.randomUUID(), "Updated",
-            null, null, null, null, null, null);
+            null, null, null, null, null, null, null);
         assertThat(nonEmpty.isEmpty()).isFalse();
         assertThat(nonEmpty.title()).isEqualTo("Updated");
     }

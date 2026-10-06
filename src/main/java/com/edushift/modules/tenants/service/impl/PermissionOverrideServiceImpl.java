@@ -2,6 +2,8 @@ package com.edushift.modules.tenants.service.impl;
 
 import com.edushift.modules.auth.entity.UserRole;
 import com.edushift.modules.tenants.dto.RolePermissionOverrideDto;
+import com.edushift.shared.exception.BusinessException;
+import com.edushift.shared.security.LmsAuthorities;
 import com.edushift.modules.tenants.entity.RolePermissionOverride;
 import com.edushift.modules.tenants.repository.RolePermissionOverrideRepository;
 import com.edushift.modules.tenants.service.PermissionOverrideService;
@@ -83,6 +85,14 @@ public class PermissionOverrideServiceImpl implements PermissionOverrideService 
 			boolean granted,
 			UUID actorUserId
 	) {
+		if (granted
+				&& role == UserRole.STUDENT
+				&& (LmsAuthorities.LMS_ANNOUNCEMENTS_CREATE.equals(authority)
+						|| LmsAuthorities.LMS_ANNOUNCEMENTS_CREATE_OWN.equals(authority))) {
+			throw new BusinessException(
+					"STUDENT_CANNOT_PUBLISH_ANNOUNCEMENTS",
+					"Students cannot be granted permission to publish announcements");
+		}
 		RolePermissionOverride row = repository
 				.findByTenantIdAndRoleAndAuthority(tenantId, role, authority)
 				.orElseGet(() -> {

@@ -1,20 +1,30 @@
 package com.edushift.modules.students.service.bulk;
 
+import com.edushift.modules.students.dto.AddGuardianRequest;
 import com.edushift.modules.students.dto.CreateStudentRequest;
+import com.edushift.modules.students.dto.StudentResponse;
+import com.edushift.modules.students.enrollments.dto.CreateEnrollmentRequest;
+import com.edushift.modules.students.enrollments.service.StudentEnrollmentService;
 import com.edushift.modules.students.entity.BulkImportJob;
 import com.edushift.modules.students.entity.DocumentType;
 import com.edushift.modules.students.entity.EnrollmentStatus;
 import com.edushift.modules.students.entity.Gender;
+import com.edushift.modules.students.entity.RelationshipType;
 import com.edushift.modules.students.repository.BulkImportJobRepository;
+import com.edushift.modules.students.service.StudentGuardianService;
 import com.edushift.modules.students.service.StudentService;
 import com.edushift.shared.exception.ApiException;
 import com.edushift.shared.multitenancy.TenantContext;
 import jakarta.validation.ConstraintViolation;
 import jakarta.validation.Validator;
 import java.io.ByteArrayInputStream;
+import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -25,23 +35,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * Worker for student bulk-import jobs. Lives in its own component so
- * the service-layer code that schedules jobs (creates the row, returns
- * 202) stays trivial.
- *
- * <h3>Why @Async on a separate bean</h3>
- * Spring's AOP proxy for {@code @Async} only kicks in on calls that
- * cross a Spring bean boundary. Putting the worker on a dedicated bean
- * makes the cross-boundary call obvious to the reader and keeps the
- * service free of self-invocation footguns.
- *
- * <h3>Tenant context</h3>
- * The {@link com.edushift.infrastructure.async.ContextPropagatingTaskDecorator}
- * configured on {@code bulkImportExecutor} carries the original
- * tenant id into the worker thread. As a defence in depth the runner
- * re-asserts it explicitly via {@link TenantContext#runAs}, since
- * downstream code (Hibernate {@code @TenantId}, audit, logs) all keys
- * off the same {@code TenantContext}.
+ * Async worker for student bulk-import jobs.
  */
 @Slf4j
 @Component
@@ -50,33 +44,33 @@ public class StudentBulkImportRunner {
 
 	private final StudentBulkImportParser parser;
 	private final StudentService studentService;
+	private final StudentGuardianService guardianService;
+	private final StudentEnrollmentService enrollmentService;
 	private final BulkImportJobRepository jobRepository;
 	private final Validator validator;
 
-	/**
-	 * Process a job in the background.
-	 *
-	 * <p>This method runs on the {@code bulkImportExecutor} pool. The
-	 * caller (controller / service that creates the {@code PENDING}
-	 * row) returns immediately with the new job's handle.
-	 *
-	 * @param jobId    internal id of the {@code PENDING} job to process
-	 * @param tenantId tenant the job belongs to (re-asserted into the
-	 *                 worker's {@link TenantContext})
-	 * @param payload  raw spreadsheet bytes (xlsx). Stored in memory so
-	 *                 the worker doesn't need disk access; capped by
-	 *                 the controller's multipart size limit.
-	 */
 	@Async("bulkImportExecutor")
 	public void run(UUID jobId, UUID tenantId, byte[] payload) {
+		run(jobId, tenantId, payload, StudentBulkImportOptions.none());
+	}
+
+	@Async("bulkImportExecutor")
+	public void run(UUID jobId, UUID tenantId, byte[] payload,
+			StudentBulkImportOptions options) {
 		TenantContext.runAs(tenantId, () -> {
-			processJob(jobId, payload);
+			processJob(jobId, payload, options == null
+					? StudentBulkImportOptions.none() : options);
 			return null;
 		});
 	}
 
 	@Transactional
 	void processJob(UUID jobId, byte[] payload) {
+		processJob(jobId, payload, StudentBulkImportOptions.none());
+	}
+
+	@Transactional
+	void processJob(UUID jobId, byte[] payload, StudentBulkImportOptions options) {
 		BulkImportJob job = jobRepository.findById(jobId).orElse(null);
 		if (job == null) {
 			log.warn("[bulk-import] job not found at runner start -- jobId={}", jobId);
@@ -87,7 +81,8 @@ public class StudentBulkImportRunner {
 
 		List<StudentRowDraft> drafts;
 		try {
-			drafts = parser.parse(new ByteArrayInputStream(payload));
+			drafts = parser.parse(new ByteArrayInputStream(payload),
+					options.columnMapping());
 		}
 		catch (BulkImportException e) {
 			log.warn("[bulk-import] parse failed -- jobId={} code={} msg={}",
@@ -103,7 +98,7 @@ public class StudentBulkImportRunner {
 		Set<String> documentsInBatch = new HashSet<>();
 		Set<String> emailsInBatch = new HashSet<>();
 		for (StudentRowDraft draft : drafts) {
-			processOneRow(job, draft, documentsInBatch, emailsInBatch);
+			processOneRow(job, draft, documentsInBatch, emailsInBatch, options);
 			job.incrementProcessed();
 		}
 
@@ -113,71 +108,179 @@ public class StudentBulkImportRunner {
 				jobId, job.getTotalRows(), job.getErrorRows());
 	}
 
-	// ===========================================================================
-	// Per-row work
-	// ===========================================================================
-
 	private void processOneRow(BulkImportJob job, StudentRowDraft draft,
-			Set<String> documentsInBatch, Set<String> emailsInBatch) {
-		// 1. Sanity-check the parsed shape.
+			Set<String> documentsInBatch, Set<String> emailsInBatch,
+			StudentBulkImportOptions options) {
 		List<String> coercionErrors = collectCoercionErrors(draft);
 		if (!coercionErrors.isEmpty()) {
-			job.recordRowError(draft.rowNumber(), "ROW_INVALID",
-					String.join("; ", coercionErrors));
+			failRow(job, draft, "ROW_INVALID", String.join("; ", coercionErrors));
 			return;
 		}
 
-		// 2. Local in-batch duplicate detection — gives us a clean
-		// `ROW_DUPLICATE` instead of letting the second insert blow up
-		// on the unique index, which would surface as a generic 409.
 		String docKey = draft.documentType().name() + ":" + draft.documentNumber();
 		if (!documentsInBatch.add(docKey)) {
-			job.recordRowError(draft.rowNumber(), "ROW_DUPLICATE",
+			failRow(job, draft, "ROW_DUPLICATE",
 					"Duplicate document " + draft.documentType()
 							+ " " + draft.documentNumber() + " inside the same upload");
 			return;
 		}
 		String email = normaliseEmail(draft.email());
 		if (email != null && !emailsInBatch.add(email)) {
-			job.recordRowError(draft.rowNumber(), "ROW_DUPLICATE",
+			failRow(job, draft, "ROW_DUPLICATE",
 					"Duplicate email " + email + " inside the same upload");
 			return;
 		}
 
-		// 3. Map to the same DTO shape the public POST uses, then run
-		// the same Bean Validation pass so we catch length / pattern
-		// mistakes uniformly.
-		CreateStudentRequest request = toCreateRequest(draft);
+		CreateStudentRequest request = toCreateRequest(draft, options);
 		Set<ConstraintViolation<CreateStudentRequest>> violations = validator.validate(request);
 		if (!violations.isEmpty()) {
 			String message = violations.stream()
 					.map(v -> v.getPropertyPath() + ": " + v.getMessage())
 					.collect(Collectors.joining("; "));
-			job.recordRowError(draft.rowNumber(), "ROW_INVALID", message);
+			failRow(job, draft, "ROW_INVALID", message);
 			return;
 		}
 
-		// 4. Persist via the public service so audit, normalisation,
-		// and uniqueness conflicts behave identically to the manual
-		// POST path.
+		if (draft.hasAnyGuardianField()) {
+			AddGuardianRequest guardianRequest = toAddGuardianRequest(draft);
+			Set<ConstraintViolation<AddGuardianRequest>> gViolations =
+					validator.validate(guardianRequest);
+			if (!gViolations.isEmpty()) {
+				String message = gViolations.stream()
+						.map(v -> v.getPropertyPath() + ": " + v.getMessage())
+						.collect(Collectors.joining("; "));
+				failRow(job, draft, "ROW_INVALID", "Apoderado: " + message);
+				return;
+			}
+		}
+
+		StudentResponse created;
 		try {
-			studentService.createStudent(request);
+			created = studentService.createStudent(request);
 		}
 		catch (ApiException e) {
-			job.recordRowError(draft.rowNumber(), e.getCode(), e.getMessage());
+			failRow(job, draft, e.getCode(), e.getMessage());
+			return;
 		}
 		catch (RuntimeException e) {
-			job.recordRowError(draft.rowNumber(), "ROW_INVALID",
+			failRow(job, draft, "ROW_INVALID",
 					e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage());
+			return;
+		}
+
+		if (options.hasSection()) {
+			try {
+				LocalDate enrolledAt = options.enrolledAt() != null
+						? options.enrolledAt() : LocalDate.now();
+				enrollmentService.createEnrollment(created.publicUuid(),
+						new CreateEnrollmentRequest(
+								options.sectionPublicUuid(),
+								options.academicYearPublicUuid(),
+								enrolledAt,
+								"bulk-import"));
+			}
+			catch (ApiException e) {
+				failRow(job, draft, "ENROLLMENT_FAILED",
+						"Student " + created.publicUuid() + " created but enrollment failed: "
+								+ e.getMessage(),
+						created.publicUuid().toString());
+				return;
+			}
+			catch (RuntimeException e) {
+				failRow(job, draft, "ENROLLMENT_FAILED",
+						"Student " + created.publicUuid() + " created but enrollment failed: "
+								+ (e.getMessage() == null ? e.getClass().getSimpleName()
+								: e.getMessage()),
+						created.publicUuid().toString());
+				return;
+			}
+		}
+
+		if (draft.hasAnyGuardianField()) {
+			try {
+				guardianService.addGuardian(created.publicUuid(), toAddGuardianRequest(draft));
+			}
+			catch (ApiException e) {
+				failRow(job, draft, "GUARDIAN_LINK_FAILED",
+						"Student " + created.publicUuid() + " created but guardian failed: "
+								+ e.getMessage(),
+						created.publicUuid().toString());
+			}
+			catch (RuntimeException e) {
+				failRow(job, draft, "GUARDIAN_LINK_FAILED",
+						"Student " + created.publicUuid() + " created but guardian failed: "
+								+ (e.getMessage() == null ? e.getClass().getSimpleName()
+								: e.getMessage()),
+						created.publicUuid().toString());
+			}
 		}
 	}
 
-	// ---------------------------------------------------------------------------
-	// Coercion + mapping
-	// ---------------------------------------------------------------------------
+	private void failRow(BulkImportJob job, StudentRowDraft draft, String code, String message) {
+		failRow(job, draft, code, message, null);
+	}
+
+	private void failRow(BulkImportJob job, StudentRowDraft draft, String code, String message,
+			String studentPublicUuid) {
+		Map<String, String> fields = snapshot(draft);
+		if (studentPublicUuid != null) {
+			fields.put("studentPublicUuid", studentPublicUuid);
+		}
+		job.recordRowError(draft.rowNumber(), code, message, studentLabel(draft), fields);
+	}
+
+	private static String studentLabel(StudentRowDraft draft) {
+		String name = joinName(draft.firstName(), draft.lastName());
+		String document = draft.documentType() == null
+				? blankToNull(draft.documentNumber())
+				: (draft.documentNumber() == null || draft.documentNumber().isBlank()
+						? draft.documentType().name()
+						: draft.documentType().name() + " " + draft.documentNumber().trim());
+		if (name != null && document != null) {
+			return name + " · " + document;
+		}
+		return name != null ? name : document;
+	}
+
+	private static Map<String, String> snapshot(StudentRowDraft draft) {
+		Map<String, String> fields = new LinkedHashMap<>();
+		put(fields, "documentType", draft.documentType() == null ? null : draft.documentType().name());
+		put(fields, "documentNumber", draft.documentNumber());
+		put(fields, "firstName", draft.firstName());
+		put(fields, "lastName", draft.lastName());
+		put(fields, "email", draft.email());
+		return fields;
+	}
+
+	private static void put(Map<String, String> fields, String key, String value) {
+		String trimmed = blankToNull(value);
+		if (trimmed != null) {
+			fields.put(key, trimmed);
+		}
+	}
+
+	private static String joinName(String first, String last) {
+		String left = blankToNull(first);
+		String right = blankToNull(last);
+		if (left == null) {
+			return right;
+		}
+		if (right == null) {
+			return left;
+		}
+		return left + " " + right;
+	}
+
+	private static String blankToNull(String value) {
+		if (value == null) {
+			return null;
+		}
+		String trimmed = value.trim();
+		return trimmed.isEmpty() ? null : trimmed;
+	}
 
 	private List<String> collectCoercionErrors(StudentRowDraft draft) {
-		List<String> errors = new java.util.ArrayList<>();
+		List<String> errors = new ArrayList<>();
 		if (draft.documentType() == null) {
 			errors.add("documentType is required and must be one of: "
 					+ enumValues(DocumentType.class));
@@ -191,16 +294,26 @@ public class StudentBulkImportRunner {
 		if (draft.lastName() == null || draft.lastName().isBlank()) {
 			errors.add("lastName is required");
 		}
-		// Optional enum fields: when present but unparsable they were
-		// coerced to null; the sentinel here is "the column had a
-		// value but it didn't match an enum constant". We can't tell
-		// the difference cheaply once they're null, so we accept the
-		// tradeoff: missing optional enums silently default to entity
-		// defaults, just like the public POST endpoint does.
+		if (draft.hasAnyGuardianField() && !draft.hasCompleteGuardian()) {
+			errors.add("guardian requires documentType, documentNumber, firstName and lastName");
+		}
 		return errors;
 	}
 
-	private CreateStudentRequest toCreateRequest(StudentRowDraft d) {
+	private CreateStudentRequest toCreateRequest(StudentRowDraft d,
+			StudentBulkImportOptions options) {
+		EnrollmentStatus status = d.enrollmentStatus();
+		LocalDate enrollmentDate = d.enrollmentDate();
+		if (options.hasSection()) {
+			status = EnrollmentStatus.ENROLLED;
+			if (enrollmentDate == null) {
+				enrollmentDate = options.enrolledAt() != null
+						? options.enrolledAt() : LocalDate.now();
+			}
+		}
+		else if (status == null) {
+			status = EnrollmentStatus.PENDING;
+		}
 		return new CreateStudentRequest(
 				d.documentType(),
 				d.documentNumber(),
@@ -212,14 +325,33 @@ public class StudentBulkImportRunner {
 				d.email(),
 				d.phone(),
 				d.address(),
-				d.enrollmentStatus() == null ? EnrollmentStatus.PENDING : d.enrollmentStatus(),
-				d.enrollmentDate(),
+				status,
+				enrollmentDate,
 				null
 		);
 	}
 
+	private AddGuardianRequest toAddGuardianRequest(StudentRowDraft d) {
+		RelationshipType relationship = d.guardianRelationship() == null
+				? RelationshipType.GUARDIAN : d.guardianRelationship();
+		return new AddGuardianRequest(
+				d.guardianDocumentType(),
+				d.guardianDocumentNumber(),
+				d.guardianFirstName(),
+				d.guardianLastName(),
+				d.guardianEmail(),
+				d.guardianPhone(),
+				null,
+				relationship,
+				true,
+				true
+		);
+	}
+
 	private static String normaliseEmail(String raw) {
-		if (raw == null) return null;
+		if (raw == null) {
+			return null;
+		}
 		String trimmed = raw.trim();
 		return trimmed.isEmpty() ? null : trimmed.toLowerCase(Locale.ROOT);
 	}
@@ -227,7 +359,9 @@ public class StudentBulkImportRunner {
 	private static <E extends Enum<E>> String enumValues(Class<E> type) {
 		StringBuilder sb = new StringBuilder();
 		for (E v : type.getEnumConstants()) {
-			if (sb.length() > 0) sb.append(", ");
+			if (sb.length() > 0) {
+				sb.append(", ");
+			}
 			sb.append(v.name());
 		}
 		return sb.toString();

@@ -1,7 +1,9 @@
 package com.edushift.modules.students.repository;
 
 import com.edushift.modules.students.entity.DocumentType;
+import com.edushift.modules.students.entity.EnrollmentStatus;
 import com.edushift.modules.students.entity.Student;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -58,6 +60,9 @@ public interface StudentRepository extends JpaRepository<Student, UUID>,
 	 * caller should treat the enrollment check as failed.
 	 */
 	Optional<Student> findByUserId(UUID userId);
+
+	/** Active institutional roster for bulk tuition emission. */
+	List<Student> findByEnrollmentStatus(EnrollmentStatus enrollmentStatus);
 
 	/**
 	 * Tenant-wide count used by the SUPER_ADMIN tenants panel

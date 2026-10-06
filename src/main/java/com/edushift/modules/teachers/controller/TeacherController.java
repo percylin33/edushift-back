@@ -83,6 +83,18 @@ public class TeacherController {
 				service.listTeachers(search, employmentStatus, hasUserAccount, pageable));
 	}
 
+	@GetMapping("/me")
+	@SecurityRequirement(name = "bearerAuth")
+	@PreAuthorize("hasRole('TEACHER')")
+	@Operation(
+			summary = "Get the teacher profile linked to the authenticated user (TEACHER)",
+			description = "Resolves the caller's linked teacher row via user_id. "
+					+ "404 when the user has TEACHER role but no teacher linkage yet."
+	)
+	public ResponseEntity<ApiResponse<TeacherResponse>> me() {
+		return ResponseEntity.ok(ApiResponse.ok(service.getCurrentTeacher()));
+	}
+
 	@GetMapping("/{publicUuid}")
 	@SecurityRequirement(name = "bearerAuth")
 	@PreAuthorize("hasRole('TENANT_ADMIN')")

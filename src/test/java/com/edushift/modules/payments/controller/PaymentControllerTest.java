@@ -21,6 +21,7 @@ class PaymentControllerTest extends AbstractControllerTest {
 
     @Autowired MockMvc mockMvc;
     @MockitoBean PaymentService paymentService;
+    @MockitoBean com.edushift.modules.payments.service.PaymentAccessService paymentAccessService;
 
     @Test
     void listInvoices_returnsOk_whenAuthenticated() throws Exception {

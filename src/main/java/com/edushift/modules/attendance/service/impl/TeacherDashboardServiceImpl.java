@@ -387,8 +387,9 @@ public class TeacherDashboardServiceImpl implements TeacherDashboardService {
 		// are usually a 1:1 match but we don't need to query it here;
 		// FE renders "30/30" via the session detail or roster).
 		String sectionsSql =
-				"select sec.id, sec.public_uuid, sec.name "
+				"select sec.id, sec.public_uuid, sec.name, g.name as grade_name "
 						+ "from edushift.sections sec "
+						+ "left join edushift.grades g on g.id = sec.grade_id "
 						+ "where sec.tenant_id = :tid "
 						+ "and sec.id in ("
 						+ "    select id from edushift.sections "
@@ -508,6 +509,7 @@ public class TeacherDashboardServiceImpl implements TeacherDashboardService {
 					sessionPublicUuid,
 					(UUID) sRow.get("public_uuid"),
 					(String) sRow.get("name"),
+					(String) sRow.get("grade_name"),
 					today,
 					slot,
 					status,

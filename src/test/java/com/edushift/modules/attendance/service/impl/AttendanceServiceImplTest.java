@@ -12,6 +12,7 @@ import com.edushift.modules.attendance.dto.CreateSessionRequest;
 import com.edushift.modules.attendance.entity.AttendanceSession;
 import com.edushift.modules.attendance.entity.AttendanceSessionSlot;
 import com.edushift.modules.attendance.entity.AttendanceSessionStatus;
+import com.edushift.modules.attendance.events.SessionClosedAbsencesEvent;
 import com.edushift.modules.attendance.exception.SessionAlreadyOpenException;
 import com.edushift.modules.attendance.exception.SessionClosedException;
 import com.edushift.modules.attendance.mapper.AttendanceMapper;
@@ -120,152 +121,58 @@ class AttendanceServiceImplTest {
 
 		@Test
 		@org.junit.jupiter.api.DisplayName(
-				"SPRINT9A-CASCADE: happy path -- 3 ausentes con guardian con userId => 3 NotificationEvent al parent (no al student)")
-		void happyPath_threeStudentsWithGuardian_eachGetsOneEvent() {
+				"close with absences publishes SessionClosedAbsencesEvent (fan-out deferred)")
+		void happyPath_threeStudents_publishesDomainEventNotNotificationInline() {
 			AttendanceSession session = activeSession();
-			studentRepo_whenFindAll();
 			givenExistingRecordsForSession(session, List.of(/* no checked-in */));
+			when(recordRepo.countBySession(session)).thenReturn(3L);
 			enrollmentRepo_willReturnNEnrollments(session, 3);
-
-			// 3 students, 3 guardians (one per student), each with userId set.
-			List<StudentGuardian> sgs = new ArrayList<>();
-			sgs.add(studentGuardianWithLinkedUser(student(1L), guardian(101L, "madre1@test.com")));
-			sgs.add(studentGuardianWithLinkedUser(student(2L), guardian(102L, "padre2@test.com")));
-			sgs.add(studentGuardianWithLinkedUser(student(3L), guardian(103L, null /* email optional */)));
-			when(studentGuardianRepo.findActiveByStudentIdsWithLinkedGuardian(anyList()))
-					.thenReturn(sgs);
-			// DEBT-NOTIF-4: stub the userRepository bulk lookup to return
-			// the 3 guardians with their publicUuid derived from the
-			// internalId. We use a Map<UUID internalId, UUID publicUuid>
-			// to keep the mapping deterministic and match the expected
-			// publicUuids below (...201, ...202, ...203).
-			java.util.Map<UUID, UUID> internalToPublic = new java.util.HashMap<>();
-			List<UUID> allStudentIds = new java.util.ArrayList<>();
-			for (int i = 0; i < sgs.size(); i++) {
-				UUID guardianUserInternal = sgs.get(i).getGuardian().getUserId();
-				UUID studentInternal = sgs.get(i).getStudent().getId();
-				allStudentIds.add(studentInternal);
-				// PublicUuid matches the test's hardcoded expectations
-				// (ordinal+200L: 201, 202, 203).
-				internalToPublic.put(guardianUserInternal, UUID.fromString(
-						"00000000-0000-0000-0000-" + String.format("%012d", 201L + i)));
-			}
-			when(userRepository.findAllById(any(java.lang.Iterable.class)))
-					.thenAnswer(invocation -> {
-						@SuppressWarnings("unchecked")
-						java.util.Collection<UUID> ids =
-								(java.util.Collection<UUID>) invocation.getArgument(0);
-						java.util.List<com.edushift.modules.auth.entity.User> out = new java.util.ArrayList<>();
-						for (UUID id : ids) {
-							UUID pub = internalToPublic.get(id);
-							if (pub != null) {
-								out.add(makeGuardianUser(id, pub));
-							}
-						}
-						return out;
-					});
+			when(recordRepo.saveAll(anyList())).thenAnswer(inv -> inv.getArgument(0));
 
 			service.closeSession(session.getPublicUuid());
 
-			ArgumentCaptor<NotificationEvent> captor = ArgumentCaptor.forClass(NotificationEvent.class);
-			verify(eventPublisher, times(3)).publishEvent(captor.capture());
-
-			List<NotificationEvent> events = captor.getAllValues();
-			assertThat(events).hasSize(3);
-			for (NotificationEvent e : events) {
-				assertThat(e.templateKey()).isEqualTo("STUDENT_ABSENT");
-				assertThat(e.category().name()).isEqualTo("ABSENCE");
-				assertThat(e.tenantId()).isNotNull();
-				assertThat(e.recipients()).hasSize(1);
-                assertThat(e.payload()).containsKey("studentPublicUuid");
-                assertThat(e.sourceId()).isNotNull();
-			}
-			// The CRITICAL assertion: recipients are guardian userIds,
-			// NOT student userIds. The original bug was sending to
-			// student.userId, which is null for K-12 students.
-			List<UUID> recipientIds = events.stream()
-					.flatMap(e -> e.recipients().stream())
-					.map(NotificationEvent.Recipient::userId)
-					.toList();
-			// helper uses ordinal+100L for the userId UUID, so
-			// guardian(101L, ...) → userId = "...201", etc.
-			assertThat(recipientIds).containsExactlyInAnyOrder(
-					UUID.fromString("00000000-0000-0000-0000-000000000201"),
-					UUID.fromString("00000000-0000-0000-0000-000000000202"),
-					UUID.fromString("00000000-0000-0000-0000-000000000203"));
-			// And NEVER any student userId.
-			assertThat(recipientIds).doesNotContain(
-					UUID.fromString("00000000-0000-0000-0000-000000000001"));
-		}
-
-		@Test
-		@org.junit.jupiter.api.DisplayName(
-				"SPRINT9A-CASCADE: student sin guardian linkeado => 0 events (no NPE)")
-		void noGuardianNoCrash_noEventsPublished() {
-			AttendanceSession session = activeSession();
-			studentRepo_whenFindAll();
-			givenExistingRecordsForSession(session, List.of());
-			enrollmentRepo_willReturnNEnrollments(session, 2);
-
-			// No guardians at all -- the bulk lookup returns empty.
-			when(studentGuardianRepo.findActiveByStudentIdsWithLinkedGuardian(anyList()))
-					.thenReturn(List.of());
-
-			service.closeSession(session.getPublicUuid());
-
+			ArgumentCaptor<SessionClosedAbsencesEvent> captor =
+					ArgumentCaptor.forClass(SessionClosedAbsencesEvent.class);
+			verify(eventPublisher, times(1)).publishEvent(captor.capture());
+			SessionClosedAbsencesEvent evt = captor.getValue();
+			assertThat(evt.absents()).hasSize(3);
+			assertThat(evt.sessionPublicUuid()).isEqualTo(session.getPublicUuid());
+			assertThat(evt.tenantId()).isNotNull();
 			verify(eventPublisher, never()).publishEvent(any(NotificationEvent.class));
+			verify(studentGuardianRepo, never()).findActiveByStudentIdsWithLinkedGuardian(anyList());
 		}
 
 		@Test
 		@org.junit.jupiter.api.DisplayName(
-				"SPRINT9A-CASCADE: guardian con userId=null => skipped (no event)")
-		void guardianWithoutUserId_skipped() {
+				"empty close (0 records) abandons session — no ABSENT event")
+		void emptyClose_abandonsWithoutAbsentEvent() {
 			AttendanceSession session = activeSession();
-			studentRepo_whenFindAll();
-			givenExistingRecordsForSession(session, List.of());
-			enrollmentRepo_willReturnNEnrollments(session, 1);
-
-Student s = student(1L);
-			// Guardian has NO userId link -- the bulk query would have
-			// filtered it (g.userId is not null), but we model the
-			// pathological case where someone bypasses the filter
-			// (e.g. inserts directly in DB).
-			Guardian g = new Guardian();
-			setField(g, "id", UUID.randomUUID());
-			g.setPublicUuid(UUID.randomUUID());
-			g.setUserId(null);
-			g.setEmail("orphan@test.com");
-			g.setFirstName("Orphan");
-			g.setLastName("Guardian");
-			StudentGuardian sg = studentGuardianWith(s, g);
-			when(studentGuardianRepo.findActiveByStudentIdsWithLinkedGuardian(anyList()))
-					.thenReturn(List.of(sg));
+			when(recordRepo.countBySession(session)).thenReturn(0L);
 
 			service.closeSession(session.getPublicUuid());
 
-			verify(eventPublisher, never()).publishEvent(any(NotificationEvent.class));
+			verify(sessionRepo).delete(session);
+			verify(auditLogger).logSessionAbandoned(session, "empty_close");
+			verify(eventPublisher, never()).publishEvent(any());
+			verify(recordRepo, never()).saveAll(anyList());
 		}
 
 		@Test
 		@org.junit.jupiter.api.DisplayName(
-				"SPRINT9A-CASCADE: bulk lookup uses ALL materialized student ids (no N+1)")
+				"materialized absents include all enrolled student ids in one event")
 		void bulkLookupUsesAllStudentIds() {
 			AttendanceSession session = activeSession();
-			studentRepo_whenFindAll();
 			givenExistingRecordsForSession(session, List.of());
+			when(recordRepo.countBySession(session)).thenReturn(1L);
 			enrollmentRepo_willReturnNEnrollments(session, 5);
-
-			when(studentGuardianRepo.findActiveByStudentIdsWithLinkedGuardian(anyList()))
-					.thenReturn(List.of());
+			when(recordRepo.saveAll(anyList())).thenAnswer(inv -> inv.getArgument(0));
 
 			service.closeSession(session.getPublicUuid());
 
-			@SuppressWarnings("unchecked")
-			ArgumentCaptor<List<UUID>> captor = ArgumentCaptor.forClass(List.class);
-			verify(studentGuardianRepo).findActiveByStudentIdsWithLinkedGuardian(captor.capture());
-			// The 5 student ids from the enrollment must be passed in a
-			// SINGLE call -- not 5 separate calls.
-			assertThat(captor.getValue()).hasSize(5);
+			ArgumentCaptor<SessionClosedAbsencesEvent> captor =
+					ArgumentCaptor.forClass(SessionClosedAbsencesEvent.class);
+			verify(eventPublisher).publishEvent(captor.capture());
+			assertThat(captor.getValue().absents()).hasSize(5);
 		}
 	}
 
@@ -289,7 +196,7 @@ Student s = student(1L);
 		// Make saveAndFlush round-trip the session (Mockito defaults to
 		// null otherwise, which trips closeSession's NPE on
 		// session.getPublicUuid() after the save call).
-		when(sessionRepo.saveAndFlush(s)).thenReturn(s);
+		lenient().when(sessionRepo.saveAndFlush(s)).thenReturn(s);
 		return s;
 	}
 

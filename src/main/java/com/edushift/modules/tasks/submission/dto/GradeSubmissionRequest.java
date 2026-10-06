@@ -10,7 +10,7 @@ import jakarta.validation.constraints.Size;
  * (Sprint 7a / BE-7a.2).
  */
 public record GradeSubmissionRequest(
-		@NotNull @Min(0) @Max(100) Integer grade,
+		@NotNull @Min(0) @Max(1000) Integer grade,
 		@Size(max = 2000) String feedback
 ) {
 }

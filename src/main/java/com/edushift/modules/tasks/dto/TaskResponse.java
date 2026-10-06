@@ -12,6 +12,7 @@ import java.util.UUID;
  *
  * <p>{@code status}, {@code publishedAt} and {@code archivedAt} were
  * added as part of BUG-2026-07-31-04 (lifecycle endpoints).
+ * Assignment fields added in V105.
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public record TaskResponse(
@@ -23,10 +24,17 @@ public record TaskResponse(
 		UUID attachmentPublicUuid,
 		UUID ownerPublicUuid,
 		boolean allowResubmission,
+		int maxScore,
 		TaskStatus status,
 		Instant publishedAt,
 		Instant archivedAt,
 		Instant createdAt,
-		Instant updatedAt
+		Instant updatedAt,
+		UUID teacherAssignmentPublicUuid,
+		UUID coursePublicUuid,
+		String courseName,
+		String periodLabel,
+		int submissionsCount,
+		int gradedSubmissionsCount
 ) {
 }

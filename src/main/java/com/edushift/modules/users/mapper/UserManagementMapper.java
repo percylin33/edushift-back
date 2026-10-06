@@ -49,6 +49,9 @@ public class UserManagementMapper {
 				user.getStatus(),
 				user.isEmailVerified(),
 				user.isMfaEnabled(),
+				user.getEmailSource() == null
+						? com.edushift.modules.auth.entity.EmailSource.REAL
+						: user.getEmailSource(),
 				user.getRoleNames(),
 				user.getLastLoginAt(),
 				user.getCreatedAt(),

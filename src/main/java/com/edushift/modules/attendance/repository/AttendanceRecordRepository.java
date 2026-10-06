@@ -9,6 +9,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
@@ -51,7 +52,7 @@ public interface AttendanceRecordRepository extends JpaRepository<AttendanceReco
 			select r from AttendanceRecord r
 			join fetch r.student s
 			where r.session = :session
-			order by s.lastName, s.firstName
+			order by lower(s.lastName) asc, lower(s.firstName) asc, lower(s.secondLastName) asc
 			""")
 	List<AttendanceRecord> findBySessionOrderedByStudentName(
 			@Param("session") AttendanceSession session);
@@ -76,6 +77,42 @@ public interface AttendanceRecordRepository extends JpaRepository<AttendanceReco
 		Instant end = to != null ? to : Instant.parse("9999-12-31T23:59:59Z");
 		return findByStudentAndOccurredAtBetweenOrderByOccurredAtDesc(student, start, end);
 	}
+
+	/**
+	 * Count of non-deleted records for a session (empty-close / abandon gate).
+	 */
+	@Query("""
+			select count(r) from AttendanceRecord r
+			where r.session = :session
+			""")
+	long countBySession(@Param("session") AttendanceSession session);
+
+	/**
+	 * Hot-path insert for check-in. Relies on the partial unique index
+	 * {@code uk_attendance_records_session_student}. On conflict returns 0
+	 * rows affected; caller re-reads the existing row (ADR-6.3).
+	 */
+	@Modifying
+	@Query(value = """
+			INSERT INTO edushift.attendance_records (
+			    id, tenant_id, public_uuid, created_at, updated_at, deleted,
+			    session_id, student_id, status, occurred_at, scanned_by_user_id
+			) VALUES (
+			    :id, :tenantId, :publicUuid, now(), now(), false,
+			    :sessionId, :studentId, :status, :occurredAt, :scannedByUserId
+			)
+			ON CONFLICT (session_id, student_id) WHERE (NOT deleted)
+			DO NOTHING
+			""", nativeQuery = true)
+	int insertCheckInIgnoreConflict(
+			@Param("id") UUID id,
+			@Param("tenantId") UUID tenantId,
+			@Param("publicUuid") UUID publicUuid,
+			@Param("sessionId") UUID sessionId,
+			@Param("studentId") UUID studentId,
+			@Param("status") String status,
+			@Param("occurredAt") Instant occurredAt,
+			@Param("scannedByUserId") UUID scannedByUserId);
 
 	/**
 	 * Count of records by status in a window — drives the "today

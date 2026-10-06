@@ -2,9 +2,14 @@ package com.edushift.modules.evaluations.gradebook.service.impl;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.given;
 
 import com.edushift.modules.academic.course.entity.Course;
+import com.edushift.modules.academic.levelgrade.entity.AcademicLevel;
+import com.edushift.modules.academic.levelgrade.entity.Grade;
+import com.edushift.modules.academic.period.entity.AcademicPeriod;
+import com.edushift.modules.academic.period.entity.PeriodType;
 import com.edushift.modules.academic.section.entity.Section;
 import com.edushift.modules.evaluations.entity.Evaluation;
 import com.edushift.modules.evaluations.entity.EvaluationKind;
@@ -14,12 +19,15 @@ import com.edushift.modules.evaluations.gradebook.dto.GradeBookResponse;
 import com.edushift.modules.evaluations.gradebook.dto.GradeBookStudentEntry;
 import com.edushift.modules.evaluations.graderecord.entity.GradeRecord;
 import com.edushift.modules.evaluations.graderecord.repository.GradeRecordRepository;
+import com.edushift.modules.evaluations.graderegister.service.GradeRegisterTemplateService;
 import com.edushift.modules.evaluations.repository.EvaluationRepository;
 import com.edushift.modules.students.enrollments.entity.StudentEnrollment;
 import com.edushift.modules.students.enrollments.repository.StudentEnrollmentRepository;
 import com.edushift.modules.students.entity.Student;
 import com.edushift.modules.teachers.assignments.entity.TeacherAssignment;
 import com.edushift.modules.teachers.assignments.repository.TeacherAssignmentRepository;
+import com.edushift.modules.teachers.entity.Teacher;
+import com.edushift.modules.tenants.branding.CurrentTenantLogoLoader;
 import com.edushift.shared.exception.ResourceNotFoundException;
 import java.lang.reflect.Field;
 import java.math.BigDecimal;
@@ -54,19 +62,40 @@ class GradeBookServiceImplTest {
     @Mock private StudentEnrollmentRepository enrollmentRepository;
     @Mock private EvaluationRepository evaluationRepository;
     @Mock private GradeRecordRepository gradeRecordRepository;
+    @Mock private GradeRegisterTemplateService gradeRegisterTemplateService;
+    @Mock private com.edushift.modules.evaluations.graderegister.service.GradeRegisterColumnMaterializer columnMaterializer;
+    @Mock private CurrentTenantLogoLoader tenantLogoLoader;
 
     @InjectMocks private GradeBookServiceImpl service;
 
     private TeacherAssignment assignment;
     private Section section;
     private Course course;
+    private Teacher teacher;
+    private AcademicPeriod period;
+    private Grade grade;
+    private AcademicLevel level;
 
     @BeforeEach
     void setUp() {
+        level = new AcademicLevel();
+        setField(level, "publicUuid", UUID.randomUUID());
+        setField(level, "id", UUID.randomUUID());
+        level.setCode("PRIMARIA");
+        level.setName("Primaria");
+
+        grade = new Grade();
+        setField(grade, "publicUuid", UUID.randomUUID());
+        setField(grade, "id", UUID.randomUUID());
+        grade.setName("3° Primaria");
+        grade.setOrdinal(3);
+        grade.setLevel(level);
+
         section = new Section();
         setField(section, "publicUuid", UUID.randomUUID());
         setField(section, "id", UUID.randomUUID());
         section.setName("3°A");
+        section.setGrade(grade);
 
         course = new Course();
         setField(course, "publicUuid", UUID.randomUUID());
@@ -74,11 +103,27 @@ class GradeBookServiceImplTest {
         course.setName("Matemática");
         course.setCode("MAT");
 
+        teacher = new Teacher();
+        setField(teacher, "publicUuid", UUID.randomUUID());
+        setField(teacher, "id", UUID.randomUUID());
+        teacher.setFirstName("Ana");
+        teacher.setLastName("García");
+        teacher.setSecondLastName("Pérez");
+
+        period = new AcademicPeriod();
+        setField(period, "publicUuid", UUID.randomUUID());
+        setField(period, "id", UUID.randomUUID());
+        period.setPeriodType(PeriodType.BIMESTRE);
+        period.setOrdinal(2);
+        period.setName("Segundo bimestre");
+
         assignment = new TeacherAssignment();
         setField(assignment, "publicUuid", UUID.randomUUID());
         setField(assignment, "id", UUID.randomUUID());
         assignment.setSection(section);
         assignment.setCourse(course);
+        assignment.setTeacher(teacher);
+        assignment.setAcademicPeriod(period);
         assignment.setAssignedAt(Instant.now());
     }
 
@@ -98,7 +143,7 @@ class GradeBookServiceImplTest {
     }
 
     @Test
-    @DisplayName("denormalises the assignment header (section, course)")
+    @DisplayName("denormalises the assignment header (section, course, teacher, period)")
     void headerDenormalised() {
         givenAssignmentLoaded();
         givenEnrollments();
@@ -112,8 +157,17 @@ class GradeBookServiceImplTest {
         assertThat(response.sectionPublicUuid())
                 .isEqualTo(section.getPublicUuid());
         assertThat(response.sectionName()).isEqualTo("3°A");
+        assertThat(response.gradePublicUuid()).isEqualTo(grade.getPublicUuid());
+        assertThat(response.gradeName()).isEqualTo("3° Primaria");
+        assertThat(response.gradeOrdinal()).isEqualTo(3);
+        assertThat(response.levelCode()).isEqualTo("PRIMARIA");
         assertThat(response.coursePublicUuid()).isEqualTo(course.getPublicUuid());
         assertThat(response.courseName()).isEqualTo("Matemática");
+        assertThat(response.teacherFullName()).isEqualTo("Ana García Pérez");
+        assertThat(response.academicPeriodPublicUuid()).isEqualTo(period.getPublicUuid());
+        assertThat(response.periodType()).isEqualTo(PeriodType.BIMESTRE);
+        assertThat(response.periodOrdinal()).isEqualTo(2);
+        assertThat(response.periodName()).isEqualTo("Segundo bimestre");
     }
 
     // =========================================================================
@@ -307,10 +361,12 @@ class GradeBookServiceImplTest {
     private void givenAssignmentLoaded() {
         given(assignmentRepository.findByPublicUuid(assignment.getPublicUuid()))
                 .willReturn(Optional.of(assignment));
+        given(gradeRegisterTemplateService.resolveForAssignment(any()))
+                .willReturn(Optional.empty());
     }
 
     private void givenEnrollments(StudentEnrollment... rows) {
-        given(enrollmentRepository.findActiveBySection(section))
+        given(enrollmentRepository.findBySectionAndStatusIn(any(), any()))
                 .willReturn(List.of(rows));
     }
 

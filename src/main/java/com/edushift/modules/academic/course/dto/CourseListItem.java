@@ -14,6 +14,8 @@ public record CourseListItem(
 		Integer credits,
 		Integer hoursPerWeek,
 		Boolean isActive,
+		String color,
+		String icon,
 		List<CourseResponse.CourseLevelRef> levels
 ) {
 }

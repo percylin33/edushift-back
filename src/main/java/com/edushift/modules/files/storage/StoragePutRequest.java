@@ -1,6 +1,7 @@
 package com.edushift.modules.files.storage;
 
 import java.io.InputStream;
+import java.time.Instant;
 import java.util.UUID;
 
 /**
@@ -19,22 +20,24 @@ import java.util.UUID;
  */
 public record StoragePutRequest(
 		UUID tenantId,
+		String tenantSlug,
 		String module,
 		UUID publicUuid,
 		String originalName,
 		String contentType,
 		InputStream input,
-		long declaredSizeBytes
+		long declaredSizeBytes,
+		String env,
+		Instant uploadedAt
 ) {
 
 	/**
 	 * Convenience for callers that want a default key layout.
-	 * The current implementations all use
-	 * {@link StoredObject#buildKey(UUID, String, UUID, String)}; the
-	 * helper is here so providers can override the layout in one place
-	 * if needed.
+	 * Implementations use
+	 * {@link StoredObject#buildKey(String, UUID, String, String, Instant, UUID, String)}.
 	 */
 	public String defaultRemoteKey(String extension) {
-		return StoredObject.buildKey(tenantId, module, publicUuid, extension);
+		return StoredObject.buildKey(
+				env, tenantId, tenantSlug, module, uploadedAt, publicUuid, extension);
 	}
 }

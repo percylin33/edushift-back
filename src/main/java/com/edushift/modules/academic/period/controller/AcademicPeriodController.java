@@ -49,12 +49,13 @@ public class AcademicPeriodController {
 
 	@GetMapping
 	@SecurityRequirement(name = "bearerAuth")
-	@PreAuthorize("hasRole('TENANT_ADMIN')")
+	@PreAuthorize("hasAnyRole('TENANT_ADMIN','TEACHER')")
 	@Operation(
-			summary = "List periods (TENANT_ADMIN)",
+			summary = "List periods (TENANT_ADMIN, TEACHER read-only)",
 			description = "If ?academicYearId is omitted, falls back to the active year of "
 					+ "the tenant; if there is no active year, returns an empty list. "
-					+ "Sorted by (period_type, ordinal) asc."
+					+ "Sorted by (period_type, ordinal) asc. TEACHER needs read access "
+					+ "to resolve the current period in evaluations / LMS pickers."
 	)
 	public ResponseEntity<List<AcademicPeriodListItem>> list(
 			@Parameter(description = "Filter by academic year publicUuid (default = active year)")

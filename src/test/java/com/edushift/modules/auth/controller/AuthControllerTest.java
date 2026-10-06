@@ -148,7 +148,10 @@ class AuthControllerTest {
 				VALID_EMAIL,
 				null, null,
 				UserStatus.ACTIVE,
-				true, false,
+				true,
+				com.edushift.modules.auth.entity.EmailSource.REAL,
+				false,
+				false,
 				java.util.Set.of("TENANT_ADMIN"),
 				java.util.Set.of("LMS_TASK_READ", "LMS_TASK_CREATE", "LMS_PAYMENT_ADMIN"),
 				Instant.now(), Instant.now(), Instant.now());

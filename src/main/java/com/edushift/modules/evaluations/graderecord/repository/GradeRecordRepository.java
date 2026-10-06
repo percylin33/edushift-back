@@ -1,7 +1,9 @@
 package com.edushift.modules.evaluations.graderecord.repository;
 
+import com.edushift.modules.academic.year.entity.AcademicYear;
 import com.edushift.modules.evaluations.entity.Evaluation;
 import com.edushift.modules.evaluations.graderecord.entity.GradeRecord;
+import com.edushift.modules.evaluations.graderegister.entity.GradeCategory;
 import com.edushift.modules.students.entity.Student;
 import com.edushift.modules.teachers.assignments.entity.TeacherAssignment;
 import java.util.List;
@@ -44,7 +46,9 @@ public interface GradeRecordRepository extends JpaRepository<GradeRecord, UUID> 
     @Query("""
             select g from GradeRecord g
             where g.evaluation.publicUuid = :evaluationPublicUuid
-            order by g.student.lastName asc, g.student.firstName asc
+            order by lower(g.student.lastName) asc,
+                     lower(g.student.firstName) asc,
+                     lower(g.student.secondLastName) asc
             """)
     List<GradeRecord> findAllByEvaluationPublicUuid(
             @Param("evaluationPublicUuid") UUID evaluationPublicUuid);
@@ -86,7 +90,9 @@ public interface GradeRecordRepository extends JpaRepository<GradeRecord, UUID> 
                    or g.evaluation.teacherAssignment.section.publicUuid
                       = :sectionPublicUuid)
               and (:isActive is null or g.isActive = :isActive)
-            order by g.student.lastName asc, g.student.firstName asc
+            order by lower(g.student.lastName) asc,
+                     lower(g.student.firstName) asc,
+                     lower(g.student.secondLastName) asc
             """)
     List<GradeRecord> findFilteredByEvaluation(
             @Param("evaluationPublicUuid") UUID evaluationPublicUuid,
@@ -114,6 +120,19 @@ public interface GradeRecordRepository extends JpaRepository<GradeRecord, UUID> 
             where g.evaluation = :evaluation
             """)
     long countByEvaluation(@Param("evaluation") Evaluation evaluation);
+
+    /**
+     * Count grade records under evaluations linked to the given categories
+     * within a single academic year (replace-template gate).
+     */
+    @Query("""
+            select count(g) from GradeRecord g
+            where g.evaluation.category in :categories
+              and g.evaluation.teacherAssignment.academicPeriod.academicYear = :year
+            """)
+    long countByCategoriesAndYear(
+            @Param("categories") List<GradeCategory> categories,
+            @Param("year") AcademicYear year);
 
     /**
      * Lists every grade attached to any evaluation under the given

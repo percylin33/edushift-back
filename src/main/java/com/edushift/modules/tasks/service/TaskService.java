@@ -23,6 +23,9 @@ public interface TaskService {
 
 	Page<TaskSummary> listBySection(UUID sectionPublicUuid, Pageable pageable);
 
+	Page<TaskSummary> listBySection(
+			UUID sectionPublicUuid, UUID assignmentPublicUuid, Pageable pageable);
+
 	TaskResponse getByPublicUuid(UUID publicUuid);
 
 	TaskResponse patch(UUID publicUuid, UpdateTaskRequest request);

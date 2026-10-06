@@ -3,22 +3,32 @@ package com.edushift.modules.academic.competency.service.impl;
 import com.edushift.modules.academic.competency.dto.CompetencyListItem;
 import com.edushift.modules.academic.competency.dto.CompetencyReorderRequest;
 import com.edushift.modules.academic.competency.dto.CompetencyResponse;
+import com.edushift.modules.academic.competency.dto.CreateCompetencyCapacityRequest;
 import com.edushift.modules.academic.competency.dto.CreateCompetencyRequest;
 import com.edushift.modules.academic.competency.dto.UpdateCompetencyRequest;
 import com.edushift.modules.academic.competency.entity.Capacity;
 import com.edushift.modules.academic.competency.entity.Competency;
+import com.edushift.modules.academic.competency.entity.CompetencyOrigin;
 import com.edushift.modules.academic.competency.mapper.CompetencyMapper;
 import com.edushift.modules.academic.competency.repository.CapacityRepository;
 import com.edushift.modules.academic.competency.repository.CompetencyRepository;
 import com.edushift.modules.academic.competency.service.CompetencyService;
 import com.edushift.modules.academic.course.entity.Course;
 import com.edushift.modules.academic.course.repository.CourseRepository;
+import com.edushift.modules.auth.entity.UserRole;
 import com.edushift.modules.sessions.learning.repository.LearningSessionRepository;
+import com.edushift.modules.teachers.assignments.repository.TeacherAssignmentRepository;
+import com.edushift.shared.exception.BadRequestException;
 import com.edushift.shared.exception.ConflictException;
+import com.edushift.shared.exception.ForbiddenException;
 import com.edushift.shared.exception.ResourceNotFoundException;
+import com.edushift.shared.security.CurrentUserProvider;
+import java.text.Normalizer;
+import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -41,10 +51,14 @@ import org.springframework.transaction.annotation.Transactional;
 @RequiredArgsConstructor
 public class CompetencyServiceImpl implements CompetencyService {
 
+	private static final int CODE_MAX = 40;
+
 	private final CompetencyRepository competencyRepository;
 	private final CapacityRepository capacityRepository;
 	private final CourseRepository courseRepository;
 	private final LearningSessionRepository sessionRepository;
+	private final TeacherAssignmentRepository assignmentRepository;
+	private final CurrentUserProvider currentUser;
 	private final CompetencyMapper mapper;
 
 	// =========================================================================
@@ -93,10 +107,24 @@ public class CompetencyServiceImpl implements CompetencyService {
 	public CompetencyResponse createCompetency(UUID courseUuid,
 			CreateCompetencyRequest request) {
 		Course course = loadCourse(courseUuid);
-		ensureCodeAvailable(course, request.code(), null);
+		boolean teacher = isTeacher();
+		if (teacher) {
+			requireAssigned(course);
+			if (request.capacities() == null || request.capacities().isEmpty()) {
+				throw new BadRequestException("COMPETENCY_NEEDS_CAPACITY",
+						"A teacher-created competency needs at least one capacity");
+			}
+		}
+
+		String code = resolveCode(course, request.code(), request.name());
+		ensureCodeAvailable(course, code, null);
 
 		int displayOrder = resolveDisplayOrder(course, request.displayOrder());
 		Competency competency = mapper.fromCreate(request, course, displayOrder);
+		competency.setCode(code);
+		competency.setOrigin(teacher
+				? CompetencyOrigin.TEACHER
+				: CompetencyOrigin.INSTITUTIONAL);
 
 		Competency saved;
 		try {
@@ -108,10 +136,12 @@ public class CompetencyServiceImpl implements CompetencyService {
 							+ displayOrder, ex);
 		}
 
-		log.info("[academic.competency] created -- publicUuid={} courseCode={} code={} order={}",
+		List<Capacity> capacities = persistCapacities(saved, request.capacities());
+
+		log.info("[academic.competency] created -- publicUuid={} courseCode={} code={} origin={} order={}",
 				saved.getPublicUuid(), course.getCode(), saved.getCode(),
-				saved.getDisplayOrder());
-		return mapper.toResponse(saved, List.of());
+				saved.getOrigin(), saved.getDisplayOrder());
+		return mapper.toResponse(saved, capacities);
 	}
 
 	@Override
@@ -238,6 +268,55 @@ public class CompetencyServiceImpl implements CompetencyService {
 				competency.getPublicUuid(), competency.getCode(), capacities.size());
 	}
 
+	@Override
+	@Transactional
+	public CompetencyResponse deactivateCompetency(UUID publicUuid) {
+		Competency competency = loadCompetency(publicUuid);
+		if (isTeacher()) {
+			requireAssigned(competency.getCourse());
+			UUID userId = currentUserId();
+			boolean owned = competency.getOrigin() == CompetencyOrigin.TEACHER
+					&& userId.equals(competency.getCreatedBy());
+			if (!owned) {
+				throw new ForbiddenException("COMPETENCY_ORIGIN_LOCKED",
+						"Only the teacher who created this competency can deactivate it");
+			}
+			if (sessionRepository.existsActiveByCompetencyForOtherTeacher(competency, userId)) {
+				throw new ConflictException("COMPETENCY_USED_BY_OTHER_TEACHER",
+						"Another teacher already uses competency '"
+								+ competency.getCode() + "' in a learning session");
+			}
+		}
+
+		competency.setIsActive(Boolean.FALSE);
+		Competency saved = competencyRepository.saveAndFlush(competency);
+		List<Capacity> capacities = capacityRepository
+				.findAllByCompetencyOrderByDisplayOrderAsc(saved);
+		log.info("[academic.competency] deactivated -- publicUuid={} origin={}",
+				saved.getPublicUuid(), saved.getOrigin());
+		return mapper.toResponse(saved, capacities);
+	}
+
+	@Override
+	@Transactional
+	public CompetencyResponse promoteCompetency(UUID publicUuid) {
+		if (isTeacher()) {
+			throw new ForbiddenException("COMPETENCY_ORIGIN_LOCKED",
+					"Only a school admin can promote a competency");
+		}
+		Competency competency = loadCompetency(publicUuid);
+		if (competency.getOrigin() != CompetencyOrigin.TEACHER) {
+			throw new ConflictException("COMPETENCY_ORIGIN_LOCKED",
+					"Only a teacher-created competency can be promoted");
+		}
+		competency.setOrigin(CompetencyOrigin.INSTITUTIONAL);
+		Competency saved = competencyRepository.saveAndFlush(competency);
+		List<Capacity> capacities = capacityRepository
+				.findAllByCompetencyOrderByDisplayOrderAsc(saved);
+		log.info("[academic.competency] promoted -- publicUuid={}", saved.getPublicUuid());
+		return mapper.toResponse(saved, capacities);
+	}
+
 	// =========================================================================
 	// Helpers
 	// =========================================================================
@@ -318,5 +397,102 @@ public class CompetencyServiceImpl implements CompetencyService {
 	 */
 	private long countSessionsByCompetency(Competency competency) {
 		return sessionRepository.countActiveByCompetency(competency);
+	}
+
+	private boolean isTeacher() {
+		return currentUser.currentUserRole().orElse(UserRole.TENANT_ADMIN) == UserRole.TEACHER;
+	}
+
+	private UUID currentUserId() {
+		return currentUser.currentUserId().orElseThrow(() ->
+				new ForbiddenException("TEACHER_NOT_ASSIGNED_TO_COURSE",
+						"No authenticated teacher for this competency write"));
+	}
+
+	private void requireAssigned(Course course) {
+		UUID userId = currentUserId();
+		if (!assignmentRepository.existsActiveByCourseAndTeacherUserId(course, userId)) {
+			throw new ForbiddenException("TEACHER_NOT_ASSIGNED_TO_COURSE",
+					"You can only author competencies for a course you teach");
+		}
+	}
+
+	private String resolveCode(Course course, String requested, String name) {
+		if (requested != null && !requested.isBlank()) {
+			return requested.trim();
+		}
+		String base = codeFromName(name);
+		String candidate = base;
+		int suffix = 2;
+		while (competencyRepository.findByCourseAndCodeIgnoreCase(course, candidate).isPresent()) {
+			candidate = withSuffix(base, suffix++);
+			if (suffix > 50) {
+				throw new ConflictException("COMPETENCY_CODE_TAKEN",
+						"Could not derive a free code from '" + name + "'");
+			}
+		}
+		return candidate;
+	}
+
+	private List<Capacity> persistCapacities(Competency competency,
+			List<CreateCompetencyCapacityRequest> requested) {
+		if (requested == null || requested.isEmpty()) {
+			return List.of();
+		}
+		Set<String> used = new HashSet<>();
+		List<Capacity> saved = new ArrayList<>(requested.size());
+		int order = 1;
+		for (CreateCompetencyCapacityRequest item : requested) {
+			String code = item.code() == null || item.code().isBlank()
+					? codeFromName(item.name())
+					: item.code().trim();
+			String unique = code;
+			int suffix = 2;
+			while (!used.add(unique.toUpperCase(Locale.ROOT))) {
+				unique = withSuffix(code, suffix++);
+			}
+			Capacity capacity = new Capacity();
+			capacity.setCompetency(competency);
+			capacity.setCode(unique);
+			capacity.setName(item.name().trim());
+			capacity.setDisplayOrder(order++);
+			capacity.setIsActive(Boolean.TRUE);
+			saved.add(capacityRepository.save(capacity));
+		}
+		capacityRepository.flush();
+		return saved;
+	}
+
+	private static String codeFromName(String name) {
+		String stripped = Normalizer.normalize(name == null ? "" : name, Normalizer.Form.NFD)
+				.replaceAll("\\p{M}", "");
+		String normalized = stripped.toUpperCase(Locale.ROOT)
+				.replaceAll("[^A-Z0-9]+", "_")
+				.replaceAll("^_+|_+$", "");
+		if (normalized.isEmpty() || !Character.isLetter(normalized.charAt(0))) {
+			normalized = "C_" + normalized;
+			normalized = normalized.replaceAll("_+$", "");
+		}
+		if (normalized.length() > CODE_MAX) {
+			normalized = normalized.substring(0, CODE_MAX).replaceAll("_+$", "");
+		}
+		if (normalized.isEmpty()) {
+			normalized = "C";
+		}
+		return normalized;
+	}
+
+	private static String withSuffix(String base, int suffix) {
+		String tail = "_" + suffix;
+		int room = CODE_MAX - tail.length();
+		String stem = base.length() > room ? base.substring(0, Math.max(room, 1)) : base;
+		stem = stem.replaceAll("_+$", "");
+		if (stem.isEmpty()) {
+			stem = "C";
+		}
+		String candidate = stem + tail;
+		return candidate.length() > CODE_MAX
+				? candidate.substring(0, CODE_MAX)
+				: candidate;
 	}
 }

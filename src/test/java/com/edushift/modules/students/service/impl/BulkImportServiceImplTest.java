@@ -8,16 +8,23 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.edushift.modules.academic.section.service.SectionService;
 import com.edushift.modules.students.dto.BulkImportJobResponse;
 import com.edushift.modules.students.entity.BulkImportJob;
 import com.edushift.modules.students.entity.BulkImportStatus;
 import com.edushift.modules.students.mapper.BulkImportJobMapper;
 import com.edushift.modules.students.repository.BulkImportJobRepository;
+import com.edushift.modules.students.service.bulk.StudentBulkImportOptions;
+import com.edushift.modules.students.service.bulk.StudentBulkImportParser;
 import com.edushift.modules.students.service.bulk.StudentBulkImportRunner;
 import com.edushift.modules.students.service.bulk.StudentTemplateGenerator;
+import com.edushift.modules.teachers.bulk.TeacherBulkImportParser;
+import com.edushift.modules.teachers.bulk.TeacherBulkImportRunner;
+import com.edushift.modules.teachers.bulk.TeacherTemplateGenerator;
 import com.edushift.shared.exception.BusinessException;
 import com.edushift.shared.exception.ResourceNotFoundException;
 import com.edushift.shared.multitenancy.TenantContext;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.lang.reflect.Field;
 import java.util.Optional;
 import java.util.UUID;
@@ -40,7 +47,13 @@ class BulkImportServiceImplTest {
 	@Mock private BulkImportJobRepository jobRepository;
 	@Spy private BulkImportJobMapper mapper = new BulkImportJobMapper();
 	@Mock private StudentBulkImportRunner runner;
+	@Mock private TeacherBulkImportRunner teacherRunner;
 	@Mock private StudentTemplateGenerator templateGenerator;
+	@Mock private TeacherTemplateGenerator teacherTemplateGenerator;
+	@Mock private StudentBulkImportParser parser;
+	@Mock private TeacherBulkImportParser teacherParser;
+	@Mock private SectionService sectionService;
+	@Spy private ObjectMapper objectMapper = new ObjectMapper();
 
 	@InjectMocks private BulkImportServiceImpl service;
 
@@ -88,7 +101,8 @@ class BulkImportServiceImplTest {
 			assertThat(saved.getFileName()).isEqualTo("students.xlsx");
 			assertThat(saved.getFileSizeBytes()).isEqualTo("payload-bytes".getBytes().length);
 
-			verify(runner).run(eq(saved.getId()), eq(TENANT_ID), any(byte[].class));
+			verify(runner).run(eq(saved.getId()), eq(TENANT_ID), any(byte[].class),
+					any(StudentBulkImportOptions.class));
 			assertThat(response.fileName()).isEqualTo("students.xlsx");
 		}
 
@@ -103,7 +117,7 @@ class BulkImportServiceImplTest {
 							ex -> assertThat(ex.getCode()).isEqualTo("UNSUPPORTED_FILE_TYPE"));
 
 			verify(jobRepository, never()).saveAndFlush(any(BulkImportJob.class));
-			verify(runner, never()).run(any(), any(), any());
+			verify(runner, never()).run(any(), any(), any(), any());
 		}
 
 		@Test

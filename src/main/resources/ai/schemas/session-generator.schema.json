@@ -58,7 +58,7 @@
       "properties": {
         "phase": {
           "type": "string",
-          "enum": ["INICIO", "DESARROLLO", "CIERRE"]
+          "minLength": 2, "maxLength": 60
         },
         "name": {
           "type": "string",

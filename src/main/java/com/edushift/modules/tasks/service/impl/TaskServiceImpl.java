@@ -2,8 +2,13 @@ package com.edushift.modules.tasks.service.impl;
 
 import com.edushift.modules.academic.section.entity.Section;
 import com.edushift.modules.academic.section.repository.SectionRepository;
+import com.edushift.modules.auth.repository.UserRepository;
 import com.edushift.modules.files.entity.FileObject;
 import com.edushift.modules.files.service.FileObjectService;
+import com.edushift.modules.notifications.entity.Notification;
+import com.edushift.modules.notifications.event.NotificationEvent;
+import com.edushift.modules.students.enrollments.entity.StudentEnrollment;
+import com.edushift.modules.students.enrollments.repository.StudentEnrollmentRepository;
 import com.edushift.modules.tasks.dto.CreateTaskRequest;
 import com.edushift.modules.tasks.dto.TaskResponse;
 import com.edushift.modules.tasks.dto.TaskSummary;
@@ -18,11 +23,23 @@ import com.edushift.modules.tasks.exception.TaskNotFoundException;
 import com.edushift.modules.tasks.mapper.TaskMapper;
 import com.edushift.modules.tasks.repository.TaskRepository;
 import com.edushift.modules.tasks.service.TaskService;
+import com.edushift.modules.tasks.submission.entity.SubmissionStatus;
+import com.edushift.modules.tasks.submission.repository.SubmissionRepository;
+import com.edushift.modules.teachers.assignments.entity.TeacherAssignment;
+import com.edushift.modules.teachers.assignments.support.LmsAssignmentBinder;
+import com.edushift.shared.multitenancy.TenantContext;
 import java.time.Instant;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
@@ -55,6 +72,11 @@ public class TaskServiceImpl implements TaskService {
 	private final SectionRepository sectionRepository;
 	private final FileObjectService fileObjectService;
 	private final TaskMapper taskMapper;
+	private final LmsAssignmentBinder lmsAssignmentBinder;
+	private final ApplicationEventPublisher eventPublisher;
+	private final StudentEnrollmentRepository studentEnrollmentRepository;
+	private final UserRepository userRepository;
+	private final SubmissionRepository submissionRepository;
 
 	@Override
 	@Transactional
@@ -62,11 +84,9 @@ public class TaskServiceImpl implements TaskService {
 			CreateTaskRequest request, UUID ownerUserId) {
 		Section section = requireSection(sectionPublicUuid);
 		validateDueAt(request.dueAt());
+		TeacherAssignment assignment = lmsAssignmentBinder.requireForCreate(
+				request.teacherAssignmentPublicUuid(), section);
 
-		// Validate the attachment reference (cross-tenant protection):
-		// the file must exist within the same tenant. A missing row
-		// resolves as FILE_NOT_FOUND (BadRequest per spec REQ-TSK-01
-		// edge case).
 		UUID attachmentPublicUuid = request.attachmentPublicUuid();
 		if (attachmentPublicUuid != null) {
 			Optional<FileObject> file = fileObjectService.findByPublicUuid(
@@ -81,16 +101,17 @@ public class TaskServiceImpl implements TaskService {
 
 		Task entity = new Task();
 		entity.setSection(section);
+		entity.setTeacherAssignment(assignment);
 		entity.setTitle(request.title());
 		entity.setDescription(request.description());
 		entity.setDueAt(request.dueAt());
 		entity.setAttachmentPublicUuid(attachmentPublicUuid);
 		entity.setOwnerUserId(ownerUserId);
-		entity.setAllowResubmission(true);
-		// status defaults to DRAFT in @PrePersist.
+		entity.setMaxScore(request.maxScore().shortValue());
+		entity.setAllowResubmission(
+				request.allowResubmission() == null || request.allowResubmission());
 		Task saved = taskRepository.save(entity);
 
-		// The task is the first consumer of the attached file.
 		if (attachmentPublicUuid != null) {
 			fileObjectService.acquireReference(attachmentPublicUuid);
 		}
@@ -101,23 +122,35 @@ public class TaskServiceImpl implements TaskService {
 	@Override
 	@Transactional(readOnly = true)
 	public Page<TaskSummary> listBySection(UUID sectionPublicUuid, Pageable pageable) {
-		// Tenant-safe: if the section is not visible to the current tenant
-		// (anti-enumeration), return an empty page instead of 404. The
-		// section existence check still validates ownership internally
-		// because findAllBySectionOrderByDueAtDesc uses @TenantId filtering.
+		return listBySection(sectionPublicUuid, null, pageable);
+	}
+
+	@Override
+	@Transactional(readOnly = true)
+	public Page<TaskSummary> listBySection(
+			UUID sectionPublicUuid, UUID assignmentPublicUuid, Pageable pageable) {
 		Optional<Section> section = sectionRepository.findByPublicUuid(sectionPublicUuid);
 		if (section.isEmpty()) {
 			return Page.empty(pageable);
 		}
-		return taskRepository
-				.findAllBySectionOrderByDueAtDesc(section.get(), pageable)
-				.map(taskMapper::toSummary);
+		if (assignmentPublicUuid != null) {
+			TeacherAssignment assignment = lmsAssignmentBinder.requireForFilter(
+					assignmentPublicUuid, section.get());
+			return enrichSummaries(taskRepository
+					.findAllBySectionAndTeacherAssignmentOrderByDueAtDesc(
+							section.get(), assignment, pageable));
+		}
+		return enrichSummaries(taskRepository
+				.findAllBySectionOrderByDueAtDesc(section.get(), pageable));
 	}
 
 	@Override
 	@Transactional(readOnly = true)
 	public TaskResponse getByPublicUuid(UUID publicUuid) {
-		return taskMapper.toResponse(requireTask(publicUuid));
+		Task task = requireTask(publicUuid);
+		int total = (int) submissionRepository.countByTask(task);
+		int graded = (int) submissionRepository.countByTaskAndStatus(task, SubmissionStatus.GRADED);
+		return taskMapper.toResponse(task, total, graded);
 	}
 
 	@Override
@@ -163,6 +196,9 @@ public class TaskServiceImpl implements TaskService {
 		if (request.allowResubmission() != null) {
 			entity.setAllowResubmission(request.allowResubmission());
 		}
+		if (request.maxScore() != null) {
+			entity.setMaxScore(request.maxScore().shortValue());
+		}
 
 		Task saved = taskRepository.save(entity);
 		return taskMapper.toResponse(saved);
@@ -180,6 +216,7 @@ public class TaskServiceImpl implements TaskService {
 		entity.setPublishedAt(Instant.now());
 		Task saved = taskRepository.save(entity);
 		log.info("Task published publicUuid={}", publicUuid);
+		notifyTaskPublished(saved);
 		return taskMapper.toResponse(saved);
 	}
 
@@ -225,6 +262,110 @@ public class TaskServiceImpl implements TaskService {
 	// helpers
 	// ------------------------------------------------------------------
 
+	/**
+	 * Fan-out {@code TASK_PUBLISHED} to every actively enrolled student
+	 * in the task's section (same pattern as {@code QUIZ_PUBLISHED}).
+	 */
+	private void notifyTaskPublished(Task saved) {
+		Section section = saved.getSection();
+		if (section == null) {
+			return;
+		}
+		List<StudentEnrollment> enrolled = studentEnrollmentRepository.findActiveBySection(section);
+		if (enrolled.isEmpty()) {
+			return;
+		}
+		String dueDate = saved.getDueAt() == null ? "" : saved.getDueAt().toString();
+		String courseName = section.getName() == null ? "" : section.getName();
+
+		// DEBT-NOTIF-4: resolve internal user ids → public UUIDs so the
+		// async listener receives recipient.userId matching users(public_uuid).
+		Set<UUID> studentUserInternalIds = new HashSet<>();
+		for (StudentEnrollment e : enrolled) {
+			UUID uid = e.getStudent() == null ? null : e.getStudent().getUserId();
+			if (uid != null) {
+				studentUserInternalIds.add(uid);
+			}
+		}
+		if (studentUserInternalIds.isEmpty()) {
+			return;
+		}
+		Map<UUID, UUID> linkedToPublic = new HashMap<>();
+		Map<UUID, String> publicToEmail = new HashMap<>();
+		for (com.edushift.modules.auth.entity.User u : userRepository.findAllById(studentUserInternalIds)) {
+			linkedToPublic.put(u.getId(), u.getPublicUuid());
+			if (u.getEmail() != null && !u.getEmail().isBlank()) {
+				publicToEmail.put(u.getPublicUuid(), u.getEmail());
+			}
+		}
+		for (UUID linkedId : studentUserInternalIds) {
+			if (!linkedToPublic.containsKey(linkedId)) {
+				userRepository.findByPublicUuid(linkedId).ifPresent(u -> {
+					linkedToPublic.put(linkedId, u.getPublicUuid());
+					if (u.getEmail() != null && !u.getEmail().isBlank()) {
+						publicToEmail.put(u.getPublicUuid(), u.getEmail());
+					}
+				});
+			}
+		}
+
+		List<NotificationEvent.Recipient> recipients = enrolled.stream()
+				.map(e -> {
+					UUID linkedId = e.getStudent() == null ? null : e.getStudent().getUserId();
+					if (linkedId == null) {
+						return null;
+					}
+					UUID publicId = linkedToPublic.get(linkedId);
+					if (publicId == null) {
+						return null;
+					}
+					String email = publicToEmail.get(publicId);
+					if ((email == null || email.isBlank()) && e.getStudent() != null) {
+						email = e.getStudent().getEmail();
+					}
+					return new NotificationEvent.Recipient(publicId, email);
+				})
+				.filter(Objects::nonNull)
+				.toList();
+
+		Map<String, Object> payload = new HashMap<>();
+		payload.put("studentName", "");
+		payload.put("taskTitle", saved.getTitle() == null ? "" : saved.getTitle());
+		payload.put("taskPublicUuid", saved.getPublicUuid() == null ? "" : saved.getPublicUuid().toString());
+		payload.put("courseName", courseName);
+		payload.put("dueDate", dueDate);
+
+		recipients.forEach(r -> eventPublisher.publishEvent(
+				NotificationEvent.builder()
+						.templateKey("TASK_PUBLISHED")
+						.category(Notification.Category.TASK)
+						.sourceId(saved.getPublicUuid())
+						.tenantId(TenantContext.currentRequired())
+						.recipients(List.of(r))
+						.payload(payload)
+						.build()));
+	}
+
+	private Page<TaskSummary> enrichSummaries(Page<Task> page) {
+		List<Task> tasks = page.getContent();
+		if (tasks.isEmpty()) {
+			return page.map(t -> taskMapper.toSummary(t, 0, 0));
+		}
+		List<UUID> taskIds = tasks.stream().map(Task::getId).toList();
+		Map<UUID, Integer> totalCounts = new HashMap<>();
+		for (Object[] row : submissionRepository.countGroupedByTaskId(taskIds)) {
+			totalCounts.put((UUID) row[0], ((Number) row[1]).intValue());
+		}
+		Map<UUID, Integer> gradedCounts = new HashMap<>();
+		for (Object[] row : submissionRepository.countGradedGroupedByTaskId(taskIds)) {
+			gradedCounts.put((UUID) row[0], ((Number) row[1]).intValue());
+		}
+		return page.map(t -> taskMapper.toSummary(
+				t,
+				totalCounts.getOrDefault(t.getId(), 0),
+				gradedCounts.getOrDefault(t.getId(), 0)));
+	}
+
 	private Task requireTask(UUID publicUuid) {
 		return taskRepository.findByPublicUuid(publicUuid)
 				.orElseThrow(() -> new TaskNotFoundException(publicUuid.toString()));
@@ -253,6 +394,7 @@ public class TaskServiceImpl implements TaskService {
 				&& r.description() == null
 				&& r.dueAt() == null
 				&& r.attachmentPublicUuid() == null
-				&& r.allowResubmission() == null;
+				&& r.allowResubmission() == null
+				&& r.maxScore() == null;
 	}
 }

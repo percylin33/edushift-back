@@ -36,6 +36,7 @@ class NotificationControllerTest {
         given(currentUserProvider.currentUserId()).willReturn(Optional.of(UUID.randomUUID()));
         given(notificationService.listForUser(any(), anyBoolean(), any()))
                 .willReturn(org.springframework.data.domain.Page.empty());
+        given(notificationService.toResponses(any())).willReturn(List.of());
         mockMvc.perform(get("/v1/notifications").with(authentication(auth())))
                 .andExpect(status().isOk());
     }

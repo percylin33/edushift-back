@@ -62,6 +62,14 @@ public interface AttendanceService {
 	AttendanceSessionResponse closeSession(UUID sessionPublicUuid);
 
 	/**
+	 * Soft-delete ACTIVE sessions on {@code day} with zero check-ins.
+	 * Does not materialize ABSENT. Used by the end-of-day cleanup job.
+	 *
+	 * @return number of sessions abandoned
+	 */
+	int abandonUnusedSessionsForDay(LocalDate day);
+
+	/**
 	 * Register a check-in scan. Idempotent on
 	 * {@code (session, student)} — the second scan of the same student
 	 * returns the existing row with {@code wasIdempotent=true}
@@ -170,6 +178,12 @@ public interface AttendanceService {
 	 */
 	Page<AttendanceSessionListItemResponse> listSessions(
 			ListSessionsFilter filter, Pageable pageable);
+
+	/**
+	 * Staff-facing student attendance timeline with optional date bounds.
+	 */
+	java.util.List<com.edushift.modules.attendance.dto.StudentAttendanceHistoryResponse> listStudentAttendanceHistory(
+			UUID studentPublicUuid, LocalDate from, LocalDate to);
 
 	/**
 	 * Submit a justification for an attendance record (Sprint 18 / BE-18.5).

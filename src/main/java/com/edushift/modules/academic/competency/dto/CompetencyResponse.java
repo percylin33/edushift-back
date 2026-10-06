@@ -1,5 +1,6 @@
 package com.edushift.modules.academic.competency.dto;
 
+import com.edushift.modules.academic.competency.entity.CompetencyOrigin;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
@@ -20,7 +21,9 @@ public record CompetencyResponse(
 		Boolean isActive,
 		List<CapacityRef> capacities,
 		Instant createdAt,
-		Instant updatedAt
+		Instant updatedAt,
+		CompetencyOrigin origin,
+		UUID createdBy
 ) {
 
 	public record CourseRef(

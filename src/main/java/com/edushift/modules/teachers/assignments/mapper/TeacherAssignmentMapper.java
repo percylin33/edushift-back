@@ -26,15 +26,19 @@ public class TeacherAssignmentMapper {
 		AcademicPeriod period = a.getAcademicPeriod();
 		Section section = a.getSection();
 		Teacher teacher = a.getTeacher();
+		var course = a.getCourse();
 		return new AssignmentResponse(
 				a.getPublicUuid(),
 				teacher.getPublicUuid(),
 				teacher.fullName(),
 				section.getPublicUuid(),
 				section.getName(),
-				a.getCourse().getPublicUuid(),
-				a.getCourse().getCode(),
-				a.getCourse().getName(),
+				resolveGradeName(section),
+				course.getPublicUuid(),
+				course.getCode(),
+				course.getName(),
+				course.getColor(),
+				course.getIcon(),
 				period.getPublicUuid(),
 				period.getPeriodType(),
 				period.getOrdinal(),
@@ -52,15 +56,20 @@ public class TeacherAssignmentMapper {
 
 	public AssignmentListItem toListItem(TeacherAssignment a) {
 		AcademicPeriod period = a.getAcademicPeriod();
+		Section section = a.getSection();
+		var course = a.getCourse();
 		return new AssignmentListItem(
 				a.getPublicUuid(),
 				a.getTeacher().getPublicUuid(),
 				a.getTeacher().fullName(),
-				a.getSection().getPublicUuid(),
-				a.getSection().getName(),
-				a.getCourse().getPublicUuid(),
-				a.getCourse().getCode(),
-				a.getCourse().getName(),
+				section.getPublicUuid(),
+				section.getName(),
+				resolveGradeName(section),
+				course.getPublicUuid(),
+				course.getCode(),
+				course.getName(),
+				course.getColor(),
+				course.getIcon(),
 				period.getPublicUuid(),
 				period.getPeriodType(),
 				period.getOrdinal(),
@@ -86,5 +95,12 @@ public class TeacherAssignmentMapper {
 				period.getOrdinal(),
 				a.getAssignedAt()
 		);
+	}
+
+	private static String resolveGradeName(Section section) {
+		if (section == null || section.getGrade() == null) {
+			return null;
+		}
+		return section.getGrade().getName();
 	}
 }

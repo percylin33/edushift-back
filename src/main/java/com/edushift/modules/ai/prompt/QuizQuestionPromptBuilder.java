@@ -1,6 +1,6 @@
 package com.edushift.modules.ai.prompt;
 
-import com.edushift.modules.ai.config.MiniMaxProperties;
+import com.edushift.modules.ai.config.ActiveLlmSettings;
 import com.edushift.modules.ai.llm.LlmClient.LlmRequest;
 import java.util.List;
 import java.util.Map;
@@ -51,10 +51,10 @@ public class QuizQuestionPromptBuilder {
      * generations in the audit log. */
     public static final String PROMPT_VERSION = "quiz-question-suggest/v1";
 
-    private final MiniMaxProperties props;
+    private final ActiveLlmSettings models;
 
-    public QuizQuestionPromptBuilder(MiniMaxProperties props) {
-        this.props = props;
+    public QuizQuestionPromptBuilder(ActiveLlmSettings models) {
+        this.models = models;
     }
 
     /**
@@ -73,8 +73,9 @@ public class QuizQuestionPromptBuilder {
         if (count < 1 || count > 5) {
             throw new IllegalArgumentException("count must be in [1,5], got " + count);
         }
-        if (model == null || model.isBlank()) {
-            model = props.getDefaultModel();
+        if (model == null || model.isBlank()
+                || (models.ollamaEnabled() && ActiveLlmSettings.isForeignToOllama(model))) {
+            model = models.defaultModel();
         }
         return new LlmRequest(
                 model,

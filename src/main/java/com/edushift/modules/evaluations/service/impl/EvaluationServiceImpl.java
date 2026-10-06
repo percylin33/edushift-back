@@ -14,6 +14,9 @@ import com.edushift.modules.evaluations.entity.EvaluationScale;
 import com.edushift.modules.evaluations.entity.EvaluationStatus;
 import com.edushift.modules.evaluations.error.EvaluationErrorCodes;
 import com.edushift.modules.evaluations.graderecord.repository.GradeRecordRepository;
+import com.edushift.modules.evaluations.graderegister.entity.GradeCategory;
+import com.edushift.modules.evaluations.graderegister.entity.GradeCategoryColumnMode;
+import com.edushift.modules.evaluations.graderegister.service.GradeRegisterTemplateService;
 import com.edushift.modules.evaluations.mapper.EvaluationMapper;
 import com.edushift.modules.evaluations.repository.EvaluationRepository;
 import com.edushift.modules.evaluations.service.EvaluationService;
@@ -78,6 +81,7 @@ public class EvaluationServiceImpl implements EvaluationService {
 	private final ApplicationEventPublisher eventPublisher; // Sprint 9 / BE-9.3
 	private final StudentEnrollmentRepository studentEnrollmentRepository; // Sprint 9 / BE-9.3
 private final com.edushift.modules.auth.repository.UserRepository userRepository; // DEBT-NOTIF-4 (Sprint 9A)
+	private final GradeRegisterTemplateService gradeRegisterTemplateService;
 
 	// =========================================================================
 	// Reads
@@ -128,7 +132,13 @@ private final com.edushift.modules.auth.repository.UserRepository userRepository
 
 		assertKindScaleCoherent(request.kind(), request.scale());
 		validateDateWindow(request.scheduledDate(), request.dueDate());
-		ensureNameAvailable(assignment, request.name().trim(), null);
+
+		GradeCategory category = null;
+		if (request.categoryPublicUuid() != null
+				&& !request.categoryPublicUuid().isBlank()) {
+			category = requireWritableCategory(parseUuid(request.categoryPublicUuid()));
+		}
+		ensureNameAvailable(assignment, request.name().trim(), category, null);
 
 		Evaluation evaluation = mapper.fromCreate(request, assignment);
 
@@ -149,16 +159,20 @@ private final com.edushift.modules.auth.repository.UserRepository userRepository
 			ensureSessionInAssignment(session, assignment);
 			evaluation.setLearningSession(session);
 		}
+		if (category != null) {
+			evaluation.setCategory(category);
+			applyTemplateScale(evaluation);
+		}
 
 		Evaluation saved;
 		try {
 			saved = evaluationRepository.saveAndFlush(evaluation);
 		}
 		catch (DataIntegrityViolationException ex) {
-			// uk_evaluations_tenant_assignment_name_ci fired — concurrent
-			// insert grabbed the same name first.
+			// uk_evaluations_assignment_category_name_ci (or null-category
+			// twin) fired — concurrent insert grabbed the same name first.
 			throw new ConflictException(EvaluationErrorCodes.EVAL_NAME_EXISTS,
-					"Another evaluation in this assignment already uses the name '"
+					"Another evaluation in this category already uses the name '"
 							+ request.name() + "'", ex);
 		}
 
@@ -222,6 +236,19 @@ private final com.edushift.modules.auth.repository.UserRepository userRepository
 				evaluation.setLearningSession(newSession);
 			}
 		}
+		if (request.categoryPublicUuid() != null) {
+			if (request.categoryPublicUuid().isBlank()) {
+				evaluation.setCategory(null);
+			} else {
+				UUID nextCategory = parseUuid(request.categoryPublicUuid());
+				GradeCategory current = evaluation.getCategory();
+				boolean sameCategory = current != null
+						&& nextCategory.equals(current.getPublicUuid());
+				if (!sameCategory) {
+					evaluation.setCategory(requireWritableCategory(nextCategory));
+				}
+			}
+		}
 
 		// Compute the effective kind/scale so we can validate
 		// coherence against the post-merge state.
@@ -238,14 +265,22 @@ private final com.edushift.modules.auth.repository.UserRepository userRepository
 				? request.dueDate() : evaluation.getDueDate();
 		validateDateWindow(effectiveScheduled, effectiveDue);
 
-		// Name uniqueness against the post-merge state.
-		if (request.name() != null
-				&& !request.name().trim().equalsIgnoreCase(evaluation.getName())) {
-			ensureNameAvailable(assignment, request.name().trim(),
-					evaluation.getId());
+		// Name uniqueness against the post-merge state (scoped by category).
+		boolean nameChanging = request.name() != null
+				&& !request.name().trim().equalsIgnoreCase(evaluation.getName());
+		boolean categoryChanging = request.categoryPublicUuid() != null;
+		if (nameChanging || categoryChanging) {
+			String effectiveName = request.name() != null
+					? request.name().trim()
+					: evaluation.getName();
+			ensureNameAvailable(assignment, effectiveName,
+					evaluation.getCategory(), evaluation.getId());
 		}
 
 		mapper.applyUpdate(request, evaluation);
+		if (evaluation.getCategory() != null) {
+			applyTemplateScale(evaluation);
+		}
 
 		Evaluation saved;
 		try {
@@ -253,7 +288,7 @@ private final com.edushift.modules.auth.repository.UserRepository userRepository
 		}
 		catch (DataIntegrityViolationException ex) {
 			throw new ConflictException(EvaluationErrorCodes.EVAL_NAME_EXISTS,
-					"Another evaluation in this assignment already uses the name '"
+					"Another evaluation in this category already uses the name '"
 							+ request.name() + "'", ex);
 		}
 
@@ -477,18 +512,32 @@ private final com.edushift.modules.auth.repository.UserRepository userRepository
 	/**
 	 * Coherent kind/scale pairs (ADR-5B.2):
 	 * <pre>
-	 *   TASK         -> SCORE_0_20 | LITERAL_A_B_C_D
-	 *   QUIZ         -> SCORE_0_20 | LITERAL_A_B_C_D
+	 *   TASK         -> SCORE_0_20 | LITERAL_A_B_C_D | LITERAL_CNEB
+	 *   QUIZ         -> SCORE_0_20 | LITERAL_A_B_C_D | LITERAL_CNEB
 	 *   EXAM         -> SCORE_0_20
 	 *   RUBRIC       -> LITERAL_AD | LITERAL_NA | LITERAL_A_B_C_D
 	 *   COMPETENCY   -> LITERAL_NA
 	 * </pre>
 	 */
+	private static void applyTemplateScale(Evaluation evaluation) {
+		GradeCategory category = evaluation.getCategory();
+		if (category == null || category.getTemplate() == null) {
+			return;
+		}
+		EvaluationScale forced = category.getTemplate().getGradingScale();
+		if (forced == null) {
+			forced = EvaluationScale.SCORE_0_20;
+		}
+		assertKindScaleCoherent(evaluation.getKind(), forced);
+		evaluation.setScale(forced);
+	}
+
 	private static void assertKindScaleCoherent(EvaluationKind kind, EvaluationScale scale) {
 		if (kind == null || scale == null) return;
 		boolean ok = switch (kind) {
 			case TASK, QUIZ     -> scale == EvaluationScale.SCORE_0_20
-					|| scale == EvaluationScale.LITERAL_A_B_C_D;
+					|| scale == EvaluationScale.LITERAL_A_B_C_D
+					|| scale == EvaluationScale.LITERAL_CNEB;
 			case EXAM            -> scale == EvaluationScale.SCORE_0_20;
 			case RUBRIC          -> scale == EvaluationScale.LITERAL_AD
 					|| scale == EvaluationScale.LITERAL_NA
@@ -511,17 +560,22 @@ private final com.edushift.modules.auth.repository.UserRepository userRepository
 		}
 	}
 
-	private void ensureNameAvailable(TeacherAssignment assignment, String name,
-			UUID excludeInternalId) {
+	private void ensureNameAvailable(
+			TeacherAssignment assignment,
+			String name,
+			GradeCategory category,
+			UUID excludeInternalId
+	) {
 		if (name == null) return;
 		String normalised = name.trim();
 		evaluationRepository
-				.findByAssignmentAndNameIgnoreCase(assignment, normalised)
-				.filter(existing -> !existing.getId().equals(excludeInternalId))
+				.findByAssignmentAndCategoryAndNameIgnoreCase(assignment, category, normalised)
+				.filter(existing -> excludeInternalId == null
+						|| !existing.getId().equals(excludeInternalId))
 				.ifPresent(conflict -> {
 					throw new ConflictException(
 							EvaluationErrorCodes.EVAL_NAME_EXISTS,
-							"Another evaluation in this assignment already "
+							"Another evaluation in this category already "
 									+ "uses the name '" + normalised + "'");
 				});
 	}
@@ -533,7 +587,27 @@ private final com.edushift.modules.auth.repository.UserRepository userRepository
 				|| patch.scheduledDate() != null
 				|| patch.scale() != null
 				|| patch.unitPublicUuid() != null
-				|| patch.learningSessionPublicUuid() != null;
+				|| patch.learningSessionPublicUuid() != null
+				|| patch.categoryPublicUuid() != null;
+	}
+
+	private GradeCategory requireWritableCategory(UUID categoryPublicUuid) {
+		GradeCategory category = gradeRegisterTemplateService
+				.findCategoryByPublicUuid(categoryPublicUuid)
+				.orElseThrow(() -> new ResourceNotFoundException(
+						"GradeCategory", categoryPublicUuid));
+		if (Boolean.TRUE.equals(category.getTemplate().getIsSystem())) {
+			throw new BadRequestException(
+					"GRADE_CATEGORY_SYSTEM_READONLY",
+					"Cannot assign a category from a system catalog template; adopt it first");
+		}
+		if (category.getColumnMode() != GradeCategoryColumnMode.OPEN
+				&& !Boolean.TRUE.equals(category.getAllowsTeacherColumns())) {
+			throw new BadRequestException(
+					"GRADE_CATEGORY_LOCKED",
+					"This category does not allow teacher-created columns");
+		}
+		return category;
 	}
 
 	private static UUID parseUuid(String value) {

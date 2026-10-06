@@ -88,7 +88,7 @@ class SectionServiceImplTest {
 			Section s1 = newSection(active, newGrade("PRIMARIA", "1ro", 1), "A");
 			when(yearRepository.findFirstByStatus(AcademicYearStatus.ACTIVE))
 					.thenReturn(Optional.of(active));
-			when(sectionRepository.findAllByAcademicYearOrderByDisplayOrderAscNameAsc(active))
+			when(sectionRepository.findAllByYearGrouped(active))
 					.thenReturn(List.of(s1));
 
 			List<SectionListItem> result = service.listSections(null, null, null);
@@ -108,7 +108,7 @@ class SectionServiceImplTest {
 
 			assertThat(result).isEmpty();
 			verify(sectionRepository, never())
-					.findAllByAcademicYearOrderByDisplayOrderAscNameAsc(any());
+					.findAllByYearGrouped(any());
 		}
 
 		@Test

@@ -13,10 +13,14 @@ import org.apache.poi.ss.usermodel.Workbook;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.mockito.Mockito;
+
+import javax.sql.DataSource;
 
 class XlsxReportGeneratorTest {
 
-    private final XlsxReportGenerator gen = new XlsxReportGenerator();
+    private final XlsxReportGenerator gen = new XlsxReportGenerator(
+            new CsvReportGenerator(Mockito.mock(DataSource.class)));
 
     private ReportJob stubJob(ReportType type) {
         var j = new ReportJob();

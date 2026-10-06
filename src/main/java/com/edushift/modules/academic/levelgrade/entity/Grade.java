@@ -19,6 +19,7 @@ import lombok.NoArgsConstructor;
 import lombok.Setter;
 import lombok.ToString;
 import org.hibernate.annotations.SQLDelete;
+import org.hibernate.annotations.SQLRestriction;
 
 /**
  * Fine-grained progression inside an {@link AcademicLevel} (e.g.
@@ -46,6 +47,7 @@ import org.hibernate.annotations.SQLDelete;
 @Setter
 @NoArgsConstructor
 @ToString(callSuper = true, of = {"publicUuid", "name", "ordinal"})
+@SQLRestriction("deleted = false")
 @SQLDelete(sql = "UPDATE edushift.grades "
 		+ "SET deleted = true, deleted_at = NOW(), updated_at = NOW() "
 		+ "WHERE id = ?")

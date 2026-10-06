@@ -3,6 +3,7 @@ package com.edushift.modules.academic.course.service.impl;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -20,6 +21,7 @@ import com.edushift.modules.academic.course.repository.CourseLevelRepository;
 import com.edushift.modules.academic.course.repository.CourseRepository;
 import com.edushift.modules.academic.levelgrade.entity.AcademicLevel;
 import com.edushift.modules.academic.levelgrade.repository.AcademicLevelRepository;
+import com.edushift.modules.academic.unit.service.UnitSeedService;
 import com.edushift.modules.teachers.assignments.repository.TeacherAssignmentRepository;
 import com.edushift.shared.exception.BusinessException;
 import com.edushift.shared.exception.ConflictException;
@@ -45,6 +47,7 @@ class CourseServiceImplTest {
 	@Mock private CourseLevelRepository courseLevelRepository;
 	@Mock private AcademicLevelRepository levelRepository;
 	@Mock private TeacherAssignmentRepository teacherAssignmentRepository;
+	@Mock private UnitSeedService unitSeedService;
 	@Spy private CourseMapper mapper = new CourseMapper();
 
 	@InjectMocks private CourseServiceImpl service;
@@ -168,11 +171,11 @@ class CourseServiceImplTest {
 			when(courseLevelRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
 			CourseResponse response = service.createCourse(new CreateCourseRequest(
-					"MAT", "Matematica", null, 4, 5, true,
-					List.of(primaria.getPublicUuid(), secundaria.getPublicUuid())));
+					"MAT", "Matematica", null, 4, 5, true, null, null, List.of(primaria.getPublicUuid(), secundaria.getPublicUuid())));
 
 			assertThat(response.code()).isEqualTo("MAT");
 			verify(courseLevelRepository, atLeastOnce()).save(any());
+			verify(unitSeedService).seedForCourse(any(UUID.class), eq(null), eq(false));
 		}
 
 		@Test
@@ -182,8 +185,7 @@ class CourseServiceImplTest {
 			when(courseRepository.findByCodeIgnoreCase("MAT")).thenReturn(Optional.of(existing));
 
 			assertThatThrownBy(() -> service.createCourse(new CreateCourseRequest(
-					"MAT", "Matematica", null, null, null, null,
-					List.of(UUID.randomUUID()))))
+					"MAT", "Matematica", null, null, null, null, null, null, List.of(UUID.randomUUID()))))
 					.isInstanceOf(ConflictException.class)
 					.hasMessageContaining("MAT");
 		}
@@ -196,7 +198,7 @@ class CourseServiceImplTest {
 			when(levelRepository.findByPublicUuid(strangerLevel)).thenReturn(Optional.empty());
 
 			assertThatThrownBy(() -> service.createCourse(new CreateCourseRequest(
-					"MAT", "Matematica", null, null, null, null, List.of(strangerLevel))))
+					"MAT", "Matematica", null, null, null, null, null, null, List.of(strangerLevel))))
 					.isInstanceOf(ResourceNotFoundException.class);
 		}
 
@@ -206,7 +208,7 @@ class CourseServiceImplTest {
 			when(courseRepository.findByCodeIgnoreCase("MAT")).thenReturn(Optional.empty());
 
 			assertThatThrownBy(() -> service.createCourse(new CreateCourseRequest(
-					"MAT", "Matematica", null, null, null, null, List.of())))
+					"MAT", "Matematica", null, null, null, null, null, null, List.of())))
 					.isInstanceOf(BusinessException.class)
 					.hasMessageContaining("at least one");
 		}
@@ -222,8 +224,7 @@ class CourseServiceImplTest {
 					.thenThrow(new DataIntegrityViolationException("uk_courses_tenant_code_active"));
 
 			assertThatThrownBy(() -> service.createCourse(new CreateCourseRequest(
-					"MAT", "Matematica", null, null, null, null,
-					List.of(primaria.getPublicUuid()))))
+					"MAT", "Matematica", null, null, null, null, null, null, List.of(primaria.getPublicUuid()))))
 					.isInstanceOf(ConflictException.class);
 		}
 	}
@@ -246,7 +247,7 @@ class CourseServiceImplTest {
 			when(courseLevelRepository.findAllByCourse(course)).thenReturn(List.of());
 
 			CourseResponse response = service.updateCourse(course.getPublicUuid(),
-					new UpdateCourseRequest(null, "Matemática Avanzada", null, null, null, false));
+					new UpdateCourseRequest(null, "Matemática Avanzada", null, null, null, false, null, null));
 
 			assertThat(response.name()).isEqualTo("Matemática Avanzada");
 			assertThat(response.isActive()).isFalse();
@@ -261,7 +262,7 @@ class CourseServiceImplTest {
 			when(courseLevelRepository.findAllByCourse(course)).thenReturn(List.of());
 
 			service.updateCourse(course.getPublicUuid(),
-					new UpdateCourseRequest(null, null, null, null, null, null));
+					new UpdateCourseRequest(null, null, null, null, null, null, null, null));
 
 			verify(courseRepository, never()).saveAndFlush(any());
 		}
@@ -277,7 +278,7 @@ class CourseServiceImplTest {
 			when(courseLevelRepository.findAllByCourse(course)).thenReturn(List.of());
 
 			service.updateCourse(course.getPublicUuid(),
-					new UpdateCourseRequest(null, null, "  ", null, null, null));
+					new UpdateCourseRequest(null, null, "  ", null, null, null, null, null));
 
 			assertThat(course.getDescription()).isNull();
 		}

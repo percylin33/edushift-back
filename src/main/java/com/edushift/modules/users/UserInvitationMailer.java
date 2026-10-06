@@ -46,6 +46,10 @@ public class UserInvitationMailer {
 
 	public boolean send(String to, String schoolName, String acceptUrl, Instant expiresAt,
 			Collection<String> roles) {
+		if (to != null && to.toLowerCase(Locale.ROOT).contains(".accounts.edushift.local")) {
+			log.info("[invitations] skip SMTP for synthetic mailbox to={}", to);
+			return false;
+		}
 		EmailSender sender = emailSender.getIfAvailable();
 		if (sender == null) {
 			log.info("[invitations] SMTP disabled — copy link for {} → {}", to, acceptUrl);

@@ -7,7 +7,9 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.edushift.modules.ai.config.ActiveLlmSettings;
 import com.edushift.modules.ai.config.MiniMaxProperties;
+import com.edushift.modules.ai.config.OllamaProperties;
 import com.edushift.modules.ai.entity.AiChatSession;
 import com.edushift.modules.ai.entity.TenantAiSettings;
 import com.edushift.modules.ai.exception.ChatSessionNotFoundException;
@@ -60,8 +62,11 @@ class ChatServiceTest {
         llmClient = mock(LlmClient.class);
         miniMaxProperties = new MiniMaxProperties();
         miniMaxProperties.setDefaultModel("MiniMax-M3");
+        OllamaProperties ollamaProperties = new OllamaProperties();
+        ollamaProperties.setEnabled(false);
         service = new ChatService(sessionRepo, messageRepo, tenantCtx, quotaService,
-                rateLimitService, piiFilter, llmClient, miniMaxProperties);
+                rateLimitService, piiFilter, llmClient,
+                new ActiveLlmSettings(miniMaxProperties, ollamaProperties));
         TenantContext.set(tenantId);
     }
 

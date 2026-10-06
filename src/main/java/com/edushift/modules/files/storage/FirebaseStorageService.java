@@ -50,7 +50,7 @@ import org.springframework.stereotype.Service;
  *
  * <h3>Multi-tenant safety (audit §7)</h3>
  * The on-the-wire path for an object is
- * {@code tenants/{tenantId}/lms/{module}/{publicUuid}}. The
+ * {@code envs/{env}/tenants/{slug}-{tenantId}/{module}/{yyyy}/{MM}/{publicUuid}}. The
  * {@link StorageService} interface (caller) is responsible for
  * constructing keys with {@link StoredObject#buildKey}; this class
  * does not log or echo keys back to callers.
@@ -354,7 +354,9 @@ public class FirebaseStorageService implements StorageService {
 	// Keep the unused-parameter warnings quiet on GCS-specific helpers
 	// that may be used by future housekeeping jobs (list, count).
 	@SuppressWarnings("unused")
-	private Page<Blob> listForHousekeeping(UUID tenantId, String prefix) {
-		return client.list(bucket, Storage.BlobListOption.prefix("tenants/" + tenantId + "/" + prefix));
+	private Page<Blob> listForHousekeeping(String tenantFolder, String prefix) {
+		// tenantFolder = "{slug}-{tenantId}" (see StoredObject.tenantFolder).
+		return client.list(bucket, Storage.BlobListOption.prefix(
+				"tenants/" + tenantFolder + "/" + prefix));
 	}
 }

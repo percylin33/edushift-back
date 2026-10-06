@@ -7,9 +7,11 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.edushift.modules.auth.entity.UserRole;
 import com.edushift.modules.notifications.entity.Announcement;
 import com.edushift.modules.notifications.service.AnnouncementService;
 import com.edushift.shared.security.CurrentUserProvider;
+import com.edushift.shared.security.LmsAuthorities;
 import com.edushift.test.AbstractControllerTest;
 import java.util.List;
 import java.util.Optional;
@@ -58,10 +60,50 @@ class AnnouncementControllerTest extends AbstractControllerTest {
     @Test
     void getOne_returnsOk_whenAuthenticated() throws Exception {
         UUID id = UUID.randomUUID();
-        given(service.get(id)).willReturn(stub(id));
+        given(currentUserProvider.currentUserId()).willReturn(Optional.of(ANY_USER));
+        given(service.getForCaller(id, ANY_USER)).willReturn(stub(id));
 
         mockMvc.perform(get("/v1/announcements/{id}", id).with(auth(tenantAdmin())))
                 .andExpect(status().isOk());
+    }
+
+    @Test
+    void create_returnsForbidden_whenStudentHasNoAuthority() throws Exception {
+        given(currentUserProvider.currentUserRole()).willReturn(Optional.of(UserRole.STUDENT));
+        given(currentUserProvider.currentUserId()).willReturn(Optional.of(ANY_USER));
+        mockMvc.perform(post("/v1/announcements")
+                        .with(auth(student()))
+                        .with(csrf())
+                        .contentType("application/json")
+                        .content("""
+                                {"title":"Hola","bodyHtml":"<p>x</p>","audienceType":"SCHOOL","audienceIds":[],"pinned":false}
+                                """))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void create_returnsForbidden_whenStudentHasCreateAuthority() throws Exception {
+        given(currentUserProvider.currentUserRole()).willReturn(Optional.of(UserRole.STUDENT));
+        mockMvc.perform(post("/v1/announcements")
+                        .with(auth(principal(List.of(
+                                "ROLE_STUDENT", LmsAuthorities.LMS_ANNOUNCEMENTS_CREATE))))
+                        .with(csrf())
+                        .contentType("application/json")
+                        .content("""
+                                {"title":"Hola","bodyHtml":"<p>x</p>","audienceType":"SCHOOL","audienceIds":[],"pinned":false}
+                                """))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void publish_returnsForbidden_whenStudentHasCreateAuthority() throws Exception {
+        UUID id = UUID.randomUUID();
+        given(currentUserProvider.currentUserRole()).willReturn(Optional.of(UserRole.STUDENT));
+        mockMvc.perform(post("/v1/announcements/{id}/publish", id)
+                        .with(auth(principal(List.of(
+                                "ROLE_STUDENT", LmsAuthorities.LMS_ANNOUNCEMENTS_CREATE))))
+                        .with(csrf()))
+                .andExpect(status().isForbidden());
     }
 
     @Test

@@ -11,6 +11,7 @@ import com.edushift.modules.sessions.learning.dto.LearningSessionListItem;
 import com.edushift.modules.sessions.learning.dto.LearningSessionListItem.AssignmentSummary;
 import com.edushift.modules.sessions.learning.dto.LearningSessionListItem.UnitSummary;
 import com.edushift.modules.sessions.learning.dto.LearningSessionResponse;
+import com.edushift.modules.sessions.learning.dto.SharedLearningSessionResponse;
 import com.edushift.modules.sessions.learning.dto.LearningSessionResponse.AssignmentRef;
 import com.edushift.modules.sessions.learning.dto.LearningSessionResponse.CapacityRef;
 import com.edushift.modules.sessions.learning.dto.LearningSessionResponse.CompetencyRef;
@@ -58,7 +59,8 @@ public class LearningSessionMapper {
 				session.getEndedAt(),
 				session.getCancelledAt(),
 				session.getCreatedAt(),
-				session.getUpdatedAt()
+				session.getUpdatedAt(),
+				session.isSharedWithGrade()
 		);
 	}
 
@@ -79,6 +81,43 @@ public class LearningSessionMapper {
 				toUnitSummary(u),
 				session.getCreatedAt(),
 				session.getUpdatedAt()
+		);
+	}
+
+	/**
+	 * Plan-only projection. Observations are never copied into this view.
+	 */
+	public SharedLearningSessionResponse toShared(LearningSession session) {
+		TeacherAssignment a = session.getTeacherAssignment();
+		Teacher teacher = a == null ? null : a.getTeacher();
+		Course course = a == null ? null : a.getCourse();
+		Section section = a == null ? null : a.getSection();
+		SessionContent content = session.getContent();
+		String author = teacher == null
+				? null
+				: ((nullSafe(teacher.getFirstName()) + " " + nullSafe(teacher.getLastName())).trim());
+		List<String> competencies = session.getCompetencies() == null
+				? List.of()
+				: session.getCompetencies().stream()
+						.map(Competency::getName)
+						.filter(name -> name != null && !name.isBlank())
+						.sorted()
+						.toList();
+		return new SharedLearningSessionResponse(
+				session.getPublicUuid(),
+				session.getTitle(),
+				session.getObjective(),
+				session.getScheduledDate(),
+				session.getDurationMinutes(),
+				content == null ? List.of() : safeList(content.getActivities()),
+				content == null ? List.of() : safeList(content.getMaterials()),
+				competencies,
+				blankToNull(author),
+				section == null ? null : section.getName(),
+				section == null || section.getGrade() == null ? null : section.getGrade().getName(),
+				course == null ? null : course.getCode(),
+				course == null ? null : course.getPublicUuid(),
+				a == null || a.getAcademicPeriod() == null ? null : a.getAcademicPeriod().getPublicUuid()
 		);
 	}
 
@@ -176,7 +215,8 @@ public class LearningSessionMapper {
 
 	private static SectionRef toSectionRef(Section s) {
 		if (s == null) return null;
-		return new SectionRef(s.getPublicUuid(), s.getName());
+		String gradeName = s.getGrade() == null ? null : s.getGrade().getName();
+		return new SectionRef(s.getPublicUuid(), s.getName(), gradeName);
 	}
 
 	private static PeriodRef toPeriodRef(AcademicPeriod p) {

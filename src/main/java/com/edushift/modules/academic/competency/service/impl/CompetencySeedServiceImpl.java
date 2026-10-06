@@ -7,6 +7,7 @@ import com.edushift.modules.academic.competency.dto.CompetencyListItem;
 import com.edushift.modules.academic.competency.dto.SeedCompetenciesResponse;
 import com.edushift.modules.academic.competency.entity.Capacity;
 import com.edushift.modules.academic.competency.entity.Competency;
+import com.edushift.modules.academic.competency.entity.CompetencyOrigin;
 import com.edushift.modules.academic.competency.mapper.CompetencyMapper;
 import com.edushift.modules.academic.competency.repository.CapacityRepository;
 import com.edushift.modules.academic.competency.repository.CompetencyRepository;
@@ -74,6 +75,7 @@ public class CompetencySeedServiceImpl implements CompetencySeedService {
 			competency.setDescription(defC.description());
 			competency.setDisplayOrder(competencyOrder++);
 			competency.setIsActive(Boolean.TRUE);
+			competency.setOrigin(CompetencyOrigin.MINEDU);
 			Competency persisted = competencyRepository.save(competency);
 			competenciesCreated++;
 

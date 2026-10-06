@@ -85,6 +85,15 @@ private static final String BASE = "/v1/teachers";
 				List.of(new SimpleGrantedAuthority("ROLE_TENANT_ADMIN")));
 	}
 
+	private static JwtAuthenticationToken teacherAuth() {
+		JwtAuthenticatedPrincipal principal = new JwtAuthenticatedPrincipal(
+				UUID.randomUUID(), UUID.randomUUID(),
+				"acme", "teacher@acme.test");
+		return new JwtAuthenticationToken(
+				principal, "fake.token",
+				List.of(new SimpleGrantedAuthority("ROLE_TEACHER")));
+	}
+
 	private static JwtAuthenticationToken plainAuth() {
 		JwtAuthenticatedPrincipal principal = new JwtAuthenticatedPrincipal(
 				UUID.randomUUID(), UUID.randomUUID(),
@@ -147,6 +156,34 @@ private static final String BASE = "/v1/teachers";
 		@DisplayName("authenticated but no role → 403")
 		void noRole() throws Exception {
 			mockMvc.perform(get(BASE).with(authentication(plainAuth())))
+					.andExpect(status().isForbidden());
+		}
+	}
+
+	// =========================================================================
+	// GET /me
+	// =========================================================================
+
+	@Nested
+	@DisplayName("GET /v1/teachers/me")
+	class GetMe {
+
+		@Test
+		@DisplayName("TEACHER → 200 with linked teacher profile")
+		void happyPath() throws Exception {
+			UUID id = UUID.randomUUID();
+			given(service.getCurrentTeacher()).willReturn(stubResponse(id));
+
+			mockMvc.perform(get(BASE + "/me").with(authentication(teacherAuth())))
+					.andExpect(status().isOk())
+					.andExpect(jsonPath("$.success").value(true))
+					.andExpect(jsonPath("$.data.publicUuid").value(id.toString()));
+		}
+
+		@Test
+		@DisplayName("TENANT_ADMIN → 403")
+		void adminForbidden() throws Exception {
+			mockMvc.perform(get(BASE + "/me").with(authentication(adminAuth())))
 					.andExpect(status().isForbidden());
 		}
 	}

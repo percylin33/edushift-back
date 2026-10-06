@@ -31,6 +31,26 @@ class DayPlanCalculatorTest {
 	}
 
 	@Test
+	void computeSuggestedPeriodsExtendsPeriodBeforeRecessAndLunch() {
+		List<DayPlanCalculator.Interval> hard = List.of(
+				new DayPlanCalculator.Interval(LocalTime.of(10, 45), LocalTime.of(11, 0)),
+				new DayPlanCalculator.Interval(LocalTime.of(13, 0), LocalTime.of(13, 45)));
+		List<SuggestedPeriodItem> periods = DayPlanCalculator.computeSuggestedPeriods(
+				LocalTime.of(7, 30),
+				LocalTime.of(15, 15),
+				45,
+				hard);
+		assertThat(periods).anyMatch(p ->
+				p.startTime().equals(LocalTime.of(9, 45)) && p.endTime().equals(LocalTime.of(10, 45)));
+		assertThat(periods).anyMatch(p ->
+				p.startTime().equals(LocalTime.of(11, 45)) && p.endTime().equals(LocalTime.of(13, 0)));
+		assertThat(periods.stream().noneMatch(p ->
+				p.startTime().equals(LocalTime.of(10, 30)) && p.endTime().equals(LocalTime.of(10, 45)))).isTrue();
+		assertThat(periods.stream().noneMatch(p ->
+				p.startTime().equals(LocalTime.of(12, 30)) && p.endTime().equals(LocalTime.of(13, 0)))).isTrue();
+	}
+
+	@Test
 	void validateDayWindowRejectsInverted() {
 		assertThatThrownBy(() -> DayPlanCalculator.validateDayWindow(
 				LocalTime.of(13, 0), LocalTime.of(8, 0), 45))

@@ -1,6 +1,9 @@
 package com.edushift.modules.users.controller;
 
 import com.edushift.modules.auth.entity.UserStatus;
+import com.edushift.modules.users.dto.AdminPasswordResetDelivery;
+import com.edushift.modules.users.dto.AdminResetPasswordRequest;
+import com.edushift.modules.users.dto.AdminResetPasswordResponse;
 import com.edushift.modules.users.dto.AssignRolesRequest;
 import com.edushift.modules.users.dto.UpdateUserRequest;
 import com.edushift.modules.users.dto.UserDetailResponse;
@@ -19,7 +22,6 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.web.PageableDefault;
-import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.validation.annotation.Validated;
@@ -30,7 +32,6 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
-import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
@@ -46,7 +47,7 @@ import org.springframework.web.bind.annotation.RestController;
  *   <tr><td>POST  </td><td>/{publicUuid}/roles        </td><td>TENANT_ADMIN</td><td>{@link UserDetailResponse}</td></tr>
  *   <tr><td>POST  </td><td>/{publicUuid}/disable      </td><td>TENANT_ADMIN</td><td>{@link UserDetailResponse}</td></tr>
  *   <tr><td>POST  </td><td>/{publicUuid}/enable       </td><td>TENANT_ADMIN</td><td>{@link UserDetailResponse}</td></tr>
- *   <tr><td>POST  </td><td>/{publicUuid}/reset-password</td><td>TENANT_ADMIN</td><td>202 Accepted</td></tr>
+ *   <tr><td>POST  </td><td>/{publicUuid}/reset-password</td><td>TENANT_ADMIN</td><td>{@link AdminResetPasswordResponse} (202 EMAIL / 200 TEMPORARY)</td></tr>
  * </table>
  *
  * <p>All write paths and the list+detail reads are gated by
@@ -176,19 +177,24 @@ public class UserManagementController {
 	}
 
 	@PostMapping("/{publicUuid}/reset-password")
-	@ResponseStatus(HttpStatus.ACCEPTED)
 	@SecurityRequirement(name = "bearerAuth")
 	@PreAuthorize("hasRole('TENANT_ADMIN')")
 	@Operation(
-			summary = "Trigger an admin-driven password reset (TENANT_ADMIN)",
-			description = "Logs the intent for the target user. Sprint 9 wires "
-					+ "this to the notifications module so an actual reset email "
-					+ "is delivered. Returns 202 Accepted to convey 'request "
-					+ "queued; out-of-band delivery to follow'."
+			summary = "Admin password reset — email link or temporary password (TENANT_ADMIN)",
+			description = "Body optional; default delivery=EMAIL. "
+					+ "EMAIL queues forgot-password mail (requires emailSource=REAL) → 202. "
+					+ "TEMPORARY sets a random password, forces mustChangePassword, "
+					+ "returns plaintext once → 200. Synthetic emails cannot use EMAIL."
 	)
-	public ResponseEntity<Void> resetPassword(@PathVariable UUID publicUuid) {
-		service.resetPassword(publicUuid);
-		return ResponseEntity.accepted().build();
+	public ResponseEntity<ApiResponse<AdminResetPasswordResponse>> resetPassword(
+			@PathVariable UUID publicUuid,
+			@Valid @RequestBody(required = false) AdminResetPasswordRequest request
+	) {
+		AdminResetPasswordResponse response = service.resetPassword(publicUuid, request);
+		if (response.delivery() == AdminPasswordResetDelivery.TEMPORARY) {
+			return ResponseEntity.ok(ApiResponse.ok(response));
+		}
+		return ResponseEntity.accepted().body(ApiResponse.ok(response));
 	}
 
 }

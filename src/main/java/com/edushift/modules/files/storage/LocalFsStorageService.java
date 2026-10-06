@@ -26,7 +26,7 @@ import org.springframework.stereotype.Service;
  *
  * <p>Active when {@code app.storage.provider=local-fs} (the default in
  * dev/test). Stores each upload at
- * {@code ${app.storage.local-fs.root}/tenants/{tenantId}/lms/{module}/{publicUuid}}.
+ * {@code ${app.storage.local-fs.root}/envs/{env}/tenants/{slug}-{tenantId}/{module}/{yyyy}/{MM}/{publicUuid}}.
  *
  * <h3>Multi-tenant safety (audit §7)</h3>
  * <ul>
@@ -223,13 +223,12 @@ public class LocalFsStorageService implements StorageService {
 	 * actual on-disk layout is rooted at {@code root} and the
 	 * tenantId is part of the {@code remoteKey} (see
 	 * {@link StoredObject#buildKey}, which emits
-	 * {@code "tenants/{tid}/lms/{module}/{publicUuid}"}). The previous
+	 * {@code "envs/{env}/tenants/{slug}-{tid}/{module}/{yyyy}/{MM}/{publicUuid}"}). The previous
 	 * implementation mistakenly had {@code tenantRoot = root.resolve(tid)},
-	 * which combined with the {@code "tenants/{tid}/..."} prefix in the
-	 * key produced a path with the tenantId appearing TWICE
-	 * ({@code ${root}/{tid}/tenants/{tid}/...}). Fixed in Sprint 11
-	 * (ADR-11.4): the tenant root for security checks is just
-	 * {@code root}, and the {@code tenants/} prefix comes from the key.
+	 * which combined with a tenant prefix in the key produced a path with the
+	 * tenantId appearing TWICE. Fixed in Sprint 11 (ADR-11.4): the tenant
+	 * root for security checks is just {@code root}, and the
+	 * {@code envs/.../tenants/} prefix comes from the key.
 	 */
 	private Path tenantRoot(UUID tenantId) {
 		return root();

@@ -109,4 +109,36 @@ public interface RefreshTokenRepository extends JpaRepository<RefreshToken, UUID
 	 */
 	boolean existsByTokenHashAndUserId(String tokenHash, UUID userId);
 
+	/**
+	 * SECURITY FIX: Count active (non-revoked, non-expired) refresh tokens
+	 * for a user. Used to enforce a maximum limit per user (DoS prevention).
+	 */
+	long countByUserIdAndRevokedAtIsNullAndExpiresAtAfter(UUID userId, Instant now);
+
+	/**
+	 * SECURITY FIX: Revoke the oldest active refresh tokens for a user,
+	 * keeping only the most recent {@code keep} tokens.
+	 *
+	 * @return number of tokens revoked
+	 */
+	@Modifying
+	@Query(value = """
+			UPDATE edushift.refresh_tokens
+			SET revoked_at = NOW(),
+			    revoked_reason = 'EXPIRED',
+			    updated_at = NOW()
+			WHERE user_id = :userId
+			  AND revoked_at IS NULL
+			  AND expires_at > :now
+			  AND id NOT IN (
+			      SELECT id FROM edushift.refresh_tokens
+			      WHERE user_id = :userId
+			        AND revoked_at IS NULL
+			        AND expires_at > :now
+			      ORDER BY created_at DESC
+			      LIMIT :keep
+			  )
+			""", nativeQuery = true)
+	int revokeOldestActiveTokens(@Param("userId") UUID userId, @Param("now") Instant now, @Param("keep") int keep);
+
 }

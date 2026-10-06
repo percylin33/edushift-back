@@ -29,6 +29,7 @@ import com.edushift.modules.tenants.entity.TenantStatus;
 import com.edushift.modules.tenants.exception.TenantNotFoundException;
 import com.edushift.modules.tenants.mapper.TenantMapper;
 import com.edushift.modules.tenants.repository.TenantRepository;
+import com.edushift.modules.tenants.service.TenantStatusCache;
 import com.edushift.shared.exception.ConflictException;
 import com.edushift.shared.exception.UnauthorizedException;
 import com.edushift.shared.multitenancy.TenantContext;
@@ -75,6 +76,7 @@ class TenantServiceImplTest {
 	@Mock private com.edushift.modules.admin.plans.PlatformPlanRepository platformPlanRepository;
 	@Mock private PlatformTransactionManager txManager;
 	@Mock private SchoolInvitationService schoolInvitationService;
+	@Mock private TenantStatusCache tenantStatusCache;
 
 	private TenantServiceImpl service;
 
@@ -92,7 +94,8 @@ class TenantServiceImplTest {
 				academicSeedService,
 				platformPlanRepository,
 				schoolInvitationService,
-				txManager
+				txManager,
+				tenantStatusCache
 		);
 		// Default platform-plan catalog: the production code falls back
 		// from findByCode to findByIsActiveTrueOrderBySortOrder. Provide

@@ -1,6 +1,7 @@
 package com.edushift.modules.notifications.repository;
 
 import com.edushift.modules.notifications.entity.NotificationTemplate;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -28,6 +29,19 @@ public interface NotificationTemplateRepository extends JpaRepository<Notificati
             """)
     Optional<NotificationTemplate> findByKeyAndLocale(
             @Param("key") String key,
+            @Param("locale") String locale);
+
+    /**
+     * Templates for a page or a fan-out batch. Callers skip this when
+     * {@code keys} is empty so Hibernate never sees an empty {@code IN}.
+     */
+    @Query("""
+            SELECT t FROM NotificationTemplate t
+            WHERE t.templateKey IN :keys
+              AND t.locale = :locale
+            """)
+    List<NotificationTemplate> findAllByTemplateKeyInAndLocale(
+            @Param("keys") Collection<String> keys,
             @Param("locale") String locale);
 
     /** All templates in the tenant, ordered by key. Used by the admin UI. */

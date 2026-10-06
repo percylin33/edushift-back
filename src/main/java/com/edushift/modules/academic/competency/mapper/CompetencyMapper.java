@@ -34,7 +34,9 @@ public class CompetencyMapper {
 				competency.getIsActive(),
 				toCapacityRefs(capacities),
 				competency.getCreatedAt(),
-				competency.getUpdatedAt()
+				competency.getUpdatedAt(),
+				competency.getOrigin(),
+				competency.getCreatedBy()
 		);
 	}
 
@@ -45,7 +47,9 @@ public class CompetencyMapper {
 				competency.getName(),
 				competency.getDisplayOrder(),
 				competency.getIsActive(),
-				capacityCount
+				capacityCount,
+				competency.getOrigin(),
+				competency.getCreatedBy()
 		);
 	}
 

@@ -1,6 +1,6 @@
 package com.edushift.modules.ai.service;
 
-import com.edushift.modules.ai.config.MiniMaxProperties;
+import com.edushift.modules.ai.config.ActiveLlmSettings;
 import com.edushift.modules.ai.entity.AiChatMessage;
 import com.edushift.modules.ai.entity.AiChatSession;
 import com.edushift.modules.ai.entity.TenantAiSettings;
@@ -76,7 +76,7 @@ public class ChatService {
     private final RateLimitService rateLimitService;
     private final PiiSafetyFilter piiFilter;
     private final LlmClient llmClient;
-    private final MiniMaxProperties miniMaxProperties;
+    private final ActiveLlmSettings activeLlm;
 
     @org.springframework.beans.factory.annotation.Value("${app.ai.chat.temperature:0.7}")
     private double chatTemperature;
@@ -255,16 +255,10 @@ public class ChatService {
 
     /**
      * Resolves the chat model from tenant settings, falling back to the
-     * global MiniMax default ({@code app.llm.minimax.default-model}).
-     * Rejects legacy OpenRouter-style ids the same way quiz generation does.
+     * active provider default (MiniMax, or the local Ollama tag).
      */
     String resolveChatModel(TenantAiSettings settings) {
-        String model = LmsAiService.resolveMiniMaxModel(
-                settings == null ? null : settings.getDefaultModel());
-        if (model == null || model.isBlank()) {
-            model = miniMaxProperties.getDefaultModel();
-        }
-        return model;
+        return activeLlm.resolve(settings == null ? null : settings.getDefaultModel());
     }
 
     /**

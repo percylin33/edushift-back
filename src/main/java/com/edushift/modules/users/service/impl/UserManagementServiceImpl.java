@@ -1,13 +1,20 @@
 package com.edushift.modules.users.service.impl;
 
+import com.edushift.modules.auth.entity.EmailSource;
+import com.edushift.modules.auth.entity.RevocationReason;
 import com.edushift.modules.auth.entity.User;
 import com.edushift.modules.auth.entity.UserRole;
 import com.edushift.modules.auth.entity.UserStatus;
 import com.edushift.modules.auth.events.UserStatusChangeEvent;
+import com.edushift.modules.auth.repository.RefreshTokenRepository;
 import com.edushift.modules.auth.repository.UserRepository;
 import com.edushift.modules.auth.service.PasswordResetService;
+import com.edushift.modules.auth.util.TemporaryPasswordGenerator;
 import com.edushift.modules.tenants.entity.Tenant;
 import com.edushift.modules.tenants.repository.TenantRepository;
+import com.edushift.modules.users.dto.AdminPasswordResetDelivery;
+import com.edushift.modules.users.dto.AdminResetPasswordRequest;
+import com.edushift.modules.users.dto.AdminResetPasswordResponse;
 import com.edushift.modules.users.dto.AssignRolesRequest;
 import com.edushift.modules.users.dto.UpdateUserRequest;
 import com.edushift.modules.users.dto.UserDetailResponse;
@@ -15,6 +22,7 @@ import com.edushift.modules.users.dto.UserListFilters;
 import com.edushift.modules.users.dto.UserListItem;
 import com.edushift.modules.users.mapper.UserManagementMapper;
 import com.edushift.modules.users.service.UserManagementService;
+import com.edushift.shared.exception.BadRequestException;
 import com.edushift.shared.exception.BusinessException;
 import com.edushift.shared.exception.ConflictException;
 import com.edushift.shared.exception.ResourceNotFoundException;
@@ -28,11 +36,13 @@ import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.ApplicationEventPublisher;
+import org.hibernate.query.criteria.HibernateCriteriaBuilder;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -65,6 +75,8 @@ public class UserManagementServiceImpl implements UserManagementService {
 	private final ApplicationEventPublisher eventPublisher;
 	private final PasswordResetService passwordResetService;
 	private final TenantRepository tenantRepository;
+	private final PasswordEncoder passwordEncoder;
+	private final RefreshTokenRepository refreshTokenRepository;
 
 	// ===========================================================================
 	// Read paths
@@ -224,18 +236,71 @@ public class UserManagementServiceImpl implements UserManagementService {
 
 	@Override
 	@Transactional
-	public void resetPassword(UUID publicUuid) {
+	public AdminResetPasswordResponse resetPassword(UUID publicUuid, AdminResetPasswordRequest request) {
 		User user = loadUser(publicUuid);
+		AdminPasswordResetDelivery delivery = request == null || request.delivery() == null
+				? AdminPasswordResetDelivery.EMAIL
+				: request.delivery();
+
+		return switch (delivery) {
+			case EMAIL -> resetViaEmail(user);
+			case TEMPORARY -> resetViaTemporaryPassword(user);
+		};
+	}
+
+	private AdminResetPasswordResponse resetViaEmail(User user) {
+		if (user.getEmailSource() == EmailSource.SYNTHETIC) {
+			throw new BadRequestException(
+					"EMAIL_SOURCE_SYNTHETIC",
+					"Este usuario tiene correo sintético; usa restablecimiento con contraseña temporal");
+		}
+		if (user.getStatus() != UserStatus.ACTIVE) {
+			throw new ConflictException(
+					"USER_NOT_RESETABLE",
+					"Solo se puede enviar reset por email a usuarios ACTIVE");
+		}
+
 		UUID tenantId = TenantContext.currentRequired();
 		Tenant tenant = tenantRepository.findById(tenantId).orElse(null);
 		if (tenant == null || tenant.getSlug() == null || tenant.getSlug().isBlank()) {
-			log.warn("[users] reset-password skipped -- tenant missing for publicUuid={}",
+			log.warn("[users] reset-password EMAIL skipped -- tenant missing for publicUuid={}",
 					user.getPublicUuid());
-			return;
+			return AdminResetPasswordResponse.email(user.getEmail());
 		}
 		passwordResetService.requestReset(user.getEmail(), tenant.getSlug(), null);
-		log.info("[users] reset-password queued -- publicUuid={} by={}",
+		log.info("[users] reset-password EMAIL queued -- publicUuid={} by={}",
 				user.getPublicUuid(), currentAdminPublicUuid());
+		return AdminResetPasswordResponse.email(user.getEmail());
+	}
+
+	private AdminResetPasswordResponse resetViaTemporaryPassword(User user) {
+		UserStatus status = user.getStatus();
+		if (status != UserStatus.ACTIVE && status != UserStatus.LOCKED) {
+			throw new ConflictException(
+					"USER_NOT_RESETABLE",
+					"Solo se puede emitir contraseña temporal a usuarios ACTIVE o LOCKED");
+		}
+
+		String temporaryPassword = TemporaryPasswordGenerator.generate();
+		user.setPasswordHash(passwordEncoder.encode(temporaryPassword));
+		user.setMustChangePassword(true);
+		if (status == UserStatus.LOCKED) {
+			UserStatus oldStatus = user.getStatus();
+			user.setStatus(UserStatus.ACTIVE);
+			eventPublisher.publishEvent(new UserStatusChangeEvent(
+					user.getPublicUuid(),
+					oldStatus,
+					UserStatus.ACTIVE,
+					"admin-temp-password-reset",
+					currentAdminPublicUuid()));
+		}
+		userRepository.save(user);
+
+		int revoked = refreshTokenRepository.revokeAllByUser(user.getId(), RevocationReason.ADMIN_REVOKE);
+		log.info("[users] reset-password TEMPORARY -- publicUuid={} by={} refreshTokensRevoked={}",
+				user.getPublicUuid(), currentAdminPublicUuid(), revoked);
+
+		return AdminResetPasswordResponse.temporary(user.getEmail(), temporaryPassword);
 	}
 
 	// ===========================================================================
@@ -344,17 +409,21 @@ public class UserManagementServiceImpl implements UserManagementService {
 		}
 
 		/**
-		 * Filter by role. The {@code roles} column is a Postgres
-		 * {@code varchar[]}, which JPA Criteria can't query natively, so we
-		 * fall back to a {@code function('array_position', ...) IS NOT NULL}
-		 * trick: it returns a non-null index when the role name is found.
-		 * This works on Postgres (the only DB we target) and stays out of
-		 * native-SQL territory.
+		 * Filter by role membership on the Postgres {@code varchar[]} column.
+		 *
+		 * <p>Plain JPA {@code function('array_position', …)} is unreliable here:
+		 * Hibernate may not type the array argument correctly and the predicate
+		 * effectively degrades to “roles IS NOT NULL”, matching every row.
+		 * {@link HibernateCriteriaBuilder#arrayContains} renders a typed
+		 * containment check ({@code roles @> ARRAY[:role]} / equivalent) that
+		 * filters correctly on PostgreSQL.
 		 */
 		private static Specification<User> byRole(String roleName) {
-			return (root, q, cb) -> cb.isNotNull(
-					cb.function("array_position", Integer.class,
-							root.get("roles"), cb.literal(roleName)));
+			return (root, q, cb) -> {
+				// Cast (not unwrap): DevTools' ECJ sometimes fails to resolve unwrap().
+				HibernateCriteriaBuilder hcb = (HibernateCriteriaBuilder) cb;
+				return hcb.arrayContains(root.<String[]>get("roles"), roleName);
+			};
 		}
 	}
 }

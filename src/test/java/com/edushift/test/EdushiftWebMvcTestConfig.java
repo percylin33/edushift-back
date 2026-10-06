@@ -103,6 +103,15 @@ public class EdushiftWebMvcTestConfig {
 	}
 
 	/**
+	 * Stand-in {@code FirstLoginOnboardingService} (CRED-7). Avoids pulling
+	 * Student/Guardian repositories into the auth controller slice.
+	 */
+	@Bean
+	com.edushift.modules.auth.service.FirstLoginOnboardingService firstLoginOnboardingService() {
+		return mock(com.edushift.modules.auth.service.FirstLoginOnboardingService.class);
+	}
+
+	/**
 	 * Stand-in {@code SessionsPdfExportService}. OpenPDF + filesystem
 	 * wiring does not belong in the controller slice. The
 	 * {@code /sessions/{id}/pdf} endpoint is integration-tested by
@@ -159,6 +168,25 @@ public class EdushiftWebMvcTestConfig {
 	@Bean
 	com.edushift.modules.tenants.repository.TenantRepository tenantRepository() {
 		return mock(com.edushift.modules.tenants.repository.TenantRepository.class);
+	}
+
+	/**
+	 * Stand-in {@code TenantStatusCache}. {@code JwtAuthenticationFilter}
+	 * checks tenant lifecycle (ACTIVE / SUSPENDED) on every request; the
+	 * real cache pulls Redis + TenantRepository — too heavy for a slice.
+	 */
+	@Bean
+	com.edushift.modules.tenants.service.TenantStatusCache tenantStatusCache() {
+		return mock(com.edushift.modules.tenants.service.TenantStatusCache.class);
+	}
+
+	/**
+	 * Stand-in {@code PaymentAccessService}. {@code PaymentLmsAccessFilter}
+	 * is auto-detected as a Filter and needs this dependency.
+	 */
+	@Bean
+	com.edushift.modules.payments.service.PaymentAccessService paymentAccessService() {
+		return mock(com.edushift.modules.payments.service.PaymentAccessService.class);
 	}
 
 	/**

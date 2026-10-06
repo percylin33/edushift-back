@@ -83,16 +83,21 @@ class LocalFsStorageServiceTest {
 
 		StoredObject stored = service.put(new StoragePutRequest(
 				tenantId,
+				"demo-school",
 				"materials",
 				UUID.randomUUID(),
 				"greeting.txt",
 				"text/plain",
 				new ByteArrayInputStream(payload),
-				payload.length));
+				payload.length,
+				"dev",
+				java.time.Instant.parse("2026-09-02T12:00:00Z")));
 
 		assertThat(stored.provider()).isEqualTo(StorageProvider.LOCAL_FS);
 		assertThat(stored.sizeBytes()).isEqualTo(payload.length);
 		assertThat(stored.checksumSha256()).isEqualTo(expectedSha);
+		assertThat(stored.remoteKey()).startsWith(
+				"envs/dev/tenants/demo-school-" + tenantId + "/materials/2026/09/");
 
 		try (InputStream in = service.open(tenantId, stored.remoteKey())) {
 			byte[] read = in.readAllBytes();
@@ -107,12 +112,15 @@ class LocalFsStorageServiceTest {
 		String sneaky = "../" + id + ".txt";
 		StoredObject stored = service.put(new StoragePutRequest(
 				tenantId,
+				null,
 				"materials",
 				id,
 				"sneaky.txt",
 				"text/plain",
 				new ByteArrayInputStream("x".getBytes()),
-				1));
+				1,
+				"dev",
+				java.time.Instant.parse("2026-09-02T12:00:00Z")));
 		// The put above used the service's default key layout; we cannot
 		// inject the malicious key through put. We exercise the open
 		// path with the malicious key directly — that's the
@@ -120,8 +128,8 @@ class LocalFsStorageServiceTest {
 		assertThatThrownBy(() -> service.open(tenantId, sneaky))
 				.isInstanceOf(FileNotFoundException.class);
 
-		// The put above succeeded: assert it landed inside the tenant dir.
-		assertThat(stored.remoteKey()).startsWith("tenants/" + tenantId + "/");
+		// The put above succeeded: assert it landed inside the env/tenant dir.
+		assertThat(stored.remoteKey()).startsWith("envs/dev/tenants/" + tenantId + "/");
 	}
 
 	@Test
@@ -164,12 +172,15 @@ class LocalFsStorageServiceTest {
 		UUID tid = UUID.randomUUID();
 		assertThatThrownBy(() -> s.put(new StoragePutRequest(
 				tid,
+				null,
 				"materials",
 				UUID.randomUUID(),
 				"x.txt",
 				"text/plain",
 				new ByteArrayInputStream("x".getBytes()),
-				1)))
+				1,
+				"dev",
+				java.time.Instant.now())))
 				.isInstanceOf(StorageUnavailableException.class);
 	}
 

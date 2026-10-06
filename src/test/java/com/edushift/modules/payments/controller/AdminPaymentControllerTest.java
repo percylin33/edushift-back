@@ -27,12 +27,31 @@ class AdminPaymentControllerTest extends AbstractControllerTest {
     @Autowired MockMvc mockMvc;
     @MockitoBean PaymentConceptService conceptService;
     @MockitoBean AdminPaymentService adminPaymentService;
+    @MockitoBean com.edushift.modules.payments.service.SubscriptionService subscriptionService;
+    @MockitoBean com.edushift.modules.payments.service.PaymentPolicyService paymentPolicyService;
+    @MockitoBean com.edushift.modules.payments.service.MoraService moraService;
+    @MockitoBean com.edushift.modules.payments.service.PaymentAccessService paymentAccessService;
+    @MockitoBean com.edushift.modules.payments.service.PaymentReportService paymentReportService;
 
     private static JwtAuthenticationToken paymentAdmin() {
         return new JwtAuthenticationToken(
                 new JwtAuthenticatedPrincipal(ANY_USER, ANY_TENANT, "pay", "pay@t"),
                 "t",
                 List.of(new SimpleGrantedAuthority("LMS_PAYMENT_ADMIN")));
+    }
+
+    @Test
+    void listPayments_returnsOk_whenAuthorized() throws Exception {
+        given(adminPaymentService.adminList(any(), any())).willReturn(new PageImpl<>(List.of()));
+
+        mockMvc.perform(get("/v1/admin/payments").with(auth(paymentAdmin())))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void listPayments_returns4xx_whenUnauthenticated() throws Exception {
+        mockMvc.perform(get("/v1/admin/payments"))
+                .andExpect(status().is4xxClientError());
     }
 
     @Test

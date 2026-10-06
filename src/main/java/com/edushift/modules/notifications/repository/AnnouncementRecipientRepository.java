@@ -1,6 +1,7 @@
 package com.edushift.modules.notifications.repository;
 
 import com.edushift.modules.notifications.entity.AnnouncementRecipient;
+import java.util.Collection;
 import java.util.List;
 import java.util.UUID;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -36,4 +37,15 @@ public interface AnnouncementRecipientRepository extends JpaRepository<Announcem
               AND r.readAt IS NULL
             """)
     int markRead(@Param("announcementId") UUID announcementId, @Param("userId") UUID userId);
+
+    boolean existsByAnnouncementIdAndUserId(UUID announcementId, UUID userId);
+
+    @Query("""
+            SELECT r FROM AnnouncementRecipient r
+            WHERE r.userId = :userId
+              AND r.announcementId IN :announcementIds
+            """)
+    List<AnnouncementRecipient> findByUserAndAnnouncements(
+            @Param("userId") UUID userId,
+            @Param("announcementIds") Collection<UUID> announcementIds);
 }

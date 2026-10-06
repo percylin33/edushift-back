@@ -64,6 +64,10 @@ public class UserMapper {
 				user.getAvatarUrl(),
 				user.getStatus(),
 				user.isEmailVerified(),
+				user.getEmailSource() == null
+						? com.edushift.modules.auth.entity.EmailSource.REAL
+						: user.getEmailSource(),
+				user.isMustChangePassword(),
 				user.isMfaEnabled(),
 				roleNames,
 				permissions,

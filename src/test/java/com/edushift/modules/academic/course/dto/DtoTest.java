@@ -16,22 +16,24 @@ class DtoTest {
     void courseResponse() {
         var levelRef = new CourseResponse.CourseLevelRef(UUID.randomUUID(), "PRIMARIA", "Primaria", 2);
         var resp = new CourseResponse(UUID.randomUUID(), "MAT", "Matemática", null, 4, 5, true,
-            List.of(levelRef), Instant.now(), Instant.now());
+            "#3B82F6", "target", List.of(levelRef), Instant.now(), Instant.now());
         assertThat(resp.code()).isEqualTo("MAT");
+        assertThat(resp.color()).isEqualTo("#3B82F6");
+        assertThat(resp.icon()).isEqualTo("target");
         assertThat(resp.levels()).hasSize(1);
     }
 
     @Test
     @DisplayName("CourseListItem — constructor + accessors")
     void courseListItem() {
-        var item = new CourseListItem(UUID.randomUUID(), "MAT", "Mat", 4, 5, true, List.of());
+        var item = new CourseListItem(UUID.randomUUID(), "MAT", "Mat", 4, 5, true, null, null, List.of());
         assertThat(item.code()).isEqualTo("MAT");
     }
 
     @Test
     @DisplayName("CreateCourseRequest — constructor + accessors")
     void createCourseRequest() {
-        var req = new CreateCourseRequest("MAT", "Mat", null, 4, 5, true, List.of(UUID.randomUUID()));
+        var req = new CreateCourseRequest("MAT", "Mat", null, 4, 5, true, null, null, List.of(UUID.randomUUID()));
         assertThat(req.code()).isEqualTo("MAT");
         assertThat(req.credits()).isEqualTo(4);
     }
@@ -39,7 +41,7 @@ class DtoTest {
     @Test
     @DisplayName("UpdateCourseRequest — constructor + accessors")
     void updateCourseRequest() {
-        var req = new UpdateCourseRequest("MAT2", null, null, 5, null, false);
+        var req = new UpdateCourseRequest("MAT2", null, null, 5, null, false, null, null);
         assertThat(req.code()).isEqualTo("MAT2");
         assertThat(req.isActive()).isFalse();
     }

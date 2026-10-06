@@ -61,6 +61,12 @@ public class EmailLayoutRenderer {
 		return html;
 	}
 
+	/**
+	 * Content id attached by {@code EmailSender} when the tenant has no public logo URL.
+	 * The header bar is the tenant primary color, so the asset is the white wordmark.
+	 */
+	public static final String PLATFORM_WORDMARK_CID = "edushift-wordmark";
+
 	private static String buildLogoBlock(EmailBrandingContext ctx) {
 		String url = ctx.logoUrl();
 		String name = escapeText(ctx.nameOrDefault());
@@ -70,8 +76,9 @@ public class EmailLayoutRenderer {
 					""".formatted(escapeAttr(url), name);
 		}
 		return """
-				<span style="font-size:20px;font-weight:700;color:%s;letter-spacing:-0.02em">%s</span>
-				""".formatted(escapeText(ctx.primaryOrDefault()), name);
+				<img src="cid:%s" alt="EduShift" width="140" style="display:inline-block;vertical-align:middle;max-width:140px;height:auto;border:0;outline:none;text-decoration:none" />
+				<span style="display:inline-block;vertical-align:middle;margin-left:12px;font-size:18px;font-weight:700;color:#ffffff;letter-spacing:-0.02em">%s</span>
+				""".formatted(PLATFORM_WORDMARK_CID, name);
 	}
 
 	private static String footerLine(EmailBrandingContext ctx) {

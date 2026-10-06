@@ -1,9 +1,26 @@
 package com.edushift.modules.payments.controller;
 
+import com.edushift.modules.payments.dto.AdminPaymentFilter;
+import com.edushift.modules.payments.dto.BulkEmitInvoicesRequest;
+import com.edushift.modules.payments.dto.BulkEmitInvoicesResponse;
+import com.edushift.modules.payments.dto.EmitInvoiceRequest;
 import com.edushift.modules.payments.dto.PaymentConceptRequest;
 import com.edushift.modules.payments.dto.PaymentConceptResponse;
+import com.edushift.modules.payments.dto.InvoiceResponse;
+import com.edushift.modules.payments.dto.PaymentPolicyDto;
+import com.edushift.modules.payments.dto.PaymentResponse;
+import com.edushift.modules.payments.dto.RejectPaymentEvidenceRequest;
+import com.edushift.modules.payments.entity.Invoice;
+import com.edushift.modules.payments.entity.Payment;
+import com.edushift.modules.payments.entity.PaymentAccessOverride;
 import com.edushift.modules.payments.service.AdminPaymentService;
+import com.edushift.modules.payments.service.MoraService;
+import com.edushift.modules.payments.service.PaymentAccessService;
 import com.edushift.modules.payments.service.PaymentConceptService;
+import com.edushift.modules.payments.service.PaymentPolicyService;
+import com.edushift.modules.payments.service.PaymentReportService;
+import com.edushift.modules.payments.service.SiblingDiscountService;
+import com.edushift.modules.payments.service.SubscriptionService;
 import com.edushift.shared.api.ApiResponse;
 import com.edushift.shared.security.LmsAuthorities;
 import io.swagger.v3.oas.annotations.Operation;
@@ -19,6 +36,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -34,6 +52,7 @@ import org.springframework.web.bind.annotation.RestController;
  *
  * <p>Endpoints:</p>
  * <ul>
+ *   <li>{@code GET    /admin/payments} — tenant payment ledger (paginated, DEBT-11-PAY-1)</li>
  *   <li>{@code GET    /admin/payments/concepts} — list tenant concepts (paginated)</li>
  *   <li>{@code POST   /admin/payments/concepts} — create</li>
  *   <li>{@code PATCH  /admin/payments/concepts/{uuid}} — update</li>
@@ -51,6 +70,23 @@ public class AdminPaymentController {
 
 	private final PaymentConceptService conceptService;
 	private final AdminPaymentService adminPaymentService;
+	private final SubscriptionService subscriptionService;
+	private final SiblingDiscountService siblingDiscountService;
+	private final PaymentPolicyService paymentPolicyService;
+	private final MoraService moraService;
+	private final PaymentAccessService paymentAccessService;
+	private final PaymentReportService paymentReportService;
+
+	@GetMapping
+	@Operation(summary = "List tenant payments (paginated; optional status/provider/search)")
+	public ApiResponse<Page<PaymentResponse>> listPayments(
+			@RequestParam(required = false) Payment.Status status,
+			@RequestParam(required = false) Payment.Provider provider,
+			@RequestParam(required = false) String search,
+			Pageable pageable) {
+		return ApiResponse.ok(adminPaymentService.adminList(
+				AdminPaymentFilter.of(status, provider, search), pageable));
+	}
 
 	@GetMapping("/concepts")
 	@Operation(summary = "List tenant payment concepts (paginated)")
@@ -79,6 +115,18 @@ public class AdminPaymentController {
 		return ApiResponse.ok(null);
 	}
 
+	@PostMapping("/invoices")
+	@Operation(summary = "Emit one invoice for a student")
+	public ApiResponse<InvoiceResponse> emitInvoice(@Valid @RequestBody EmitInvoiceRequest request) {
+		return ApiResponse.ok(adminPaymentService.emitInvoice(request));
+	}
+
+	@PostMapping("/invoices/bulk")
+	@Operation(summary = "Emit invoices in bulk (section or all enrolled); dryRun previews")
+	public ApiResponse<BulkEmitInvoicesResponse> bulkEmit(@Valid @RequestBody BulkEmitInvoicesRequest request) {
+		return ApiResponse.ok(adminPaymentService.bulkEmit(request));
+	}
+
 	@PostMapping("/invoices/{publicUuid}/mark-paid-cash")
 	@Operation(summary = "Mark invoice as paid in cash (front-desk cashier)")
 	public ApiResponse<Void> markPaidCash(
@@ -88,6 +136,22 @@ public class AdminPaymentController {
 		return ApiResponse.ok(null);
 	}
 
+	@GetMapping("/invoices")
+	@Operation(summary = "List tenant invoices (optional status filter, e.g. PENDING_REVIEW)")
+	public ApiResponse<Page<InvoiceResponse>> listInvoices(
+			@RequestParam(required = false) Invoice.Status status,
+			Pageable pageable) {
+		return ApiResponse.ok(adminPaymentService.listInvoices(status, pageable));
+	}
+
+	@PostMapping("/invoices/{publicUuid}/reject-evidence")
+	@Operation(summary = "Reject parent payment voucher and reopen the invoice")
+	public ApiResponse<InvoiceResponse> rejectEvidence(
+			@PathVariable UUID publicUuid,
+			@Valid @RequestBody RejectPaymentEvidenceRequest request) {
+		return ApiResponse.ok(adminPaymentService.rejectEvidence(publicUuid, request));
+	}
+
 	@PostMapping("/invoices/{publicUuid}/refund")
 	@Operation(summary = "Refund a paid invoice (MP API best-effort; DB transition is authoritative)")
 	public ApiResponse<Void> refund(
@@ -95,5 +159,124 @@ public class AdminPaymentController {
 			@RequestParam(required = false) String reason) {
 		adminPaymentService.refund(publicUuid, reason);
 		return ApiResponse.ok(null);
+	}
+
+	// ---- Subscriptions (billing plans) ----
+
+	@GetMapping("/subscriptions")
+	@Operation(summary = "List billing plans / subscriptions")
+	public ApiResponse<Page<com.edushift.modules.payments.dto.SubscriptionResponse>> listSubscriptions(
+			@RequestParam(required = false) com.edushift.modules.payments.entity.Subscription.Status status,
+			Pageable pageable) {
+		return ApiResponse.ok(subscriptionService.list(status, pageable));
+	}
+
+	@PostMapping("/subscriptions")
+	@Operation(summary = "Create a recurring billing plan for a student")
+	public ApiResponse<com.edushift.modules.payments.dto.SubscriptionResponse> createSubscription(
+			@Valid @RequestBody com.edushift.modules.payments.dto.CreateSubscriptionRequest request) {
+		return ApiResponse.ok(subscriptionService.create(request));
+	}
+
+	@PostMapping("/subscriptions/bulk")
+	@Operation(summary = "Bulk-assign billing plans by academic level or grade")
+	public ApiResponse<com.edushift.modules.payments.dto.BulkCreateSubscriptionsResponse> bulkCreateSubscriptions(
+			@Valid @RequestBody com.edushift.modules.payments.dto.BulkCreateSubscriptionsRequest request) {
+		return ApiResponse.ok(subscriptionService.bulkCreate(request));
+	}
+
+	@GetMapping("/subscriptions/sibling-suggestions")
+	@Operation(summary = "List sibling-discount suggestions grouped by guardian (staff review)")
+	public ApiResponse<java.util.List<com.edushift.modules.payments.dto.SiblingSuggestionGroupResponse>> siblingSuggestions() {
+		return ApiResponse.ok(siblingDiscountService.listSuggestions());
+	}
+
+	@PostMapping("/subscriptions/sibling-suggestions/refresh")
+	@Operation(summary = "Re-detect sibling groups and mark NONE plans as SUGGESTED")
+	public ApiResponse<java.util.Map<String, Integer>> refreshSiblingSuggestions() {
+		int marked = siblingDiscountService.refreshSuggestions();
+		return ApiResponse.ok(java.util.Map.of("markedSuggested", marked));
+	}
+
+	@PostMapping("/subscriptions/sibling-suggestions/decide")
+	@Operation(summary = "Accept or reject sibling discount for students (staff decision)")
+	public ApiResponse<java.util.Map<String, Integer>> decideSiblingDiscount(
+			@Valid @RequestBody com.edushift.modules.payments.dto.SiblingDiscountDecideRequest request) {
+		int updated = siblingDiscountService.decide(request.studentPublicUuids(), request.decision());
+		return ApiResponse.ok(java.util.Map.of("updated", updated));
+	}
+
+	@PostMapping("/subscriptions/{publicUuid}/pause")
+	@Operation(summary = "Pause a billing plan")
+	public ApiResponse<com.edushift.modules.payments.dto.SubscriptionResponse> pauseSubscription(
+			@PathVariable UUID publicUuid) {
+		return ApiResponse.ok(subscriptionService.pause(publicUuid));
+	}
+
+	@PostMapping("/subscriptions/{publicUuid}/resume")
+	@Operation(summary = "Resume a paused billing plan")
+	public ApiResponse<com.edushift.modules.payments.dto.SubscriptionResponse> resumeSubscription(
+			@PathVariable UUID publicUuid) {
+		return ApiResponse.ok(subscriptionService.resume(publicUuid));
+	}
+
+	@PostMapping("/subscriptions/{publicUuid}/cancel")
+	@Operation(summary = "Cancel a billing plan")
+	public ApiResponse<com.edushift.modules.payments.dto.SubscriptionResponse> cancelSubscription(
+			@PathVariable UUID publicUuid) {
+		return ApiResponse.ok(subscriptionService.cancel(publicUuid));
+	}
+
+	@PostMapping("/subscriptions/run-due")
+	@Operation(summary = "Issue due subscription invoices now (UAT / admin)")
+	public ApiResponse<java.util.Map<String, Integer>> runDueSubscriptions() {
+		int issued = subscriptionService.runDueNow();
+		return ApiResponse.ok(java.util.Map.of("issued", issued));
+	}
+
+	// ---- Policy / mora / access / reports ----
+
+	@GetMapping("/policy")
+	@Operation(summary = "Get tenant payment collection policy")
+	public ApiResponse<PaymentPolicyDto> getPolicy() {
+		return ApiResponse.ok(paymentPolicyService.getCurrent());
+	}
+
+	@PutMapping("/policy")
+	@Operation(summary = "Update tenant payment collection policy")
+	public ApiResponse<PaymentPolicyDto> updatePolicy(@Valid @RequestBody PaymentPolicyDto policy) {
+		return ApiResponse.ok(paymentPolicyService.updateCurrent(policy));
+	}
+
+	@PostMapping("/invoices/{publicUuid}/mora-exempt")
+	@Operation(summary = "Exempt an invoice from automatic late fees")
+	public ApiResponse<Void> moraExempt(@PathVariable UUID publicUuid) {
+		moraService.exemptInvoice(publicUuid);
+		return ApiResponse.ok(null);
+	}
+
+	@PostMapping("/access-overrides")
+	@Operation(summary = "Temporarily lift LMS soft-gate for a user")
+	public ApiResponse<PaymentAccessOverride> createAccessOverride(
+			@RequestParam UUID userPublicUuid,
+			@RequestParam(required = false) UUID studentPublicUuid,
+			@RequestParam java.time.Instant untilAt,
+			@RequestParam(required = false) String reason) {
+		return ApiResponse.ok(paymentAccessService.createOverride(
+				userPublicUuid, studentPublicUuid, untilAt, reason));
+	}
+
+	@GetMapping(value = "/reports/export.csv", produces = "text/csv")
+	@Operation(summary = "Export invoices CSV for the current month/tenant")
+	public org.springframework.http.ResponseEntity<String> exportCsv() {
+		return org.springframework.http.ResponseEntity.ok()
+				.header("Content-Disposition", "attachment; filename=invoices.csv")
+				.body(paymentReportService.exportCsv());
+	}
+
+	@GetMapping("/reports/aging")
+	@Operation(summary = "Aging buckets for OVERDUE invoices (centavos)")
+	public ApiResponse<java.util.Map<String, Long>> aging() {
+		return ApiResponse.ok(paymentReportService.agingBuckets());
 	}
 }

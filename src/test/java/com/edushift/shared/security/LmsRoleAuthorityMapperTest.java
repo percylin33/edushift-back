@@ -61,7 +61,8 @@ class LmsRoleAuthorityMapperTest {
 				LmsAuthorities.LMS_QUIZ_READ,
 				LmsAuthorities.LMS_QUIZ_CREATE,
 				LmsAuthorities.LMS_QUIZ_GRADE,
-				LmsAuthorities.LMS_AI_GENERATE);
+				LmsAuthorities.LMS_AI_GENERATE,
+				LmsAuthorities.LMS_ANNOUNCEMENTS_CREATE_OWN);
 		assertThat(auths).doesNotContain(
 				LmsAuthorities.LMS_TASK_SUBMIT,
 				LmsAuthorities.LMS_QUIZ_SUBMIT,
@@ -139,6 +140,24 @@ class LmsRoleAuthorityMapperTest {
 	void tenantAdminAndTeacherStillHasAll() {
 		Set<String> auths = mapper.mapAuthorities(
 				EnumSet.of(UserRole.TENANT_ADMIN, UserRole.TEACHER));
-		assertThat(auths).hasSize(16);
+		assertThat(auths).hasSize(18);
+	}
+
+	@Test
+	@DisplayName("a tenant override cannot grant announcement publishing to a student")
+	void studentOverrideCannotPublishAnnouncements() {
+		PermissionOverrideService overrides = mock(PermissionOverrideService.class);
+		org.mockito.Mockito.when(overrides.snapshotFor(org.mockito.ArgumentMatchers.any()))
+				.thenReturn(java.util.Map.of(
+						UserRole.STUDENT,
+						Set.of(LmsAuthorities.LMS_ANNOUNCEMENTS_CREATE,
+								LmsAuthorities.LMS_ANNOUNCEMENTS_CREATE_OWN)));
+		org.mockito.Mockito.when(overrides.revokedFor(org.mockito.ArgumentMatchers.any()))
+				.thenReturn(java.util.Map.of());
+		LmsRoleAuthorityMapper scoped = new LmsRoleAuthorityMapper(overrides);
+		Set<String> auths = scoped.resolveFor(java.util.UUID.randomUUID(), List.of(UserRole.STUDENT));
+		assertThat(auths).doesNotContain(
+				LmsAuthorities.LMS_ANNOUNCEMENTS_CREATE,
+				LmsAuthorities.LMS_ANNOUNCEMENTS_CREATE_OWN);
 	}
 }

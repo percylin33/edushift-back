@@ -17,9 +17,9 @@ public record SessionContentDto(
 		@Size(max = 1000, message = "objective too long")
 		String objective,
 
-		List<@Size(max = 500, message = "activity too long") String> activities,
+		List<@Size(max = 1500, message = "activity too long") String> activities,
 
-		List<@Size(max = 200, message = "material too long") String> materials,
+		List<@Size(max = 1500, message = "material too long") String> materials,
 
 		@Size(max = 2000, message = "observations too long")
 		String observations

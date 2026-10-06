@@ -140,6 +140,8 @@ class TeacherDashboardIT extends IntegrationTest {
 					.isEqualTo(seed.section().getPublicUuid().toString());
 			assertThat(first.get("sectionName").asText())
 					.isEqualTo(seed.section().getName());
+			assertThat(first.get("gradeName").asText())
+					.isEqualTo(seed.section().getGrade().getName());
 			assertThat(first.get("enrolledStudents").asLong())
 					.as("the seeded enrollment must be reflected in the KPI")
 					.isEqualTo(1L);

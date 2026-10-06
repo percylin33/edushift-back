@@ -35,7 +35,7 @@ import lombok.Setter;
 @NoArgsConstructor
 public class Invoice extends TenantAwareEntity {
 
-    public enum Status { PENDING, PAID, OVERDUE, CANCELLED, REFUNDED }
+    public enum Status { PENDING, PENDING_REVIEW, PAID, OVERDUE, CANCELLED, REFUNDED }
 
     @Column(name = "public_uuid", nullable = false, updatable = false, unique = true)
     private UUID publicUuid;
@@ -72,7 +72,7 @@ public class Invoice extends TenantAwareEntity {
     private long totalCents = 0;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "status", nullable = false, length = 15)
+    @Column(name = "status", nullable = false, length = 20)
     private Status status = Status.PENDING;
 
     @Column(name = "issued_at", nullable = false)
@@ -86,6 +86,29 @@ public class Invoice extends TenantAwareEntity {
 
     @Column(name = "notes")
     private String notes;
+
+    /** Soft-FK to {@code lms_file_objects.public_uuid} (parent voucher). */
+    @Column(name = "evidence_file_public_uuid")
+    private UUID evidenceFilePublicUuid;
+
+    @Column(name = "evidence_submitted_at")
+    private Instant evidenceSubmittedAt;
+
+    @Column(name = "evidence_notes")
+    private String evidenceNotes;
+
+    @Column(name = "evidence_rejection_reason")
+    private String evidenceRejectionReason;
+
+    /** Late-fee amount already applied (centavos). */
+    @Column(name = "mora_cents", nullable = false)
+    private long moraCents = 0;
+
+    @Column(name = "mora_applied_at")
+    private Instant moraAppliedAt;
+
+    @Column(name = "mora_exempt", nullable = false)
+    private boolean moraExempt = false;
 
     @PrePersist
     private void onCreate() {

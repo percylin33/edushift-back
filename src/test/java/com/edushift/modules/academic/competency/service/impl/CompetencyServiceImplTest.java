@@ -13,23 +13,32 @@ import static org.mockito.Mockito.when;
 import com.edushift.modules.academic.competency.dto.CompetencyListItem;
 import com.edushift.modules.academic.competency.dto.CompetencyReorderRequest;
 import com.edushift.modules.academic.competency.dto.CompetencyResponse;
+import com.edushift.modules.academic.competency.dto.CreateCompetencyCapacityRequest;
 import com.edushift.modules.academic.competency.dto.CreateCompetencyRequest;
 import com.edushift.modules.academic.competency.dto.UpdateCompetencyRequest;
 import com.edushift.modules.academic.competency.entity.Capacity;
 import com.edushift.modules.academic.competency.entity.Competency;
+import com.edushift.modules.academic.competency.entity.CompetencyOrigin;
 import com.edushift.modules.academic.competency.mapper.CompetencyMapper;
 import com.edushift.modules.academic.competency.repository.CapacityRepository;
 import com.edushift.modules.academic.competency.repository.CompetencyRepository;
+import com.edushift.modules.auth.entity.UserRole;
 import com.edushift.modules.sessions.learning.repository.LearningSessionRepository;
 import com.edushift.modules.academic.course.entity.Course;
 import com.edushift.modules.academic.course.repository.CourseRepository;
+import com.edushift.modules.teachers.assignments.repository.TeacherAssignmentRepository;
+import com.edushift.shared.exception.ApiException;
+import com.edushift.shared.exception.BadRequestException;
 import com.edushift.shared.exception.ConflictException;
+import com.edushift.shared.exception.ForbiddenException;
 import com.edushift.shared.exception.ResourceNotFoundException;
+import com.edushift.shared.security.CurrentUserProvider;
 import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -57,9 +66,19 @@ class CompetencyServiceImplTest {
 	@Mock private CapacityRepository capacityRepository;
 	@Mock private CourseRepository courseRepository;
 	@Mock private LearningSessionRepository sessionRepository;
+	@Mock private TeacherAssignmentRepository assignmentRepository;
+	@Mock private CurrentUserProvider currentUser;
 	@Spy private CompetencyMapper mapper = new CompetencyMapper();
 
 	@InjectMocks private CompetencyServiceImpl service;
+
+	private final UUID adminId = UUID.randomUUID();
+
+	@BeforeEach
+	void stubAdminCaller() {
+		lenient().when(currentUser.currentUserRole()).thenReturn(Optional.of(UserRole.TENANT_ADMIN));
+		lenient().when(currentUser.currentUserId()).thenReturn(Optional.of(adminId));
+	}
 
 	// =========================================================================
 	// listCompetencies
@@ -174,6 +193,7 @@ class CompetencyServiceImplTest {
 							"description", 1, null));
 
 			assertThat(response.code()).isEqualTo("MAT_C1");
+			assertThat(response.origin()).isEqualTo(CompetencyOrigin.INSTITUTIONAL);
 			assertThat(response.displayOrder()).isEqualTo(1);
 			assertThat(response.course().code()).isEqualTo("MAT");
 			assertThat(response.capacities()).isEmpty();
@@ -439,6 +459,219 @@ class CompetencyServiceImplTest {
 			assertThatThrownBy(() -> service.deleteCompetency(anyUuid))
 					.isInstanceOf(ResourceNotFoundException.class);
 			verify(competencyRepository, never()).delete(any(Competency.class));
+		}
+	}
+
+	// =========================================================================
+	// Teacher authoring
+	// =========================================================================
+
+	@Nested
+	@DisplayName("teacher authoring")
+	class TeacherAuthoring {
+
+		private final UUID teacherId = UUID.randomUUID();
+
+		@BeforeEach
+		void stubTeacher() {
+			lenient().when(currentUser.currentUserRole()).thenReturn(Optional.of(UserRole.TEACHER));
+			lenient().when(currentUser.currentUserId()).thenReturn(Optional.of(teacherId));
+		}
+
+		@Test
+		@DisplayName("assigned teacher creates TEACHER competency with a capacity")
+		void createsOwnCompetency() {
+			Course course = newCourse("ART", "Arte");
+			when(courseRepository.findByPublicUuid(course.getPublicUuid()))
+					.thenReturn(Optional.of(course));
+			when(assignmentRepository.existsActiveByCourseAndTeacherUserId(course, teacherId))
+					.thenReturn(true);
+			when(competencyRepository.findByCourseAndCodeIgnoreCase(course, "TRABAJO"))
+					.thenReturn(Optional.empty());
+			when(competencyRepository.findMaxDisplayOrderForCourse(course)).thenReturn(null);
+			when(competencyRepository.saveAndFlush(any())).thenAnswer(inv -> {
+				Competency c = inv.getArgument(0);
+				setField(c, "publicUuid", UUID.randomUUID());
+				setField(c, "id", UUID.randomUUID());
+				c.setCreatedBy(teacherId);
+				return c;
+			});
+			when(capacityRepository.save(any())).thenAnswer(inv -> {
+				Capacity c = inv.getArgument(0);
+				setField(c, "publicUuid", UUID.randomUUID());
+				setField(c, "id", UUID.randomUUID());
+				return c;
+			});
+
+			CompetencyResponse response = service.createCompetency(course.getPublicUuid(),
+					new CreateCompetencyRequest(null, "Trabajo", null, null, null,
+							List.of(new CreateCompetencyCapacityRequest("COLABORA", "Colabora"))));
+
+			assertThat(response.origin()).isEqualTo(CompetencyOrigin.TEACHER);
+			assertThat(response.code()).isEqualTo("TRABAJO");
+			assertThat(response.capacities()).hasSize(1);
+			assertThat(response.capacities().get(0).code()).isEqualTo("COLABORA");
+		}
+
+		@Test
+		@DisplayName("teacher without assignment → 403 TEACHER_NOT_ASSIGNED_TO_COURSE")
+		void notAssigned() {
+			Course course = newCourse("ART", "Arte");
+			when(courseRepository.findByPublicUuid(course.getPublicUuid()))
+					.thenReturn(Optional.of(course));
+			when(assignmentRepository.existsActiveByCourseAndTeacherUserId(course, teacherId))
+					.thenReturn(false);
+
+			assertThatThrownBy(() -> service.createCompetency(course.getPublicUuid(),
+					new CreateCompetencyRequest(null, "Trabajo", null, null, null,
+							List.of(new CreateCompetencyCapacityRequest(null, "Colabora")))))
+					.isInstanceOf(ForbiddenException.class)
+					.extracting(ex -> ((ApiException) ex).getCode())
+					.isEqualTo("TEACHER_NOT_ASSIGNED_TO_COURSE");
+			verify(competencyRepository, never()).saveAndFlush(any());
+		}
+
+		@Test
+		@DisplayName("teacher create without capacities → 400 COMPETENCY_NEEDS_CAPACITY")
+		void needsCapacity() {
+			Course course = newCourse("ART", "Arte");
+			when(courseRepository.findByPublicUuid(course.getPublicUuid()))
+					.thenReturn(Optional.of(course));
+			when(assignmentRepository.existsActiveByCourseAndTeacherUserId(course, teacherId))
+					.thenReturn(true);
+
+			assertThatThrownBy(() -> service.createCompetency(course.getPublicUuid(),
+					new CreateCompetencyRequest("ART_C1", "Trabajo", null, null, null)))
+					.isInstanceOf(BadRequestException.class)
+					.extracting(ex -> ((ApiException) ex).getCode())
+					.isEqualTo("COMPETENCY_NEEDS_CAPACITY");
+		}
+
+		@Test
+		@DisplayName("teacher deactivates their own competency")
+		void deactivatesOwn() {
+			Course course = newCourse("ART", "Arte");
+			Competency competency = newCompetency(course, "ART_C1", 1);
+			competency.setOrigin(CompetencyOrigin.TEACHER);
+			competency.setCreatedBy(teacherId);
+			when(competencyRepository.findByPublicUuid(competency.getPublicUuid()))
+					.thenReturn(Optional.of(competency));
+			when(assignmentRepository.existsActiveByCourseAndTeacherUserId(course, teacherId))
+					.thenReturn(true);
+			when(sessionRepository.existsActiveByCompetencyForOtherTeacher(competency, teacherId))
+					.thenReturn(false);
+			when(competencyRepository.saveAndFlush(competency)).thenReturn(competency);
+			when(capacityRepository.findAllByCompetencyOrderByDisplayOrderAsc(competency))
+					.thenReturn(List.of());
+
+			CompetencyResponse response = service.deactivateCompetency(competency.getPublicUuid());
+
+			assertThat(response.isActive()).isFalse();
+		}
+
+		@Test
+		@DisplayName("teacher cannot deactivate a MINEDU competency")
+		void cannotDeactivateMinedu() {
+			Course course = newCourse("MAT", "Matemática");
+			Competency competency = newCompetency(course, "MAT_C1", 1);
+			competency.setOrigin(CompetencyOrigin.MINEDU);
+			competency.setCreatedBy(adminId);
+			when(competencyRepository.findByPublicUuid(competency.getPublicUuid()))
+					.thenReturn(Optional.of(competency));
+			when(assignmentRepository.existsActiveByCourseAndTeacherUserId(course, teacherId))
+					.thenReturn(true);
+
+			assertThatThrownBy(() -> service.deactivateCompetency(competency.getPublicUuid()))
+					.isInstanceOf(ForbiddenException.class)
+					.extracting(ex -> ((ApiException) ex).getCode())
+					.isEqualTo("COMPETENCY_ORIGIN_LOCKED");
+		}
+
+		@Test
+		@DisplayName("teacher cannot deactivate another teacher's competency")
+		void cannotDeactivateOthers() {
+			Course course = newCourse("ART", "Arte");
+			Competency competency = newCompetency(course, "ART_C1", 1);
+			competency.setOrigin(CompetencyOrigin.TEACHER);
+			competency.setCreatedBy(UUID.randomUUID());
+			when(competencyRepository.findByPublicUuid(competency.getPublicUuid()))
+					.thenReturn(Optional.of(competency));
+			when(assignmentRepository.existsActiveByCourseAndTeacherUserId(course, teacherId))
+					.thenReturn(true);
+
+			assertThatThrownBy(() -> service.deactivateCompetency(competency.getPublicUuid()))
+					.isInstanceOf(ForbiddenException.class)
+					.extracting(ex -> ((ApiException) ex).getCode())
+					.isEqualTo("COMPETENCY_ORIGIN_LOCKED");
+		}
+
+		@Test
+		@DisplayName("deactivate blocked when another teacher already uses it")
+		void usedByOtherTeacher() {
+			Course course = newCourse("ART", "Arte");
+			Competency competency = newCompetency(course, "ART_C1", 1);
+			competency.setOrigin(CompetencyOrigin.TEACHER);
+			competency.setCreatedBy(teacherId);
+			when(competencyRepository.findByPublicUuid(competency.getPublicUuid()))
+					.thenReturn(Optional.of(competency));
+			when(assignmentRepository.existsActiveByCourseAndTeacherUserId(course, teacherId))
+					.thenReturn(true);
+			when(sessionRepository.existsActiveByCompetencyForOtherTeacher(competency, teacherId))
+					.thenReturn(true);
+
+			assertThatThrownBy(() -> service.deactivateCompetency(competency.getPublicUuid()))
+					.isInstanceOf(ConflictException.class)
+					.extracting(ex -> ((ApiException) ex).getCode())
+					.isEqualTo("COMPETENCY_USED_BY_OTHER_TEACHER");
+		}
+
+		@Test
+		@DisplayName("unknown competency on deactivate → 404")
+		void unknownOnDeactivate() {
+			UUID anyUuid = UUID.randomUUID();
+			when(competencyRepository.findByPublicUuid(anyUuid)).thenReturn(Optional.empty());
+
+			assertThatThrownBy(() -> service.deactivateCompetency(anyUuid))
+					.isInstanceOf(ResourceNotFoundException.class);
+		}
+	}
+
+	@Nested
+	@DisplayName("promoteCompetency")
+	class PromoteCompetency {
+
+		@Test
+		@DisplayName("admin promotes TEACHER → INSTITUTIONAL")
+		void promotes() {
+			Course course = newCourse("ART", "Arte");
+			Competency competency = newCompetency(course, "ART_C1", 1);
+			competency.setOrigin(CompetencyOrigin.TEACHER);
+			competency.setCreatedBy(UUID.randomUUID());
+			when(competencyRepository.findByPublicUuid(competency.getPublicUuid()))
+					.thenReturn(Optional.of(competency));
+			when(competencyRepository.saveAndFlush(competency)).thenReturn(competency);
+			when(capacityRepository.findAllByCompetencyOrderByDisplayOrderAsc(competency))
+					.thenReturn(List.of());
+
+			CompetencyResponse response = service.promoteCompetency(competency.getPublicUuid());
+
+			assertThat(response.origin()).isEqualTo(CompetencyOrigin.INSTITUTIONAL);
+			assertThat(competency.getCreatedBy()).isNotNull();
+		}
+
+		@Test
+		@DisplayName("promote of MINEDU → 409 COMPETENCY_ORIGIN_LOCKED")
+		void rejectsMinedu() {
+			Course course = newCourse("MAT", "Matemática");
+			Competency competency = newCompetency(course, "MAT_C1", 1);
+			competency.setOrigin(CompetencyOrigin.MINEDU);
+			when(competencyRepository.findByPublicUuid(competency.getPublicUuid()))
+					.thenReturn(Optional.of(competency));
+
+			assertThatThrownBy(() -> service.promoteCompetency(competency.getPublicUuid()))
+					.isInstanceOf(ConflictException.class)
+					.extracting(ex -> ((ApiException) ex).getCode())
+					.isEqualTo("COMPETENCY_ORIGIN_LOCKED");
 		}
 	}
 

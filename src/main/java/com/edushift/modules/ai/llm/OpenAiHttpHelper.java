@@ -10,6 +10,7 @@ import java.net.http.HttpRequest.BodyPublishers;
 import java.net.http.HttpResponse;
 import java.net.http.HttpResponse.BodyHandlers;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -97,10 +98,7 @@ final class OpenAiHttpHelper {
             // under "extra" is ignored by MiniMax/OpenAI-compatible gateways.
             Map<String, Object> body = new java.util.LinkedHashMap<>();
             body.put("model", request.model());
-            body.put("messages", List.of(
-                    new ChatMessage("system", request.systemPrompt()),
-                    new ChatMessage("user", request.userPrompt())
-            ));
+            body.put("messages", buildMessages(request));
             if (request.temperature() != null) {
                 body.put("temperature", request.temperature());
             }
@@ -118,8 +116,10 @@ final class OpenAiHttpHelper {
                     .uri(URI.create(stripTrailingSlash(baseUrl) + "/chat/completions"))
                     .timeout(timeout)
                     .header("Content-Type", "application/json")
-                    .header("Authorization", authHeader)
                     .POST(BodyPublishers.ofByteArray(payload));
+            if (authHeader != null && !authHeader.isBlank()) {
+                b.header("Authorization", authHeader);
+            }
             for (Map.Entry<String, String> h : extraHeaders.entrySet()) {
                 b.header(h.getKey(), h.getValue());
             }
@@ -192,6 +192,32 @@ final class OpenAiHttpHelper {
 
     private static String stripTrailingSlash(String s) {
         return s.endsWith("/") ? s.substring(0, s.length() - 1) : s;
+    }
+
+    /**
+     * System, then prior turns, then the current user message. If the
+     * history already ends with that user message (chat persists it
+     * before the call), it is not repeated.
+     */
+    private static List<ChatMessage> buildMessages(LlmClient.LlmRequest request) {
+        List<ChatMessage> messages = new ArrayList<>();
+        messages.add(new ChatMessage("system", request.systemPrompt()));
+        if (request.history() != null) {
+            for (LlmClient.HistoryItem item : request.history()) {
+                if (item == null || item.role() == null || item.role().isBlank()
+                        || item.content() == null || item.content().isBlank()) {
+                    continue;
+                }
+                messages.add(new ChatMessage(item.role(), item.content()));
+            }
+        }
+        ChatMessage last = messages.get(messages.size() - 1);
+        boolean alreadyCurrentUser = "user".equals(last.role())
+                && request.userPrompt().equals(last.content());
+        if (!alreadyCurrentUser) {
+            messages.add(new ChatMessage("user", request.userPrompt()));
+        }
+        return messages;
     }
 
     // ---------------------------------------------------------------------

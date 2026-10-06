@@ -210,7 +210,9 @@ public class FileObjectController {
 	@Operation(summary = "Upload a file via multipart/form-data (BE-proxied)",
 			description = "The classic upload path: the BE streams the bytes "
 					+ "to the active storage provider. Use this on LOCAL_FS or "
-					+ "when the signed-URL flow is not desired.")
+					+ "when the signed-URL flow is not desired. "
+					+ "module must be one of: materials, submissions, avatars, "
+					+ "branding, attendance, schedule-bootstrap, reports.")
 	public ResponseEntity<ApiResponse<FileObjectResponse>> upload(
 			@RequestParam("module") String module,
 			@RequestPart("file") MultipartFile file) throws java.io.IOException {
@@ -327,11 +329,12 @@ public class FileObjectController {
 
 	/**
 	 * Branding module objects live at
-	 * {@code tenants/{tid}/lms/branding/{uuid}.ext} (see {@code StoredObject.buildKey}).
+	 * {@code envs/{env}/tenants/{slug}-{tid}/branding/{yyyy}/{MM}/{uuid}.ext}
+	 * (see {@code StoredObject.buildKey}).
 	 */
 	private static boolean isBrandingAsset(FileObject entity) {
 		String key = entity.getRemoteKey();
-		return key != null && key.contains("/lms/branding/");
+		return key != null && (key.contains("/branding/") || key.contains("/lms/branding/"));
 	}
 
 	private static boolean isImageContentType(String contentType) {

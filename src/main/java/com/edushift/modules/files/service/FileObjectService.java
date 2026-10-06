@@ -1,16 +1,17 @@
 package com.edushift.modules.files.service;
 
+import com.edushift.modules.files.config.StorageEnvResolver;
 import com.edushift.modules.files.config.StorageProperties;
 import com.edushift.modules.files.entity.FileObject;
 import com.edushift.modules.files.entity.FileUploadStatus;
 import com.edushift.modules.files.repository.FileObjectRepository;
-import com.edushift.modules.files.storage.StorageProvider;
 import com.edushift.modules.files.storage.StoragePutRequest;
 import com.edushift.modules.files.storage.StorageService;
 import com.edushift.modules.files.storage.StoredObject;
 import com.edushift.modules.files.validator.FileValidator;
+import com.edushift.modules.tenants.entity.Tenant;
+import com.edushift.modules.tenants.repository.TenantRepository;
 import java.time.Instant;
-import java.util.Map;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -23,7 +24,8 @@ import org.springframework.web.multipart.MultipartFile;
  * <p>Responsibilities:
  * <ul>
  *   <li>Validate the upload ({@link FileValidator}).</li>
- *   <li>Build a tenant-scoped remote key.</li>
+ *   <li>Build a tenant-scoped remote key
+ *       ({@code envs/{env}/tenants/{slug}-{tenantId}/{module}/{yyyy}/{MM}/{uuid}.ext}).</li>
  *   <li>Stream the bytes to the active storage provider.</li>
  *   <li>Persist a {@link FileObject} row with the resulting
  *       (provider, remoteKey, size, sha256, contentType, originalName).</li>
@@ -45,15 +47,21 @@ public class FileObjectService {
 	private final FileObjectRepository repository;
 	private final FileValidator validator;
 	private final StorageProperties storageProperties;
+	private final StorageEnvResolver storageEnvResolver;
+	private final TenantRepository tenantRepository;
 
 	public FileObjectService(StorageService storage,
 			FileObjectRepository repository,
 			FileValidator validator,
-			StorageProperties storageProperties) {
+			StorageProperties storageProperties,
+			StorageEnvResolver storageEnvResolver,
+			TenantRepository tenantRepository) {
 		this.storage = storage;
 		this.repository = repository;
 		this.validator = validator;
 		this.storageProperties = storageProperties;
+		this.storageEnvResolver = storageEnvResolver;
+		this.tenantRepository = tenantRepository;
 	}
 
 	/**
@@ -61,7 +69,7 @@ public class FileObjectService {
 	 * ({@code "materials"}, {@code "submissions"}, …).
 	 *
 	 * @param tenantId from the current request
-	 * @param module   logical bucket inside the storage layout
+	 * @param module   logical bucket inside the storage layout (allowlisted)
 	 * @param file     Spring multipart payload
 	 * @return the persisted {@link FileObject} row, with a freshly
 	 *         assigned {@code publicUuid}
@@ -69,23 +77,29 @@ public class FileObjectService {
 	@Transactional
 	public FileObject store(UUID tenantId, String module, MultipartFile file) {
 		validator.validate(file);
+		String safeModule = StoredObject.requireAllowedModule(module);
+		Instant uploadedAt = Instant.now();
+		String env = storageEnvResolver.resolveEnv();
+		String tenantSlug = resolveTenantSlug(tenantId);
 		// We materialise the public UUID up-front so we can use it in
 		// the storage key. The entity @PrePersist would also generate
 		// one but doing it here keeps the key and the row aligned.
 		UUID publicUuid = UUID.randomUUID();
 		String ext = extractExtension(file.getOriginalFilename());
-		String remoteKey = StoredObject.buildKey(tenantId, module, publicUuid, ext);
 
 		StoredObject stored;
 		try {
 			stored = storage.put(new StoragePutRequest(
 					tenantId,
-					module,
+					tenantSlug,
+					safeModule,
 					publicUuid,
 					safeOriginalName(file.getOriginalFilename()),
 					file.getContentType(),
 					file.getInputStream(),
-					file.getSize()));
+					file.getSize(),
+					env,
+					uploadedAt));
 		}
 		catch (java.io.IOException e) {
 			throw new com.edushift.modules.files.exception.StorageUnavailableException(
@@ -96,8 +110,7 @@ public class FileObjectService {
 		entity.setPublicUuid(publicUuid);
 		entity.setProvider(stored.provider());
 		entity.setRemoteKey(stored.remoteKey());
-		entity.setOriginalName(stored != null ? safeOriginalName(file.getOriginalFilename())
-				: safeOriginalName(file.getOriginalFilename()));
+		entity.setOriginalName(safeOriginalName(file.getOriginalFilename()));
 		entity.setContentType(file.getContentType());
 		entity.setSizeBytes(stored.sizeBytes());
 		entity.setChecksumSha256(stored.checksumSha256());
@@ -200,6 +213,8 @@ public class FileObjectService {
 	public SignedUpload createUploadRequest(UUID tenantId, String module,
 			String originalName, String contentType, long sizeBytes) {
 
+		String safeModule = StoredObject.requireAllowedModule(module);
+
 		// Validate BEFORE creating the row: a rejected MIME / oversized
 		// payload should never leave a PENDING row behind.
 		validator.validateContentType(contentType);
@@ -210,7 +225,11 @@ public class FileObjectService {
 
 		UUID publicUuid = UUID.randomUUID();
 		String ext = extractExtension(originalName);
-		String remoteKey = StoredObject.buildKey(tenantId, module, publicUuid, ext);
+		Instant uploadedAt = Instant.now();
+		String env = storageEnvResolver.resolveEnv();
+		String tenantSlug = resolveTenantSlug(tenantId);
+		String remoteKey = StoredObject.buildKey(
+				env, tenantId, tenantSlug, safeModule, uploadedAt, publicUuid, ext);
 
 		String signedUrl = storage.presignedPutUrl(
 				tenantId, remoteKey, contentType,
@@ -316,5 +335,12 @@ public class FileObjectService {
 			return null;
 		}
 		return name.substring(dot + 1);
+	}
+
+	/** Resolves the school slug for the storage folder {slug}-{tenantId}. */
+	private String resolveTenantSlug(UUID tenantId) {
+		return tenantRepository.findById(tenantId)
+				.map(Tenant::getSlug)
+				.orElse(null);
 	}
 }

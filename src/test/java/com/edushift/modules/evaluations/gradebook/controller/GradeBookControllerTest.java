@@ -1,5 +1,7 @@
 package com.edushift.modules.evaluations.gradebook.controller;
 
+import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -11,6 +13,7 @@ import com.edushift.infrastructure.multitenancy.TenantInterceptor;
 import com.edushift.modules.auth.security.JwtAuthenticatedPrincipal;
 import com.edushift.modules.auth.security.JwtAuthenticationToken;
 import com.edushift.modules.auth.service.JwtService;
+import com.edushift.modules.academic.period.entity.PeriodType;
 import com.edushift.modules.evaluations.entity.EvaluationKind;
 import com.edushift.modules.evaluations.entity.EvaluationScale;
 import com.edushift.modules.evaluations.entity.EvaluationStatus;
@@ -25,6 +28,7 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -98,16 +102,27 @@ private static final String BASE = "/v1/academic/teacher-assignments";
         return new GradeBookResponse(
                 assignmentUuid,
                 UUID.randomUUID(), "3°A",
+                UUID.randomUUID(), "3° Primaria", 3, "PRIMARIA",
                 UUID.randomUUID(), "Matemática",
+                "Ana García Pérez",
+                UUID.randomUUID(),
+                PeriodType.BIMESTRE,
+                2,
+                "Segundo bimestre",
+                null,
+                null,
+                null,
+                List.of(),
                 List.of(new GradeBookStudentEntry(
                         studentUuid, "Ana García",
-                        new BigDecimal("14.25"))),
+                        new BigDecimal("14.25"), "ACTIVE", Map.of(),
+                        null, Map.of())),
                 List.of(new GradeBookEvaluationEntry(
                         evalUuid, "Examen", EvaluationKind.EXAM,
                         EvaluationScale.SCORE_0_20,
                         EvaluationStatus.PUBLISHED,
                         new BigDecimal("1.00"),
-                        LocalDate.of(2026, 5, 1))),
+                        LocalDate.of(2026, 5, 1), null, null)),
                 List.of(new GradeBookCellEntry(
                         studentUuid, evalUuid,
                         new BigDecimal("14.25"), null,
@@ -122,7 +137,7 @@ private static final String BASE = "/v1/academic/teacher-assignments";
     @DisplayName("TENANT_ADMIN → 200 + ApiResponse wrapper + denormalised header")
     void admin() throws Exception {
         UUID assignmentUuid = UUID.randomUUID();
-        given(service.buildGradeBook(assignmentUuid))
+        given(service.buildGradeBook(eq(assignmentUuid), anyBoolean(), anyBoolean()))
                 .willReturn(stub(assignmentUuid));
 
         mockMvc.perform(get(BASE + "/" + assignmentUuid + "/gradebook")
@@ -132,7 +147,13 @@ private static final String BASE = "/v1/academic/teacher-assignments";
                 .andExpect(jsonPath("$.data.assignmentPublicUuid")
                         .value(assignmentUuid.toString()))
                 .andExpect(jsonPath("$.data.sectionName").value("3°A"))
+                .andExpect(jsonPath("$.data.gradeName").value("3° Primaria"))
+                .andExpect(jsonPath("$.data.levelCode").value("PRIMARIA"))
                 .andExpect(jsonPath("$.data.courseName").value("Matemática"))
+                .andExpect(jsonPath("$.data.teacherFullName").value("Ana García Pérez"))
+                .andExpect(jsonPath("$.data.periodType").value("BIMESTRE"))
+                .andExpect(jsonPath("$.data.periodOrdinal").value(2))
+                .andExpect(jsonPath("$.data.periodName").value("Segundo bimestre"))
                 .andExpect(jsonPath("$.data.students[0].weightedAverage").value(14.25))
                 .andExpect(jsonPath("$.data.evaluations[0].name").value("Examen"))
                 .andExpect(jsonPath("$.data.cells[0].score").value(14.25));
@@ -142,7 +163,7 @@ private static final String BASE = "/v1/academic/teacher-assignments";
     @DisplayName("TEACHER → 200 (RBAC allows TEACHER too)")
     void teacher() throws Exception {
         UUID assignmentUuid = UUID.randomUUID();
-        given(service.buildGradeBook(assignmentUuid))
+        given(service.buildGradeBook(eq(assignmentUuid), anyBoolean(), anyBoolean()))
                 .willReturn(stub(assignmentUuid));
 
         mockMvc.perform(get(BASE + "/" + assignmentUuid + "/gradebook")
@@ -168,7 +189,7 @@ private static final String BASE = "/v1/academic/teacher-assignments";
     @DisplayName("unknown assignment → 404 RESOURCE_NOT_FOUND")
     void notFound() throws Exception {
         UUID assignmentUuid = UUID.randomUUID();
-        given(service.buildGradeBook(assignmentUuid))
+        given(service.buildGradeBook(eq(assignmentUuid), anyBoolean(), anyBoolean()))
                 .willThrow(new ResourceNotFoundException(
                         "TeacherAssignment", assignmentUuid));
 

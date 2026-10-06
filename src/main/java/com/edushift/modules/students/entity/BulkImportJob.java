@@ -1,6 +1,7 @@
 package com.edushift.modules.students.entity;
 
 import com.edushift.shared.domain.TenantAwareEntity;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -12,6 +13,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
@@ -140,10 +142,19 @@ public class BulkImportJob extends TenantAwareEntity {
 	}
 
 	public void recordRowError(int rowNumber, String code, String message) {
+		recordRowError(rowNumber, code, message, null, null);
+	}
+
+	/**
+	 * @param label  who failed, e.g. {@code "Ana López · DNI 12345678"}
+	 * @param fields values the admin can edit and retry (document, name, email)
+	 */
+	public void recordRowError(int rowNumber, String code, String message,
+			String label, Map<String, String> fields) {
 		if (errors == null) {
 			errors = new ArrayList<>();
 		}
-		errors.add(new RowError(rowNumber, code, truncate(message, 500)));
+		errors.add(new RowError(rowNumber, code, truncate(message, 500), label, fields));
 		this.errorRows++;
 	}
 
@@ -170,6 +181,20 @@ public class BulkImportJob extends TenantAwareEntity {
 	 * it (header row = 1, first data row = 2). Admins reading the error
 	 * report will be able to navigate to the offending row directly.
 	 */
-	public record RowError(int row, String code, String message) {
+	/**
+	 * {@code label} and {@code fields} are optional so jobs saved before
+	 * they existed still deserialize.
+	 */
+	public record RowError(
+			int row,
+			String code,
+			String message,
+			String label,
+			Map<String, String> fields
+	) {
+		@JsonIgnore
+		public RowError(int row, String code, String message) {
+			this(row, code, message, null, null);
+		}
 	}
 }

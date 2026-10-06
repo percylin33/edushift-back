@@ -79,6 +79,42 @@ public interface LearningSessionRepository extends JpaRepository<LearningSession
 			@Param("dateTo") LocalDate dateTo);
 
 	/**
+	 * Sessions the teacher may copy: shared, not cancelled, same course,
+	 * grade and period as one of their active assignments, and not their own.
+	 */
+	@Query("""
+			select distinct s from LearningSession s
+			  join s.teacherAssignment a
+			  join a.section sec
+			  join a.course course
+			  join a.academicPeriod period
+			where s.sharedWithGrade = true
+			  and s.status <> com.edushift.modules.sessions.learning.entity.SessionStatus.CANCELLED
+			  and a.teacher.publicUuid <> :teacherUuid
+			  and exists (
+			    select 1 from com.edushift.modules.teachers.assignments.entity.TeacherAssignment mine
+			    where mine.teacher.publicUuid = :teacherUuid
+			      and mine.unassignedAt is null
+			      and mine.course = course
+			      and mine.section.grade = sec.grade
+			      and mine.academicPeriod = period
+			  )
+			order by s.scheduledDate desc, s.createdAt desc
+			""")
+	List<LearningSession> findSharedForTeacher(@Param("teacherUuid") UUID teacherUuid);
+
+	/**
+	 * Every shared, non-cancelled session in the tenant. Admin catalog.
+	 */
+	@Query("""
+			select s from LearningSession s
+			where s.sharedWithGrade = true
+			  and s.status <> com.edushift.modules.sessions.learning.entity.SessionStatus.CANCELLED
+			order by s.scheduledDate desc, s.createdAt desc
+			""")
+	List<LearningSession> findSharedForAdmin();
+
+	/**
 	 * Existence probe used by {@code UnitService.delete} to return
 	 * {@code UNIT_HAS_SESSIONS} (409). Only counts non-cancelled
 	 * sessions: a CANCELLED session is irrelevant for "is the unit
@@ -150,6 +186,22 @@ public interface LearningSessionRepository extends JpaRepository<LearningSession
 			  and s.status <> com.edushift.modules.sessions.learning.entity.SessionStatus.CANCELLED
 			""")
 	boolean existsByCompetency(@Param("competency") Competency competency);
+
+	/**
+	 * True when a non-cancelled session of a teacher other than
+	 * {@code userId} still references the competency. Soft-deleted
+	 * sessions are excluded by {@code @SQLRestriction}.
+	 */
+	@Query("""
+			select count(s) > 0 from LearningSession s
+			  join s.competencies c
+			where c = :competency
+			  and s.status <> com.edushift.modules.sessions.learning.entity.SessionStatus.CANCELLED
+			  and s.teacherAssignment.teacher.userId <> :userId
+			""")
+	boolean existsActiveByCompetencyForOtherTeacher(
+			@Param("competency") Competency competency,
+			@Param("userId") UUID userId);
 
 	/**
 	 * Existence probe used by {@code CapacityService.delete}.

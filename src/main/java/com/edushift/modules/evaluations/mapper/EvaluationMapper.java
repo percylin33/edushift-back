@@ -30,6 +30,7 @@ import org.springframework.stereotype.Component;
 public class EvaluationMapper {
 
 	public EvaluationResponse toResponse(Evaluation evaluation, long gradeCount) {
+		var category = evaluation.getCategory();
 		return new EvaluationResponse(
 				evaluation.getPublicUuid(),
 				toAssignmentRef(evaluation.getTeacherAssignment()),
@@ -37,6 +38,8 @@ public class EvaluationMapper {
 				evaluation.getLearningSession() != null
 						? evaluation.getLearningSession().getPublicUuid()
 						: null,
+				category != null ? category.getPublicUuid() : null,
+				category != null ? category.getName() : null,
 				evaluation.getKind(),
 				evaluation.getName(),
 				evaluation.getDescription(),
@@ -55,6 +58,7 @@ public class EvaluationMapper {
 	}
 
 	public EvaluationListItem toListItem(Evaluation evaluation, long gradeCount) {
+		var category = evaluation.getCategory();
 		return new EvaluationListItem(
 				evaluation.getPublicUuid(),
 				evaluation.getKind(),
@@ -64,6 +68,8 @@ public class EvaluationMapper {
 				evaluation.getDueDate(),
 				evaluation.getScale(),
 				evaluation.getStatus(),
+				category != null ? category.getPublicUuid() : null,
+				category != null ? category.getName() : null,
 				gradeCount,
 				evaluation.getIsActive(),
 				evaluation.getCreatedAt(),
