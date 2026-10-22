@@ -56,6 +56,14 @@ public class CookieHelper {
 		return buildCookie("edushift_refresh_token", "", 0);
 	}
 
+	public ResponseCookie createImpersonationAccessCookie(String token, long maxAgeSeconds) {
+		return buildCookie("edushift_impersonation_access_token", token, maxAgeSeconds);
+	}
+
+	public ResponseCookie clearImpersonationAccessCookie() {
+		return buildCookie("edushift_impersonation_access_token", "", 0);
+	}
+
 	/**
 	 * Extracts a cookie value from the request.
 	 */

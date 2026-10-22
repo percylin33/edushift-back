@@ -8,6 +8,8 @@ import com.edushift.modules.admin.tenants.dto.AdminTenantSummary;
 import com.edushift.modules.tenants.entity.Tenant;
 import com.edushift.modules.tenants.entity.TenantPlan;
 import java.util.Map;
+import java.util.List;
+import java.time.Instant;
 
 /**
  * Sprint 15 / F-05 / H-07 — entity → DTO mapper. Filters out any column
@@ -32,7 +34,11 @@ public final class AdminTenantMapper {
 	public record Aggregates(
 			Map<java.util.UUID, PlatformPlan> plansById,
 			Map<java.util.UUID, Long> activeStudentsByTenant,
-			Map<java.util.UUID, B2BSubscription> activeSubscriptionByTenant
+			Map<java.util.UUID, B2BSubscription> activeSubscriptionByTenant,
+			Map<java.util.UUID, Long> usersByTenant,
+			Map<java.util.UUID, Long> teachersByTenant,
+			Map<java.util.UUID, Long> storageBytesByTenant,
+			Instant metricsUpdatedAt
 	) {}
 
 	public static AdminTenantSummary toSummary(Tenant t, Aggregates agg) {
@@ -42,7 +48,6 @@ public final class AdminTenantMapper {
 				: null;
 		B2BSubscription sub = agg.activeSubscriptionByTenant().get(t.getId());
 		Long activeStudents = agg.activeStudentsByTenant().get(t.getId());
-
 		return new AdminTenantSummary(
 				t.getPublicUuid(),
 				t.getSlug(),
@@ -51,6 +56,8 @@ public final class AdminTenantMapper {
 				t.getPlan() != null ? t.getPlan().name() : null,
 				plan != null ? plan.getName() : legacyPlanDisplayName(t.getPlan()),
 				activeStudents != null ? activeStudents.intValue() : null,
+				t.getMaxStudents() != null ? t.getMaxStudents()
+						: (plan != null ? plan.getMaxStudents() : null),
 				sub != null ? sub.getNextBillingAt() : null,
 				t.getTrialEndsAt(),
 				t.getCreatedAt(),
@@ -81,6 +88,14 @@ public final class AdminTenantMapper {
 				: null;
 		B2BSubscription sub = agg.activeSubscriptionByTenant().get(t.getId());
 		Long activeStudents = agg.activeStudentsByTenant().get(t.getId());
+		Long totalUsers = agg.usersByTenant().get(t.getId());
+		Long totalTeachers = agg.teachersByTenant().get(t.getId());
+		Long storageUsedBytes = agg.storageBytesByTenant().get(t.getId());
+		Integer maxStudents = t.getMaxStudents() != null
+				? t.getMaxStudents() : (plan != null ? plan.getMaxStudents() : null);
+		Integer maxTeachers = t.getMaxTeachers() != null
+				? t.getMaxTeachers() : (plan != null ? plan.getMaxTeachers() : null);
+		Integer maxStorageMb = plan != null ? plan.getMaxStorageMb() : null;
 
 		return new AdminTenantDetail(
 				t.getId(), t.getPublicUuid(),
@@ -90,15 +105,19 @@ public final class AdminTenantMapper {
 				plan != null ? plan.getName() : legacyPlanDisplayName(t.getPlan()),
 				t.getPlanId(),
 				activeStudents != null ? activeStudents.intValue() : null,
-				null, null,
+				totalUsers != null ? totalUsers.intValue() : 0,
+				totalTeachers != null ? totalTeachers.intValue() : 0,
 				t.getTrialEndsAt(),
 				t.getBranding(),
 				t.getFeatureFlags(),
 				t.getSettings(),
 				toSubscriptionSummary(sub, plan),
-				t.getMaxStudents(),
-				t.getMaxTeachers(),
-				null,
+				maxStudents,
+				maxTeachers,
+				maxStorageMb,
+				storageUsedBytes != null ? storageUsedBytes : 0L,
+				plan != null && plan.getFeatures() != null ? List.copyOf(plan.getFeatures()) : List.of(),
+				agg.metricsUpdatedAt(),
 				t.getCreatedAt(),
 				t.getUpdatedAt());
 	}

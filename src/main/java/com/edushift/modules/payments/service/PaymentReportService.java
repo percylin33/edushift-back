@@ -1,6 +1,7 @@
 package com.edushift.modules.payments.service;
 
 import com.edushift.modules.payments.entity.Invoice;
+import com.edushift.modules.payments.dto.PaymentAgingReportDto;
 import com.edushift.modules.payments.repository.InvoiceRepository;
 import com.edushift.shared.multitenancy.TenantContext;
 import java.time.Instant;
@@ -44,35 +45,45 @@ public class PaymentReportService {
 	}
 
 	@Transactional(readOnly = true)
-	public Map<String, Long> agingBuckets() {
-		TenantContext.currentRequired();
+	public PaymentAgingReportDto agingBuckets() {
+		var tenantId = TenantContext.currentRequired();
 		Instant now = Instant.now();
-		List<Invoice> overdue = invoiceRepository.findByStatusOrderByIssuedAtDesc(
-						Invoice.Status.OVERDUE, PageRequest.of(0, 5000))
-				.getContent();
-		Map<String, Long> buckets = new LinkedHashMap<>();
-		buckets.put("d0_30", 0L);
-		buckets.put("d31_60", 0L);
-		buckets.put("d61_90", 0L);
-		buckets.put("d90_plus", 0L);
-		for (Invoice i : overdue) {
-			if (i.getDueAt() == null) {
-				continue;
-			}
-			long days = ChronoUnit.DAYS.between(i.getDueAt(), now);
-			String key;
-			if (days <= 30) {
-				key = "d0_30";
-			} else if (days <= 60) {
-				key = "d31_60";
-			} else if (days <= 90) {
-				key = "d61_90";
-			} else {
-				key = "d90_plus";
-			}
-			buckets.put(key, buckets.get(key) + i.getTotalCents());
+		List<InvoiceRepository.AgingBucketProjection> aggregates = invoiceRepository.aggregateOverdueByAge(
+				tenantId,
+				now,
+				now.minus(30, ChronoUnit.DAYS),
+				now.minus(60, ChronoUnit.DAYS),
+				now.minus(90, ChronoUnit.DAYS));
+		Map<String, PaymentAgingReportDto.AgingBucket> buckets = new LinkedHashMap<>();
+		buckets.put("d0_30", emptyBucket());
+		buckets.put("d31_60", emptyBucket());
+		buckets.put("d61_90", emptyBucket());
+		buckets.put("d90_plus", emptyBucket());
+		long totalCents = 0;
+		long invoiceCount = 0;
+		for (InvoiceRepository.AgingBucketProjection row : aggregates) {
+			PaymentAgingReportDto.AgingBucket bucket = new PaymentAgingReportDto.AgingBucket(
+					value(row.getAmountCents()), value(row.getInvoiceCount()), value(row.getStudentCount()));
+			buckets.put(row.getBucket(), bucket);
+			totalCents += bucket.amountCents();
+			invoiceCount += bucket.invoiceCount();
 		}
-		return buckets;
+		return new PaymentAgingReportDto(
+				totalCents,
+				invoiceCount,
+				invoiceRepository.countOverdueStudents(tenantId, now),
+				buckets.get("d0_30"),
+				buckets.get("d31_60"),
+				buckets.get("d61_90"),
+				buckets.get("d90_plus"));
+	}
+
+	private static PaymentAgingReportDto.AgingBucket emptyBucket() {
+		return new PaymentAgingReportDto.AgingBucket(0, 0, 0);
+	}
+
+	private static long value(Long value) {
+		return value == null ? 0 : value;
 	}
 
 	private static String csv(String s) {

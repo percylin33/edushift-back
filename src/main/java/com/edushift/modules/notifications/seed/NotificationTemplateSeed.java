@@ -167,6 +167,13 @@ public final class NotificationTemplateSeed {
                                 <div style="font-size:15px;line-height:1.55;color:#334155">{{body}}</div>
                                 <p style="margin:16px 0 0;font-size:12px;color:#94a3b8">{{senderName}} · {{tenantName}}</p>
                                 """),
+                build("DISCLOSURE_PUBLISHED", "ANNOUNCEMENT",
+                                "Información del año {{academicYear}} disponible — {{tenantName}}",
+                                """
+                                <h1 style="margin:0 0 16px;font-size:20px;color:#0f172a">Información anual publicada</h1>
+                                <p style="margin:0 0 12px;font-size:15px;line-height:1.55;color:#334155">{{tenantName}} publicó la información del servicio educativo para el año {{academicYear}}.</p>
+                                <p style="margin:0;font-size:14px;color:#64748b">Consulta la versión {{version}} desde el portal familiar de EduShift.</p>
+                                """),
                 build("PASSWORD_RESET", "SYSTEM",
                                 "Restablece tu contraseña — {{tenantName}}",
                                 """

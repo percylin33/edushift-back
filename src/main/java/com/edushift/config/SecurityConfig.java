@@ -111,6 +111,7 @@ public class SecurityConfig {
 			// withheld at the DTO level (TenantSummary), so opening this path
 			// to the public web is safe by construction.
 			"/v1/tenants/by-slug/*",
+			"/v1/tenants/by-slug/*/manifest.webmanifest",
 			// `tenants/register` is invite-gated public signup: anyone with a
 			// valid unused Super-Admin school invitation token can create a
 			// TRIAL tenant. The token is the credential.
@@ -135,6 +136,12 @@ public class SecurityConfig {
 			"/actuator/info",
 			// Sprint 15 / BE-15.1: admin login is public (no tenant context).
 			"/v1/admin/login",
+			// Uses a short-lived ONBOARDING bearer, validated by AdminAuthService.
+			"/v1/admin/initial-password",
+			// Admin MFA endpoints validate their short-lived onboarding/MFA
+			// bearer tokens inside AdminMfaOnboardingService. Let them reach
+			// that controller-level validation instead of requiring an access JWT.
+			"/v1/admin/mfa/**",
 			// Sprint 15 / F-02 follow-up: dev-only MFA enrolment bypass.
 			// The controller bean is itself @Profile({"dev","local"}) — in prod
 			// the path is unmapped and Spring returns 404. Auth here is the
@@ -152,7 +159,15 @@ public class SecurityConfig {
 			// Branding assets (logo / login background) must be readable on the
 			// unauthenticated login page. The controller only serves rows whose
 			// remote_key is under /lms/branding/ and content-type is image/*.
-			"/v1/files/public/*"
+			"/v1/files/public/*",
+		"/v1/public/admissions/*/inquiries",
+		"/v1/public/admissions/*/catalog",
+		"/v1/public/admissions/*/offers/*",
+		"/v1/public/admissions/*/offers/*/response",
+		// Libro de Reclamaciones Virtual — Ley N° 32495 (INDECOPI).
+		// Public endpoint: anyone can submit a complaint without authentication.
+		"/public/claims",
+		"/public/contact"
 	};
 
 	private final HandlerExceptionResolver handlerExceptionResolver;
@@ -234,6 +249,7 @@ public class SecurityConfig {
 										+ "style-src 'self' 'unsafe-inline'; "
 										+ "font-src 'self' data:; "
 										+ "connect-src 'self' https: wss:; "
+									+ "frame-src 'self' blob:; "
 										+ "frame-ancestors 'none'; "
 										+ "base-uri 'self'; "
 										+ "form-action 'self'"))

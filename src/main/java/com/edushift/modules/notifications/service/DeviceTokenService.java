@@ -66,7 +66,12 @@ public class DeviceTokenService {
 
 	@Transactional
 	public void heartbeat(String token) {
-		UserDeviceToken existing = repository.findByToken(token).orElse(null);
+		UUID tenantId = TenantContext.currentRequired();
+		UUID userId = currentUserProvider.currentUserId()
+				.orElseThrow(() -> new IllegalStateException("Authenticated user required to update a device"));
+		UserDeviceToken existing = repository
+				.findByTenantIdAndUserPublicUuidAndToken(tenantId, userId, token)
+				.orElse(null);
 		if (existing == null) {
 			// Stale heartbeat from an unregistered token - ignore.
 			log.debug("[fcm-device] heartbeat on unknown token (no-op)");
@@ -83,7 +88,12 @@ public class DeviceTokenService {
 
 	@Transactional
 	public void unregister(String token) {
-		UserDeviceToken existing = repository.findByToken(token).orElse(null);
+		UUID tenantId = TenantContext.currentRequired();
+		UUID userId = currentUserProvider.currentUserId()
+				.orElseThrow(() -> new IllegalStateException("Authenticated user required to remove a device"));
+		UserDeviceToken existing = repository
+				.findByTenantIdAndUserPublicUuidAndToken(tenantId, userId, token)
+				.orElse(null);
 		if (existing == null) return;
 		existing.setActive(false);
 		existing.setUnregisteredAt(Instant.now());

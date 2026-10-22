@@ -2,15 +2,20 @@ package com.edushift.modules.payments.controller;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.verify;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.edushift.modules.auth.security.JwtAuthenticatedPrincipal;
 import com.edushift.modules.auth.security.JwtAuthenticationToken;
+import com.edushift.modules.payments.dto.PaymentAgingReportDto;
+import com.edushift.modules.payments.dto.PaymentAccessCandidateDto;
 import com.edushift.modules.payments.service.AdminPaymentService;
 import com.edushift.modules.payments.service.PaymentConceptService;
 import com.edushift.test.AbstractControllerTest;
 import java.util.List;
+import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
@@ -28,6 +33,7 @@ class AdminPaymentControllerTest extends AbstractControllerTest {
     @MockitoBean PaymentConceptService conceptService;
     @MockitoBean AdminPaymentService adminPaymentService;
     @MockitoBean com.edushift.modules.payments.service.SubscriptionService subscriptionService;
+    @MockitoBean com.edushift.modules.payments.service.SiblingDiscountService siblingDiscountService;
     @MockitoBean com.edushift.modules.payments.service.PaymentPolicyService paymentPolicyService;
     @MockitoBean com.edushift.modules.payments.service.MoraService moraService;
     @MockitoBean com.edushift.modules.payments.service.PaymentAccessService paymentAccessService;
@@ -73,4 +79,42 @@ class AdminPaymentControllerTest extends AbstractControllerTest {
         mockMvc.perform(get("/v1/admin/payments/concepts").with(auth(student())))
                 .andExpect(status().is4xxClientError());
     }
+
+        @Test
+        void aging_returnsAggregatedTenantSummary_whenAuthorized() throws Exception {
+        given(paymentReportService.agingBuckets()).willReturn(new PaymentAgingReportDto(
+            1000L, 2L, 1L,
+            new PaymentAgingReportDto.AgingBucket(1000L, 2L, 1L),
+            new PaymentAgingReportDto.AgingBucket(0L, 0L, 0L),
+            new PaymentAgingReportDto.AgingBucket(0L, 0L, 0L),
+            new PaymentAgingReportDto.AgingBucket(0L, 0L, 0L)));
+
+        mockMvc.perform(get("/v1/admin/payments/reports/aging").with(auth(paymentAdmin())))
+            .andExpect(status().isOk());
+        }
+
+        @Test
+        void accessOverrideRoutes_areAvailableOnlyToPaymentAdmins() throws Exception {
+        given(paymentAccessService.listActiveOverrides()).willReturn(List.of());
+        given(paymentAccessService.searchOverrideCandidates("ana"))
+            .willReturn(List.of(new PaymentAccessCandidateDto(ANY_USER, UUID.randomUUID(), "Ana Ruiz", "Apoderado")));
+
+        mockMvc.perform(get("/v1/admin/payments/access-overrides").with(auth(paymentAdmin())))
+            .andExpect(status().isOk());
+        mockMvc.perform(get("/v1/admin/payments/access-overrides/candidates?q=ana").with(auth(paymentAdmin())))
+            .andExpect(status().isOk());
+        mockMvc.perform(get("/v1/admin/payments/access-overrides"))
+            .andExpect(status().is4xxClientError());
+        }
+
+        @Test
+        void revokeAccessOverride_delegatesToTenantScopedService() throws Exception {
+        UUID overrideUuid = UUID.randomUUID();
+
+        mockMvc.perform(delete("/v1/admin/payments/access-overrides/" + overrideUuid)
+                .with(auth(paymentAdmin())))
+            .andExpect(status().isOk());
+
+        verify(paymentAccessService).revokeOverride(overrideUuid);
+        }
 }

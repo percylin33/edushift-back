@@ -15,6 +15,25 @@ public interface PaymentAccessOverrideRepository extends JpaRepository<PaymentAc
 
 	@Query("""
 			SELECT o FROM PaymentAccessOverride o
+			WHERE o.tenantId = :tenantId
+			  AND o.untilAt > :now
+			ORDER BY o.untilAt ASC
+			""")
+	List<PaymentAccessOverride> findActiveByTenant(
+			@Param("tenantId") UUID tenantId,
+			@Param("now") Instant now);
+
+	@Query("""
+			SELECT o FROM PaymentAccessOverride o
+			WHERE o.publicUuid = :publicUuid
+			  AND o.tenantId = :tenantId
+			""")
+	Optional<PaymentAccessOverride> findByPublicUuidAndTenantId(
+			@Param("publicUuid") UUID publicUuid,
+			@Param("tenantId") UUID tenantId);
+
+	@Query("""
+			SELECT o FROM PaymentAccessOverride o
 			WHERE o.userPublicUuid = :userPublicUuid
 			  AND o.untilAt > :now
 			ORDER BY o.untilAt DESC

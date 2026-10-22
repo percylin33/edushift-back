@@ -26,7 +26,7 @@ public class StudentAttendanceHistoryController {
     private final AttendanceService attendanceService;
 
     @GetMapping
-    @PreAuthorize("hasAnyRole('TENANT_ADMIN','TEACHER','STAFF')")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','TEACHER') or hasAuthority('ATTENDANCE:READ')")
     @Operation(summary = "List attendance records for a student (staff)")
     public ApiResponse<List<StudentAttendanceHistoryResponse>> list(
             @PathVariable UUID studentPublicUuid,

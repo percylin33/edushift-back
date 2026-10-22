@@ -171,6 +171,15 @@ public class EdushiftWebMvcTestConfig {
 	}
 
 	/**
+	 * The security filter rechecks the JWT user on each request. MVC slices do
+	 * not load JPA repositories, so provide a stand-in for their filter chain.
+	 */
+	@Bean
+	com.edushift.modules.auth.repository.UserRepository userRepository() {
+		return mock(com.edushift.modules.auth.repository.UserRepository.class);
+	}
+
+	/**
 	 * Stand-in {@code TenantStatusCache}. {@code JwtAuthenticationFilter}
 	 * checks tenant lifecycle (ACTIVE / SUSPENDED) on every request; the
 	 * real cache pulls Redis + TenantRepository — too heavy for a slice.

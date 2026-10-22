@@ -1,4 +1,7 @@
 target/
+!target/
+target/*
+!target/edushift-back-0.0.1-SNAPSHOT.jar
 build/
 out/
 .gradle/
@@ -26,6 +29,7 @@ README.md
 *.md
 
 Dockerfile*
+!Dockerfile.local
 docker-compose*.yml
 .dockerignore
 .env

@@ -158,6 +158,7 @@ public class SessionGeneratorService {
         List<String> phaseTokens = resolvePhaseTokens(request.templateUuid());
         LlmRequest llmRequest = promptBuilder.build(
                 request, course.getName(), gradeName, competencyNames, capacityNames, phaseTokens);
+        quotaService.reserveForRequest(llmRequest);
 
         // 6. Persist a PENDING audit row BEFORE the call. If the JVM
         //    dies mid-call, we still have a record of the attempt.
@@ -281,6 +282,7 @@ public class SessionGeneratorService {
         List<String> phaseTokens = resolvePhaseTokens(request.templateUuid());
         LlmRequest llmRequest = promptBuilder.buildWithRag(
                 request, course.getName(), gradeName, competencyNames, capacityNames, ragSnippets, phaseTokens);
+        quotaService.reserveForRequest(llmRequest);
 
         // 5. Persist a PENDING audit row.
         AiGeneration gen = newGeneration(tenantId, userId, llmRequest, course.getPublicUuid());

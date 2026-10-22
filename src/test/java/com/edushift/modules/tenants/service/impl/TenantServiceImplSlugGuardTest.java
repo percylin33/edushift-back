@@ -21,6 +21,7 @@ class TenantServiceImplSlugGuardTest {
         assertThat(TenantServiceImpl.isPlausibleTenantSlug("keola-networks")).isTrue();
         assertThat(TenantServiceImpl.isPlausibleTenantSlug("a")).isTrue();
         assertThat(TenantServiceImpl.isPlausibleTenantSlug("a1b2c3")).isTrue();
+        assertThat(TenantServiceImpl.isPlausibleTenantSlug("123school")).isTrue();
         assertThat(TenantServiceImpl.isPlausibleTenantSlug("escuela-norte-2026")).isTrue();
     }
 
@@ -55,8 +56,9 @@ class TenantServiceImplSlugGuardTest {
 
     @Test
     void rejectsTooLong() {
-        // 25 chars — limit is 24
-        String tooLong = "a".repeat(25);
+        // 64 chars — DNS label limit is 63
+        String tooLong = "a".repeat(64);
         assertThat(TenantServiceImpl.isPlausibleTenantSlug(tooLong)).isFalse();
+        assertThat(TenantServiceImpl.isPlausibleTenantSlug("a".repeat(63))).isTrue();
     }
 }

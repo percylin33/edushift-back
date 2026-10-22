@@ -3,21 +3,28 @@ package com.edushift.modules.tenants.controller;
 import com.edushift.modules.admin.invitations.SchoolInvitationPreflight;
 import com.edushift.modules.admin.invitations.SchoolInvitationService;
 import com.edushift.modules.auth.dto.AuthResponse;
+import com.edushift.modules.auth.controller.CookieHelper;
+import jakarta.servlet.http.HttpServletResponse;
 import com.edushift.modules.tenants.dto.RegisterTenantRequest;
+import com.edushift.modules.tenants.dto.TenantManifest;
 import com.edushift.modules.tenants.dto.TenantResponse;
 import com.edushift.modules.tenants.dto.TenantSummary;
 import com.edushift.modules.tenants.dto.UpdateTenantRequest;
+import com.edushift.modules.tenants.service.TenantManifestService;
 import com.edushift.modules.tenants.service.TenantService;
 import com.edushift.shared.api.ApiResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.CacheControl;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.validation.annotation.Validated;
@@ -76,7 +83,9 @@ import org.springframework.web.bind.annotation.RestController;
 public class TenantController {
 
 	private final TenantService tenantService;
+	private final TenantManifestService tenantManifestService;
 	private final SchoolInvitationService schoolInvitationService;
+	private final CookieHelper cookieHelper;
 
 	@GetMapping("/by-slug/{slug}")
 	@Operation(
@@ -94,6 +103,21 @@ public class TenantController {
 	) {
 		TenantSummary summary = tenantService.findBySlug(slug);
 		return ResponseEntity.ok(ApiResponse.ok(summary));
+	}
+
+	@GetMapping(value = "/by-slug/{slug}/manifest.webmanifest", produces = "application/manifest+json")
+	@Operation(summary = "Get public PWA install metadata for a tenant")
+	public ResponseEntity<TenantManifest> getManifestBySlug(
+			@PathVariable
+			@NotBlank(message = "slug is required")
+			@Size(min = 2, max = 80, message = "slug length out of range")
+			String slug,
+			HttpServletRequest request
+	) {
+		return ResponseEntity.ok()
+				.contentType(MediaType.parseMediaType("application/manifest+json"))
+				.cacheControl(CacheControl.noCache())
+				.body(tenantManifestService.findBySlug(slug, request.getHeader("Origin")));
 	}
 
 	@GetMapping("/me")
@@ -175,15 +199,21 @@ public class TenantController {
 	@Operation(
 			summary = "Register a new tenant + admin (invitation required)",
 			description = "Redeems a Super-Admin school invitation. Creates the tenant "
-					+ "in PENDING/TRIAL state, the admin user, and returns a logged-in "
-					+ "session ready for onboarding. 409 TENANT_SLUG_TAKEN when the slug "
+					+ "in ACTIVE/TRIAL state, the admin user, and sets httpOnly session cookies. Returns user metadata "
+					+ "without exposing token values. 409 TENANT_SLUG_TAKEN when the slug "
 					+ "collides. 410 when the invitation is spent or expired."
 	)
 	public ResponseEntity<AuthResponse> register(
-			@Valid @RequestBody RegisterTenantRequest request
+			@Valid @RequestBody RegisterTenantRequest request,
+			HttpServletResponse response
 	) {
 		AuthResponse session = tenantService.register(request);
-		return ResponseEntity.status(HttpStatus.CREATED).body(session);
+		response.addHeader("Set-Cookie", cookieHelper.createAccessTokenCookie(
+				session.accessToken(), session.expiresInSec()).toString());
+		response.addHeader("Set-Cookie", cookieHelper.createRefreshTokenCookie(
+				session.refreshToken(), 7 * 24 * 60 * 60).toString());
+		return ResponseEntity.status(HttpStatus.CREATED).body(new AuthResponse(
+				null, null, session.tokenType(), session.expiresInSec(), session.user()));
 	}
 
 }

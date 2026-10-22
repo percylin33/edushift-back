@@ -1,5 +1,6 @@
 package com.edushift.modules.users.controller;
 
+import com.edushift.modules.auth.controller.CookieHelper;
 import com.edushift.modules.auth.dto.AuthResponse;
 import com.edushift.modules.users.dto.AcceptInvitationRequest;
 import com.edushift.modules.users.dto.CreateInvitationRequest;
@@ -11,6 +12,7 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
@@ -21,6 +23,7 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.web.PageableDefault;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseCookie;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.validation.annotation.Validated;
@@ -46,7 +49,7 @@ import org.springframework.web.bind.annotation.RestController;
  *   <tr><td>GET   </td><td>/                       </td><td>TENANT_ADMIN</td><td>{@link Page}&lt;{@link InvitationResponse}&gt;</td></tr>
  *   <tr><td>DELETE</td><td>/{publicUuid}           </td><td>TENANT_ADMIN</td><td>{@link InvitationResponse} (cancelled)</td></tr>
  *   <tr><td>GET   </td><td>/by-token/{token}       </td><td>—</td>          <td>{@link InvitationPreflightResponse}</td></tr>
- *   <tr><td>POST  </td><td>/accept                 </td><td>—</td>          <td>{@link AuthResponse} (raw, OAuth-shape)</td></tr>
+ *   <tr><td>POST  </td><td>/accept                 </td><td>—</td>          <td>{@link AuthResponse} + httpOnly session cookies</td></tr>
  * </table>
  *
  * <p>The two public paths ({@code by-token/**} and {@code accept}) must
@@ -60,7 +63,10 @@ import org.springframework.web.bind.annotation.RestController;
 		description = "Invitation lifecycle: create / list / cancel (admin) and preflight / accept (public)")
 public class UserInvitationController {
 
+	private static final long REFRESH_COOKIE_MAX_AGE_SEC = 7L * 24 * 60 * 60;
+
 	private final UserInvitationService service;
+	private final CookieHelper cookieHelper;
 
 	// ===========================================================================
 	// Admin paths — TENANT_ADMIN
@@ -90,9 +96,11 @@ public class UserInvitationController {
 						request.email(),
 						request.firstName(),
 						request.lastName(),
+						request.secondLastName(),
 						request.roles(),
 						request.documentType(),
-						request.documentNumber()));
+						request.documentNumber(),
+						null));
 		return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.ok(response));
 	}
 
@@ -174,15 +182,17 @@ public class UserInvitationController {
 	@Operation(
 			summary = "Redeem an invitation token (public)",
 			description = "Creates the new user inside the invitation's tenant "
-					+ "and returns a logged-in session — same envelope as "
-					+ "/v1/auth/login. Maps token errors to 404 / 410 (see "
+					+ "and starts a session with the same httpOnly cookies as "
+					+ "/v1/auth/login. The response body contains user info, not tokens. "
+					+ "Maps token errors to 404 / 410 (see "
 					+ "preflight). Returns 201 Created because a new user "
 					+ "resource is created. Optional body.tenantSlug (or "
 					+ "X-Tenant-Slug) must match the invitation (UAT-CD-11)."
 	)
 	public ResponseEntity<AuthResponse> accept(
 			@Valid @RequestBody AcceptInvitationRequest request,
-			@RequestHeader(value = "X-Tenant-Slug", required = false) String tenantSlugHeader
+			@RequestHeader(value = "X-Tenant-Slug", required = false) String tenantSlugHeader,
+			HttpServletResponse httpResponse
 	) {
 		AcceptInvitationRequest effective = request;
 		if ((request.tenantSlug() == null || request.tenantSlug().isBlank())
@@ -190,7 +200,19 @@ public class UserInvitationController {
 			effective = new AcceptInvitationRequest(
 					request.token(), request.password(), tenantSlugHeader.trim());
 		}
-		AuthResponse response = service.acceptInvitation(effective);
-		return ResponseEntity.status(HttpStatus.CREATED).body(response);
+		AuthResponse session = service.acceptInvitation(effective);
+
+		// Match /auth/login: tokens only travel in httpOnly cookies, while
+		// the response body contains the user summary needed by the SPA.
+		ResponseCookie accessCookie = cookieHelper.createAccessTokenCookie(
+				session.accessToken(), session.expiresInSec());
+		ResponseCookie refreshCookie = cookieHelper.createRefreshTokenCookie(
+				session.refreshToken(), REFRESH_COOKIE_MAX_AGE_SEC);
+		httpResponse.addHeader("Set-Cookie", accessCookie.toString());
+		httpResponse.addHeader("Set-Cookie", refreshCookie.toString());
+
+		AuthResponse safeSession = new AuthResponse(
+				null, null, session.tokenType(), session.expiresInSec(), session.user());
+		return ResponseEntity.status(HttpStatus.CREATED).body(safeSession);
 	}
 }

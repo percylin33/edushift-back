@@ -3,6 +3,7 @@ package com.edushift.modules.family.service;
 import com.edushift.modules.family.dto.FamilyActivityItemDto;
 import com.edushift.modules.family.dto.FamilyAttendanceRecordDto;
 import com.edushift.modules.family.dto.FamilyChildSummary;
+import com.edushift.modules.family.dto.FamilyCompetencyResultDto;
 import com.edushift.modules.family.dto.FamilyGradeItemDto;
 import com.edushift.modules.family.dto.FamilyPaymentItemDto;
 import com.edushift.modules.schedule.timeslot.dto.ScheduleWeekView;
@@ -31,6 +32,9 @@ public interface FamilyService {
 			ReportJob.Format format) throws java.io.IOException;
 
 	List<FamilyGradeItemDto> getChildGrades(UUID studentPublicUuid, UUID parentUserPublicUuid);
+
+	List<FamilyCompetencyResultDto> getChildCompetencyResults(
+			UUID studentPublicUuid, UUID parentUserPublicUuid);
 
 	List<FamilyActivityItemDto> getChildActivities(UUID studentPublicUuid, UUID parentUserPublicUuid);
 

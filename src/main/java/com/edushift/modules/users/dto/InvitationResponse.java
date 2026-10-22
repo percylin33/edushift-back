@@ -34,8 +34,17 @@ public record InvitationResponse(
 		Instant expiresAt,
 		Instant acceptedAt,
 		Instant cancelledAt,
-		Instant createdAt
+		Instant createdAt,
+		String secondLastName
 ) {
+	public InvitationResponse(UUID publicUuid, String email, String firstName,
+			String lastName, DocumentType documentType, String documentNumber,
+			Set<String> roles, InvitationStatus status, String token,
+			Instant expiresAt, Instant acceptedAt, Instant cancelledAt,
+			Instant createdAt) {
+		this(publicUuid, email, firstName, lastName, documentType, documentNumber,
+				roles, status, token, expiresAt, acceptedAt, cancelledAt, createdAt, null);
+	}
 
 	/**
 	 * List-view variant: {@code token} is dropped on purpose. Used by
@@ -44,6 +53,6 @@ public record InvitationResponse(
 	public InvitationResponse withoutToken() {
 		return new InvitationResponse(
 				publicUuid, email, firstName, lastName, documentType, documentNumber, roles,
-				status, null, expiresAt, acceptedAt, cancelledAt, createdAt);
+				status, null, expiresAt, acceptedAt, cancelledAt, createdAt, secondLastName);
 	}
 }

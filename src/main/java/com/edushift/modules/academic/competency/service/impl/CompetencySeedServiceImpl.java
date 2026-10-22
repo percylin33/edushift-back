@@ -8,6 +8,7 @@ import com.edushift.modules.academic.competency.dto.SeedCompetenciesResponse;
 import com.edushift.modules.academic.competency.entity.Capacity;
 import com.edushift.modules.academic.competency.entity.Competency;
 import com.edushift.modules.academic.competency.entity.CompetencyOrigin;
+import com.edushift.modules.academic.competency.entity.CurriculumSourceContentStatus;
 import com.edushift.modules.academic.competency.mapper.CompetencyMapper;
 import com.edushift.modules.academic.competency.repository.CapacityRepository;
 import com.edushift.modules.academic.competency.repository.CompetencyRepository;
@@ -76,6 +77,11 @@ public class CompetencySeedServiceImpl implements CompetencySeedService {
 			competency.setDisplayOrder(competencyOrder++);
 			competency.setIsActive(Boolean.TRUE);
 			competency.setOrigin(CompetencyOrigin.MINEDU);
+			competency.setSourceCatalogVersion(CompetencyDefaults.SOURCE_CATALOG_VERSION);
+			competency.setSourceCatalogCode(defC.code());
+			competency.setSourceLevelCode(CompetencyDefaults.SOURCE_LEVEL_CODE);
+			competency.setSourceCycleCodes(CompetencyDefaults.SOURCE_CYCLE_CODES);
+			competency.setSourceContentStatus(CurriculumSourceContentStatus.MINEDU_SUMMARY);
 			Competency persisted = competencyRepository.save(competency);
 			competenciesCreated++;
 
@@ -88,6 +94,9 @@ public class CompetencySeedServiceImpl implements CompetencySeedService {
 				capacity.setDescription(defCap.description());
 				capacity.setDisplayOrder(capacityOrder++);
 				capacity.setIsActive(Boolean.TRUE);
+				capacity.setSourceCatalogVersion(CompetencyDefaults.SOURCE_CATALOG_VERSION);
+				capacity.setSourceCatalogCode(defCap.code());
+				capacity.setSourceContentStatus(CurriculumSourceContentStatus.MINEDU_SUMMARY);
 				capacityRepository.save(capacity);
 				capacitiesCreated++;
 			}

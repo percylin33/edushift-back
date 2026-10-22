@@ -21,6 +21,7 @@ import com.edushift.modules.students.service.StudentGuardianService;
 import com.edushift.modules.users.dto.CreateInvitationRequest;
 import com.edushift.modules.users.dto.InvitationResponse;
 import com.edushift.modules.users.service.UserInvitationService;
+import com.edushift.modules.payments.service.SubscriptionService;
 import com.edushift.shared.exception.BusinessException;
 import com.edushift.shared.exception.ConflictException;
 import com.edushift.shared.exception.ForbiddenException;
@@ -46,6 +47,7 @@ public class StudentGuardianServiceImpl implements StudentGuardianService {
 	private final StudentGuardianMapper mapper;
 	private final UserRepository userRepository;
 	private final UserInvitationService invitationService;
+	private final SubscriptionService subscriptionService;
 
 	/** Convention key carried in {@code user_invitations.metadata}. */
 	public static final String METADATA_GUARDIAN_ID_KEY = "guardianId";
@@ -106,6 +108,9 @@ public class StudentGuardianServiceImpl implements StudentGuardianService {
 		link.setCanPickupStudent(request.canPickupStudent());
 
 		StudentGuardian saved = linkRepository.save(link);
+		if (guardian.getUserId() != null) {
+			subscriptionService.synchronizeStudentForBillingRules(student.getPublicUuid());
+		}
 		log.info("[guardians] linked -- student={} guardian={} primary={} pickup={}",
 				student.getPublicUuid(), guardian.getPublicUuid(),
 				saved.isPrimaryContact(), saved.isCanPickupStudent());
@@ -207,6 +212,7 @@ public class StudentGuardianServiceImpl implements StudentGuardianService {
 
 		guardian.setUserId(user.getPublicUuid());
 		guardianRepository.saveAndFlush(guardian);
+		subscriptionService.synchronizeGuardianForBillingRules(guardian.getId());
 		log.info("[guardians] link-user -- guardian={} user={}",
 				guardian.getPublicUuid(), user.getPublicUuid());
 		return mapper.toResponse(loadLink(student, guardian));

@@ -8,6 +8,7 @@ import java.util.UUID;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Repository;
 
 /**
@@ -57,6 +58,14 @@ public interface StudentGuardianRepository extends JpaRepository<StudentGuardian
 			""")
 	List<StudentGuardian> findActiveByGuardianUserId(@Param("parentUserId") UUID parentUserId);
 
+	/** Distinct linked family accounts for school-wide publication notices. */
+	@Query("""
+			select distinct g.userId from StudentGuardian sg
+			join sg.guardian g
+			where g.userId is not null
+			""")
+	List<UUID> findAllGuardianUserIdsWithPortalAccess();
+
 	@Query("""
 			select count(sg) from StudentGuardian sg
 			where sg.student.id = :studentId
@@ -85,6 +94,18 @@ public interface StudentGuardianRepository extends JpaRepository<StudentGuardian
 			""")
 	List<StudentGuardian> findActiveByStudentIdsWithLinkedGuardian(
 			@Param("studentIds") Collection<UUID> studentIds);
+
+	@Query("""
+			select sg from StudentGuardian sg
+			join fetch sg.student s
+			join fetch sg.guardian g
+			where g.userId is not null
+			  and (lower(concat(g.firstName, ' ', g.lastName)) like lower(concat('%', :term, '%'))
+			       or lower(g.email) like lower(concat('%', :term, '%')))
+			order by sg.isPrimaryContact desc, g.lastName asc, g.firstName asc
+			""")
+	List<StudentGuardian> searchLinkedGuardiansForPaymentOverride(
+			@Param("term") String term, Pageable pageable);
 
 	@Query("""
 			select sg from StudentGuardian sg

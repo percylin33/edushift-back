@@ -79,6 +79,26 @@ public class Competency extends TenantAwareEntity {
 	@Column(name = "description", columnDefinition = "text")
 	private String description;
 
+	/** Curriculum source release copied into this tenant course, when applicable. */
+	@Column(name = "source_catalog_version", length = 60)
+	private String sourceCatalogVersion;
+
+	/** Stable identifier of the source competency, retained if the school changes its local code. */
+	@Column(name = "source_catalog_code", length = 80)
+	private String sourceCatalogCode;
+
+	/** National education level, separate from a tenant's custom level labels. */
+	@Column(name = "source_level_code", length = 20)
+	private String sourceLevelCode;
+
+	/** CNEB cycles covered by the source entry, e.g. III,IV,V. */
+	@Column(name = "source_cycle_codes", length = 30)
+	private String sourceCycleCodes;
+
+	@Enumerated(EnumType.STRING)
+	@Column(name = "source_content_status", length = 32)
+	private CurriculumSourceContentStatus sourceContentStatus;
+
 	@Column(name = "display_order", nullable = false)
 	private Integer displayOrder;
 

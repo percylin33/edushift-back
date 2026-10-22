@@ -3,6 +3,7 @@ package com.edushift.modules.students.listener;
 import com.edushift.modules.students.entity.Guardian;
 import com.edushift.modules.students.repository.GuardianRepository;
 import com.edushift.modules.students.service.impl.StudentGuardianServiceImpl;
+import com.edushift.modules.payments.service.SubscriptionService;
 import com.edushift.modules.users.events.InvitationAcceptedEvent;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
@@ -21,6 +22,7 @@ import org.springframework.stereotype.Component;
 public class GuardianInvitationListener {
 
 	private final GuardianRepository guardianRepository;
+	private final SubscriptionService subscriptionService;
 
 	@EventListener
 	public void onInvitationAccepted(InvitationAcceptedEvent event) {
@@ -52,6 +54,7 @@ public class GuardianInvitationListener {
 
 		guardian.setUserId(event.userPublicUuid());
 		guardianRepository.save(guardian);
+		subscriptionService.synchronizeGuardianForBillingRules(guardian.getId());
 		log.info("[guardians.invitations] linked guardian={} to user={} via invitation={}",
 				guardian.getPublicUuid(), event.userPublicUuid(),
 				event.invitationPublicUuid());

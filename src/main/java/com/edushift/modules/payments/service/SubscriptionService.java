@@ -6,13 +6,18 @@ import com.edushift.modules.academic.levelgrade.repository.AcademicLevelReposito
 import com.edushift.modules.academic.levelgrade.repository.GradeRepository;
 import com.edushift.modules.payments.dto.BulkCreateSubscriptionsRequest;
 import com.edushift.modules.payments.dto.BulkCreateSubscriptionsResponse;
+import com.edushift.modules.payments.dto.BillingPlanRuleRequest;
+import com.edushift.modules.payments.dto.BillingPlanRuleResponse;
 import com.edushift.modules.payments.dto.CreateSubscriptionRequest;
 import com.edushift.modules.payments.dto.SubscriptionResponse;
+import com.edushift.modules.payments.dto.UpdateBillingPlanRuleRequest;
+import com.edushift.modules.payments.entity.BillingPlanRule;
 import com.edushift.modules.payments.entity.PaymentConcept;
 import com.edushift.modules.payments.entity.Subscription;
 import com.edushift.modules.payments.exception.PaymentConceptNotFoundException;
 import com.edushift.modules.payments.job.InvoiceCronJob;
 import com.edushift.modules.payments.repository.PaymentConceptRepository;
+import com.edushift.modules.payments.repository.BillingPlanRuleRepository;
 import com.edushift.modules.payments.repository.SubscriptionRepository;
 import com.edushift.modules.students.enrollments.entity.StudentEnrollment;
 import com.edushift.modules.students.enrollments.repository.StudentEnrollmentRepository;
@@ -51,6 +56,7 @@ public class SubscriptionService {
 	private final StudentEnrollmentRepository enrollmentRepository;
 	private final GradeRepository gradeRepository;
 	private final AcademicLevelRepository levelRepository;
+	private final BillingPlanRuleRepository billingPlanRuleRepository;
 	private final SiblingDiscountService siblingDiscountService;
 	private final InvoiceCronJob invoiceCronJob;
 
@@ -62,6 +68,7 @@ public class SubscriptionService {
 			StudentEnrollmentRepository enrollmentRepository,
 			GradeRepository gradeRepository,
 			AcademicLevelRepository levelRepository,
+			BillingPlanRuleRepository billingPlanRuleRepository,
 			SiblingDiscountService siblingDiscountService,
 			@Lazy InvoiceCronJob invoiceCronJob) {
 		this.subscriptionRepository = subscriptionRepository;
@@ -71,8 +78,106 @@ public class SubscriptionService {
 		this.enrollmentRepository = enrollmentRepository;
 		this.gradeRepository = gradeRepository;
 		this.levelRepository = levelRepository;
+		this.billingPlanRuleRepository = billingPlanRuleRepository;
 		this.siblingDiscountService = siblingDiscountService;
 		this.invoiceCronJob = invoiceCronJob;
+	}
+
+	@Transactional(readOnly = true)
+	public List<BillingPlanRuleResponse> listBillingPlanRules() {
+		TenantContext.currentRequired();
+		return billingPlanRuleRepository.findAllByOrderByCreatedAtDesc().stream()
+				.map(this::ruleSnapshot)
+				.toList();
+	}
+
+	@Transactional(readOnly = true)
+	public BillingPlanRuleResponse previewBillingPlanRule(BillingPlanRuleRequest request) {
+		TenantContext.currentRequired();
+		return previewRule(toRule(request));
+	}
+
+	@Transactional
+	public BillingPlanRuleResponse createBillingPlanRule(BillingPlanRuleRequest request) {
+		TenantContext.currentRequired();
+		BillingPlanRule rule = toRule(request);
+		ensureNoActiveRule(rule);
+		BillingPlanRule saved = billingPlanRuleRepository.saveAndFlush(rule);
+		BillingPlanRuleResponse response = syncRule(saved);
+		if (response.createdCount() > 0) siblingDiscountService.refreshSuggestions();
+		return response;
+	}
+
+	@Transactional
+	public BillingPlanRuleResponse updateBillingPlanRule(UUID publicUuid, UpdateBillingPlanRuleRequest request) {
+		BillingPlanRule rule = billingPlanRuleRepository.findByPublicUuid(publicUuid)
+				.orElseThrow(() -> new BusinessException("BILLING_PLAN_RULE_NOT_FOUND", "Automatic plan rule not found"));
+		if (Boolean.TRUE.equals(request.active()) && !rule.isActive()) {
+			ensureNoActiveRule(rule);
+		}
+		rule.setActive(request.active());
+		BillingPlanRule saved = billingPlanRuleRepository.save(rule);
+		if (saved.isActive()) return syncRule(saved);
+		return ruleSnapshot(saved);
+	}
+
+	@Transactional
+	public BillingPlanRuleResponse synchronizeBillingPlanRule(UUID publicUuid) {
+		BillingPlanRule rule = billingPlanRuleRepository.findByPublicUuid(publicUuid)
+				.orElseThrow(() -> new BusinessException("BILLING_PLAN_RULE_NOT_FOUND", "Automatic plan rule not found"));
+		if (!rule.isActive()) {
+			throw new BusinessException("BILLING_PLAN_RULE_INACTIVE", "Activate the rule before synchronizing it");
+		}
+		BillingPlanRuleResponse response = syncRule(rule);
+		if (response.createdCount() > 0) siblingDiscountService.refreshSuggestions();
+		return response;
+	}
+
+	@Transactional
+	public void deleteBillingPlanRule(UUID publicUuid) {
+		BillingPlanRule rule = billingPlanRuleRepository.findByPublicUuid(publicUuid)
+				.orElseThrow(() -> new BusinessException("BILLING_PLAN_RULE_NOT_FOUND", "Automatic plan rule not found"));
+		billingPlanRuleRepository.delete(rule);
+	}
+
+	/** Called after enrollment or guardian linkage; creates all matching plans idempotently. */
+	@Transactional
+	public int synchronizeStudentForBillingRules(UUID studentPublicUuid) {
+		TenantContext.currentRequired();
+		Student student = studentRepository.findByPublicUuidForUpdate(studentPublicUuid)
+				.orElseThrow(() -> new BusinessException("STUDENT_NOT_FOUND", "Student not found"));
+		List<StudentEnrollment> enrollments = enrollmentRepository.findActiveByStudentFetchSection(student);
+		if (enrollments.isEmpty()) return 0;
+		Set<UUID> activeGradeIds = new LinkedHashSet<>();
+		Set<UUID> activeLevelIds = new LinkedHashSet<>();
+		for (StudentEnrollment enrollment : enrollments) {
+			Grade grade = enrollment.getSection().getGrade();
+			activeGradeIds.add(grade.getId());
+			activeLevelIds.add(grade.getLevel().getId());
+		}
+		int created = 0;
+		for (BillingPlanRule rule : billingPlanRuleRepository.findByActiveTrueOrderByCreatedAtDesc()) {
+			if ((rule.getGradeId() != null && activeGradeIds.contains(rule.getGradeId()))
+					|| (rule.getLevelId() != null && activeLevelIds.contains(rule.getLevelId()))) {
+				if (syncStudentForRule(rule, student) == SyncOutcome.CREATED) created++;
+			}
+		}
+		if (created > 0) siblingDiscountService.refreshSuggestions();
+		return created;
+	}
+
+	@Transactional
+	public int synchronizeGuardianForBillingRules(UUID guardianInternalId) {
+		TenantContext.currentRequired();
+		Set<UUID> studentPublicUuids = new LinkedHashSet<>();
+		for (StudentGuardian link : studentGuardianRepository.findActiveByGuardianId(guardianInternalId)) {
+			if (link.getStudent() != null) studentPublicUuids.add(link.getStudent().getPublicUuid());
+		}
+		int created = 0;
+		for (UUID studentPublicUuid : studentPublicUuids) {
+			created += synchronizeStudentForBillingRules(studentPublicUuid);
+		}
+		return created;
 	}
 
 	@Transactional(readOnly = true)
@@ -87,7 +192,7 @@ public class SubscriptionService {
 	@Transactional
 	public SubscriptionResponse create(CreateSubscriptionRequest request) {
 		TenantContext.currentRequired();
-		Student student = studentRepository.findByPublicUuid(request.studentPublicUuid())
+		Student student = studentRepository.findByPublicUuidForUpdate(request.studentPublicUuid())
 				.orElseThrow(() -> new BusinessException("STUDENT_NOT_FOUND", "Student not found"));
 		PaymentConcept concept = requireConcept(request.conceptPublicUuid());
 		if (subscriptionRepository.existsByStudentIdAndConceptIdAndStatus(
@@ -138,6 +243,7 @@ public class SubscriptionService {
 		int skippedNoGuardian = 0;
 		List<UUID> created = new ArrayList<>();
 		for (Student student : students) {
+			student = studentRepository.findByPublicUuidForUpdate(student.getPublicUuid()).orElse(student);
 			if (subscriptionRepository.existsByStudentIdAndConceptIdAndStatus(
 					student.getPublicUuid(), concept.getId(), Subscription.Status.ACTIVE)) {
 				skippedAlready++;
@@ -296,6 +402,179 @@ public class SubscriptionService {
 		s.setNextBillingAt(BillingSchedule.toStartOfDay(nextDate, zone));
 		return s;
 	}
+
+	private BillingPlanRule toRule(BillingPlanRuleRequest request) {
+		if ((request.levelPublicUuid() == null) == (request.gradePublicUuid() == null)) {
+			throw new BusinessException("BILLING_PLAN_RULE_SCOPE_REQUIRED", "Provide exactly one level or grade");
+		}
+		PaymentConcept concept = requireConcept(request.conceptPublicUuid());
+		if (!concept.isActive() || concept.getCategory() != PaymentConcept.Category.TUITION) {
+			throw new BusinessException("BILLING_PLAN_RULE_TUITION_REQUIRED", "Automatic rules require an active tuition concept");
+		}
+		long amount = request.amountCents() == null ? concept.getDefaultAmountCents() : request.amountCents();
+		if (amount <= 0) throw new BusinessException("INVALID_AMOUNT", "amountCents must be > 0");
+		if (request.billingPeriod() == Subscription.BillingPeriod.ANNUAL
+				&& (request.billingMonth() == null || request.billingMonth() < 1 || request.billingMonth() > 12)) {
+			throw new BusinessException("INVALID_BILLING_MONTH", "billingMonth (1–12) is required for annual rules");
+		}
+		if (request.billingPeriod() == Subscription.BillingPeriod.MONTHLY && request.billingMonth() != null) {
+			throw new BusinessException("INVALID_BILLING_MONTH", "billingMonth must be empty for monthly rules");
+		}
+		BillingPlanRule rule = new BillingPlanRule();
+		rule.setTenantId(TenantContext.currentRequired());
+		rule.setConceptId(concept.getId());
+		rule.setAmountCents(amount);
+		rule.setCurrency(request.currency() == null || request.currency().isBlank()
+				? concept.getCurrency() : request.currency());
+		rule.setBillingPeriod(request.billingPeriod());
+		rule.setBillingDayOfMonth(request.billingDayOfMonth());
+		rule.setBillingMonth(request.billingPeriod() == Subscription.BillingPeriod.ANNUAL
+				? request.billingMonth() : null);
+		if (request.gradePublicUuid() != null) {
+			Grade grade = gradeRepository.findByPublicUuid(request.gradePublicUuid())
+					.orElseThrow(() -> new BusinessException("GRADE_NOT_FOUND", "Grade not found"));
+			rule.setGradeId(grade.getId());
+		} else {
+			AcademicLevel level = levelRepository.findByPublicUuid(request.levelPublicUuid())
+					.orElseThrow(() -> new BusinessException("LEVEL_NOT_FOUND", "Level not found"));
+			rule.setLevelId(level.getId());
+		}
+		return rule;
+	}
+
+	private void ensureNoActiveRule(BillingPlanRule rule) {
+		for (BillingPlanRule existing : billingPlanRuleRepository.findByActiveTrueOrderByCreatedAtDesc()) {
+			if (!existing.getConceptId().equals(rule.getConceptId())) continue;
+			boolean sameScope = rule.getGradeId() != null
+					? rule.getGradeId().equals(existing.getGradeId())
+					: rule.getLevelId().equals(existing.getLevelId());
+			boolean overlaps = false;
+			if (rule.getLevelId() != null && existing.getGradeId() != null) {
+				Grade grade = gradeRepository.findById(existing.getGradeId()).orElse(null);
+				overlaps = grade != null && grade.getLevel().getId().equals(rule.getLevelId());
+			} else if (rule.getGradeId() != null && existing.getLevelId() != null) {
+				Grade grade = gradeRepository.findById(rule.getGradeId()).orElse(null);
+				overlaps = grade != null && grade.getLevel().getId().equals(existing.getLevelId());
+			}
+			if (sameScope || overlaps) {
+				throw new BusinessException("BILLING_PLAN_RULE_SCOPE_OVERLAP",
+						"An active rule for this tuition already covers the selected grade or level");
+			}
+		}
+	}
+
+	private BillingPlanRuleResponse syncRule(BillingPlanRule rule) {
+		int created = 0;
+		int alreadyActive = 0;
+		int waitingGuardian = 0;
+		List<Student> students = studentsInScope(rule);
+		if (students.size() > BULK_MAX) {
+			throw new BusinessException("BULK_LIMIT_EXCEEDED", "Automatic rule supports at most " + BULK_MAX + " students");
+		}
+		for (Student student : students) {
+			SyncOutcome outcome = syncStudentForRule(rule, student);
+			switch (outcome) {
+				case CREATED -> created++;
+				case ALREADY_ACTIVE -> alreadyActive++;
+				case WAITING_GUARDIAN -> waitingGuardian++;
+			}
+		}
+		return new BillingPlanRuleResponse(
+				rule.getPublicUuid(), conceptPublicUuid(rule), levelPublicUuid(rule), gradePublicUuid(rule),
+				rule.getAmountCents(), rule.getCurrency(), rule.getBillingPeriod(), rule.getBillingDayOfMonth(),
+				rule.getBillingMonth(), rule.isActive(), students.size(), created, alreadyActive, waitingGuardian);
+	}
+
+	private BillingPlanRuleResponse previewRule(BillingPlanRule rule) {
+		int wouldCreate = 0;
+		int alreadyActive = 0;
+		int waitingGuardian = 0;
+		List<Student> students = studentsInScope(rule);
+		for (Student student : students) {
+			if (subscriptionRepository.existsByStudentIdAndConceptIdAndStatus(
+					student.getPublicUuid(), rule.getConceptId(), Subscription.Status.ACTIVE)) {
+				alreadyActive++;
+			} else {
+				try {
+					resolveGuardianUserId(student);
+					wouldCreate++;
+				} catch (BusinessException ex) {
+					waitingGuardian++;
+				}
+			}
+		}
+		return new BillingPlanRuleResponse(
+				rule.getPublicUuid(), conceptPublicUuid(rule), levelPublicUuid(rule), gradePublicUuid(rule),
+				rule.getAmountCents(), rule.getCurrency(), rule.getBillingPeriod(), rule.getBillingDayOfMonth(),
+				rule.getBillingMonth(), rule.isActive(), students.size(), wouldCreate, alreadyActive, waitingGuardian);
+	}
+
+	private BillingPlanRuleResponse ruleSnapshot(BillingPlanRule rule) {
+		return previewRule(rule);
+	}
+
+	private List<Student> studentsInScope(BillingPlanRule rule) {
+		List<StudentEnrollment> enrollments;
+		if (rule.getGradeId() != null) {
+			Grade grade = gradeRepository.findById(rule.getGradeId())
+					.orElseThrow(() -> new BusinessException("GRADE_NOT_FOUND", "Grade not found"));
+			enrollments = enrollmentRepository.findActiveByGrade(grade);
+		} else {
+			AcademicLevel level = levelRepository.findById(rule.getLevelId())
+					.orElseThrow(() -> new BusinessException("LEVEL_NOT_FOUND", "Level not found"));
+			enrollments = enrollmentRepository.findActiveByLevel(level);
+		}
+		Set<UUID> seen = new LinkedHashSet<>();
+		List<Student> students = new ArrayList<>();
+		for (StudentEnrollment enrollment : enrollments) {
+			Student student = enrollment.getStudent();
+			if (student != null && seen.add(student.getId())) students.add(student);
+		}
+		return students;
+	}
+
+	private SyncOutcome syncStudentForRule(BillingPlanRule rule, Student student) {
+		student = studentRepository.findByPublicUuidForUpdate(student.getPublicUuid()).orElse(student);
+		if (subscriptionRepository.existsByStudentIdAndConceptIdAndStatus(
+				student.getPublicUuid(), rule.getConceptId(), Subscription.Status.ACTIVE)) {
+			return SyncOutcome.ALREADY_ACTIVE;
+		}
+		UUID guardianUserId;
+		try {
+			guardianUserId = resolveGuardianUserId(student);
+		} catch (BusinessException ex) {
+			return SyncOutcome.WAITING_GUARDIAN;
+		}
+		PaymentConcept concept = conceptRepository.findById(rule.getConceptId())
+				.orElseThrow(() -> new PaymentConceptNotFoundException("Payment concept not found"));
+		Subscription subscription = buildSubscription(
+				student, guardianUserId, concept, null, rule.getAmountCents(), rule.getBillingPeriod(),
+				rule.getBillingDayOfMonth(), rule.getBillingMonth(), rule.getCurrency());
+		subscriptionRepository.save(subscription);
+		return SyncOutcome.CREATED;
+	}
+
+	private UUID conceptPublicUuid(BillingPlanRule rule) {
+		return conceptRepository.findById(rule.getConceptId())
+				.orElseThrow(() -> new PaymentConceptNotFoundException("Payment concept not found"))
+				.getPublicUuid();
+	}
+
+	private UUID levelPublicUuid(BillingPlanRule rule) {
+		if (rule.getLevelId() == null) return null;
+		return levelRepository.findById(rule.getLevelId())
+				.orElseThrow(() -> new BusinessException("LEVEL_NOT_FOUND", "Level not found"))
+				.getPublicUuid();
+	}
+
+	private UUID gradePublicUuid(BillingPlanRule rule) {
+		if (rule.getGradeId() == null) return null;
+		return gradeRepository.findById(rule.getGradeId())
+				.orElseThrow(() -> new BusinessException("GRADE_NOT_FOUND", "Grade not found"))
+				.getPublicUuid();
+	}
+
+	private enum SyncOutcome { CREATED, ALREADY_ACTIVE, WAITING_GUARDIAN }
 
 	private List<Student> resolveBulkStudents(BulkCreateSubscriptionsRequest request) {
 		Set<UUID> seen = new LinkedHashSet<>();

@@ -3,6 +3,7 @@ package com.edushift.modules.family.controller;
 import com.edushift.modules.family.dto.FamilyActivityItemDto;
 import com.edushift.modules.family.dto.FamilyAttendanceRecordDto;
 import com.edushift.modules.family.dto.FamilyChildSummary;
+import com.edushift.modules.family.dto.FamilyCompetencyResultDto;
 import com.edushift.modules.family.dto.FamilyGradeItemDto;
 import com.edushift.modules.family.dto.FamilyPaymentItemDto;
 import com.edushift.modules.family.service.FamilyService;
@@ -94,6 +95,16 @@ public class FamilyController {
 		UUID userId = currentUserProvider.currentUserId()
 				.orElseThrow(() -> new IllegalStateException("Authenticated user is required"));
 		return ResponseEntity.ok(ApiResponse.ok(familyService.getChildGrades(studentPublicUuid, userId)));
+	}
+
+	@GetMapping("/children/{studentPublicUuid}/competency-results")
+	@PreAuthorize("hasAuthority('LMS_FAMILY_READ')")
+	public ResponseEntity<ApiResponse<List<FamilyCompetencyResultDto>>> getChildCompetencyResults(
+			@PathVariable UUID studentPublicUuid) {
+		UUID userId = currentUserProvider.currentUserId()
+				.orElseThrow(() -> new IllegalStateException("Authenticated user is required"));
+		return ResponseEntity.ok(ApiResponse.ok(
+				familyService.getChildCompetencyResults(studentPublicUuid, userId)));
 	}
 
 	@GetMapping("/children/{studentPublicUuid}/activities")

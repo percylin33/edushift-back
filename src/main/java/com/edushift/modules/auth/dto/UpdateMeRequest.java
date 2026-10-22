@@ -11,5 +11,10 @@ public record UpdateMeRequest(
 		@Size(max = 100) String firstName,
 		@Size(max = 100) String lastName,
 		@Size(max = 32) String phone,
-		@Email @Size(max = 254) String email
-) {}
+		@Email @Size(max = 254) String email,
+		@Size(max = 100) String secondLastName
+) {
+	public UpdateMeRequest(String firstName, String lastName, String phone, String email) {
+		this(firstName, lastName, phone, email, null);
+	}
+}

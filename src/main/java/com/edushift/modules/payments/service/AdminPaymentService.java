@@ -12,6 +12,7 @@ import com.edushift.modules.payments.dto.BulkEmitInvoicesResponse;
 import com.edushift.modules.payments.dto.EmitInvoiceRequest;
 import com.edushift.modules.payments.dto.InvoiceItemResponse;
 import com.edushift.modules.payments.dto.InvoiceResponse;
+import com.edushift.modules.payments.dto.InvoiceReviewQueueItemResponse;
 import com.edushift.modules.payments.dto.PaymentResponse;
 import com.edushift.modules.payments.dto.RejectPaymentEvidenceRequest;
 import com.edushift.modules.payments.entity.Invoice;
@@ -120,7 +121,47 @@ public class AdminPaymentService {
 		Page<Invoice> page = status == null
 				? invoiceRepo.findAllByOrderByIssuedAtDesc(pageable)
 				: invoiceRepo.findByStatusOrderByIssuedAtDesc(status, pageable);
-		return page.map(i -> InvoiceResponse.from(i, List.of()));
+		List<UUID> studentUuids = page.getContent().stream()
+				.map(Invoice::getStudentId).distinct().toList();
+		Map<UUID, Student> studentsByUuid = new HashMap<>();
+		studentRepository.findAllByPublicUuidIn(studentUuids)
+				.forEach(student -> studentsByUuid.put(student.getPublicUuid(), student));
+		return page.map(invoice -> {
+			InvoiceResponse response = InvoiceResponse.from(invoice, List.of());
+			Student student = studentsByUuid.get(invoice.getStudentId());
+			return student == null ? response : response.withStudentIdentity(
+					new InvoiceResponse.StudentIdentity(
+							student.fullName(), student.getDocumentType(), student.getDocumentNumber()));
+		});
+	}
+
+	@Transactional(readOnly = true)
+	public Page<InvoiceReviewQueueItemResponse> listInvoiceReviewQueue(Pageable pageable) {
+		TenantContext.currentRequired();
+		Page<Invoice> page = invoiceRepo.findByStatusOrderByEvidenceSubmittedAtDesc(
+				Invoice.Status.PENDING_REVIEW, sanitizeReviewQueuePageable(pageable));
+		List<UUID> studentUuids = page.getContent().stream()
+				.map(Invoice::getStudentId).distinct().toList();
+		Map<UUID, Student> studentsByUuid = new HashMap<>();
+		studentRepository.findAllByPublicUuidIn(studentUuids)
+				.forEach(student -> studentsByUuid.put(student.getPublicUuid(), student));
+		return page.map(invoice -> {
+			Student student = studentsByUuid.get(invoice.getStudentId());
+			InvoiceReviewQueueItemResponse.StudentIdentity identity = student == null ? null
+					: new InvoiceReviewQueueItemResponse.StudentIdentity(
+							student.fullName(), student.getDocumentType(), student.getDocumentNumber());
+			return new InvoiceReviewQueueItemResponse(
+					invoice.getPublicUuid(), invoice.getStudentId(), invoice.getPeriodLabel(),
+					invoice.getCurrency(), invoice.getTotalCents(), invoice.getStatus(),
+					invoice.getDueAt(), invoice.getEvidenceFilePublicUuid(),
+					invoice.getEvidenceSubmittedAt(), invoice.getEvidenceNotes(), identity);
+		});
+	}
+
+	private static Pageable sanitizeReviewQueuePageable(Pageable pageable) {
+		int page = Math.max(pageable.getPageNumber(), 0);
+		int size = Math.min(Math.max(pageable.getPageSize(), 1), 100);
+		return PageRequest.of(page, size);
 	}
 
 	@Transactional
@@ -229,7 +270,7 @@ public class AdminPaymentService {
 	@Transactional
 	public void markPaidCash(UUID invoicePublicUuid, String notes) {
 		TenantContext.currentRequired();
-		Invoice invoice = invoiceRepo.findByPublicUuid(invoicePublicUuid)
+		Invoice invoice = invoiceRepo.findByPublicUuidForUpdate(invoicePublicUuid)
 				.orElseThrow(() -> new InvoiceNotFoundException("Invoice not found: " + invoicePublicUuid));
 
 		if (invoice.getStatus() == Invoice.Status.PAID) {
@@ -244,6 +285,12 @@ public class AdminPaymentService {
 			throw new com.edushift.shared.exception.BusinessException(
 					"INVOICE_REFUNDED", "Refunded invoices cannot be marked paid");
 		}
+		if (invoice.getStatus() != Invoice.Status.PENDING
+				&& invoice.getStatus() != Invoice.Status.OVERDUE) {
+			throw new BusinessException(
+					"INVOICE_EVIDENCE_IN_REVIEW",
+					"Resolve the submitted payment evidence before recording cash");
+		}
 
 		Payment p = new Payment();
 		p.setTenantId(TenantContext.currentRequired());
@@ -255,12 +302,13 @@ public class AdminPaymentService {
 		p.setAmountCents(invoice.getTotalCents());
 		p.setCurrency(invoice.getCurrency());
 		p.setPaymentMethod("CASH");
-		p.setPaidAt(Instant.now());
+		Instant paidAt = Instant.now();
+		p.setPaidAt(paidAt);
 		p.setRawResponse("{\"manual\":true,\"notes\":\"" + sanitize(notes) + "\"}");
 		p = paymentRepo.save(p);
 
 		invoice.setStatus(Invoice.Status.PAID);
-		invoice.setPaidAt(Instant.now());
+		invoice.setPaidAt(paidAt);
 		invoice.setEvidenceRejectionReason(null);
 		invoiceRepo.save(invoice);
 		publishPaymentReceived(invoice);
@@ -269,9 +317,45 @@ public class AdminPaymentService {
 	}
 
 	@Transactional
-	public InvoiceResponse rejectEvidence(UUID invoicePublicUuid, RejectPaymentEvidenceRequest request) {
+	public void approveEvidence(UUID invoicePublicUuid) {
 		TenantContext.currentRequired();
-		Invoice invoice = invoiceRepo.findByPublicUuid(invoicePublicUuid)
+		Invoice invoice = invoiceRepo.findByPublicUuidForUpdate(invoicePublicUuid)
+				.orElseThrow(() -> new InvoiceNotFoundException("Invoice not found: " + invoicePublicUuid));
+		if (invoice.getStatus() != Invoice.Status.PENDING_REVIEW
+				|| invoice.getEvidenceFilePublicUuid() == null) {
+			throw new BusinessException(
+					"INVOICE_NOT_IN_REVIEW",
+					"Only an invoice with submitted evidence can be approved");
+		}
+
+		Instant paidAt = Instant.now();
+		Payment payment = new Payment();
+		payment.setTenantId(TenantContext.currentRequired());
+		payment.setInvoiceId(invoice.getId());
+		payment.setGuardianUserId(invoice.getGuardianUserId());
+		payment.setProvider(Payment.Provider.MANUAL);
+		payment.setExternalReference(invoice.getPublicUuid().toString());
+		payment.setStatus(Payment.Status.APPROVED);
+		payment.setAmountCents(invoice.getTotalCents());
+		payment.setCurrency(invoice.getCurrency());
+		payment.setPaymentMethod("VOUCHER");
+		payment.setPaidAt(paidAt);
+		payment.setRawResponse("{\"manual\":true,\"source\":\"VOUCHER\",\"evidenceFilePublicUuid\":\""
+				+ invoice.getEvidenceFilePublicUuid() + "\"}");
+		payment = paymentRepo.save(payment);
+
+		invoice.setStatus(Invoice.Status.PAID);
+		invoice.setPaidAt(paidAt);
+		invoiceRepo.save(invoice);
+		publishPaymentReceived(invoice);
+		log.info("[admin-payment] invoice {} approved from voucher (payment {})",
+				invoicePublicUuid, payment.getPublicUuid());
+	}
+
+	@Transactional
+	public void rejectEvidence(UUID invoicePublicUuid, RejectPaymentEvidenceRequest request) {
+		TenantContext.currentRequired();
+		Invoice invoice = invoiceRepo.findByPublicUuidForUpdate(invoicePublicUuid)
 				.orElseThrow(() -> new InvoiceNotFoundException("Invoice not found: " + invoicePublicUuid));
 
 		if (invoice.getStatus() != Invoice.Status.PENDING_REVIEW) {
@@ -301,10 +385,6 @@ public class AdminPaymentService {
 		invoice.setEvidenceRejectionReason(request.reason().trim());
 		invoiceRepo.save(invoice);
 		publishEvidenceRejected(invoice, request.reason().trim());
-
-		List<InvoiceItemResponse> items = itemRepo.findByInvoiceIdOrderByCreatedAtAsc(invoice.getId())
-				.stream().map(InvoiceItemResponse::from).toList();
-		return InvoiceResponse.from(invoice, items);
 	}
 
 	@Transactional
@@ -522,6 +602,6 @@ public class AdminPaymentService {
 
 	private static String sanitize(String s) {
 		if (s == null) return "";
-		return s.replace("\"", "'").replace("\n", " ").replace("\r", " ");
+		return s.replace("\\", "\\\\").replace("\"", "'").replace("\n", " ").replace("\r", " ");
 	}
 }

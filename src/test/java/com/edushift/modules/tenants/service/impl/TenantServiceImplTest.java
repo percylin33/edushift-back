@@ -30,6 +30,7 @@ import com.edushift.modules.tenants.exception.TenantNotFoundException;
 import com.edushift.modules.tenants.mapper.TenantMapper;
 import com.edushift.modules.tenants.repository.TenantRepository;
 import com.edushift.modules.tenants.service.TenantStatusCache;
+import com.edushift.shared.exception.BadRequestException;
 import com.edushift.shared.exception.ConflictException;
 import com.edushift.shared.exception.UnauthorizedException;
 import com.edushift.shared.multitenancy.TenantContext;
@@ -163,9 +164,23 @@ class TenantServiceImplTest {
 		@DisplayName("not found → TenantNotFoundException")
 		void unknownSlugThrows() {
 			when(tenantRepository.findBySlugIgnoreCase("ghost")).thenReturn(Optional.empty());
+			when(tenantRepository.findByHostnameAliasIgnoreCase("ghost")).thenReturn(Optional.empty());
 
 			assertThatThrownBy(() -> service.findBySlug("ghost"))
 					.isInstanceOf(TenantNotFoundException.class);
+		}
+
+		@Test
+		@DisplayName("compact hostname resolves to a legacy dashed slug")
+		void resolvesCompactHostnameAlias() {
+			Tenant legacyTenant = newTenant("virgen-del-buen-paso", TenantStatus.ACTIVE);
+			when(tenantRepository.findBySlugIgnoreCase("virgendelbuenpaso")).thenReturn(Optional.empty());
+			when(tenantRepository.findByHostnameAliasIgnoreCase("virgendelbuenpaso"))
+					.thenReturn(Optional.of(legacyTenant));
+
+			var summary = service.findBySlug("virgendelbuenpaso");
+
+			assertThat(summary.slug()).isEqualTo("virgen-del-buen-paso");
 		}
 	}
 
@@ -343,10 +358,10 @@ class TenantServiceImplTest {
 		@Test
 		@DisplayName("happy path — persists tenant + admin, issues session, returns AuthResponse")
 		void registersTenantAndAdminAtomically() {
-			RegisterTenantRequest request = sampleRequest("acme-co", "Founder", "founder@acme.test");
+			RegisterTenantRequest request = sampleRequest("acmeco", "Founder", "founder@acme.test");
 			stubPendingInvite("founder@acme.test");
 
-			when(tenantRepository.findBySlugIgnoreCase("acme-co")).thenReturn(Optional.empty());
+			when(tenantRepository.findByHostnameAliasIgnoreCase("acmeco")).thenReturn(Optional.empty());
 			when(tenantRepository.saveAndFlush(any(Tenant.class)))
 					.thenAnswer(inv -> {
 						Tenant t = inv.getArgument(0);
@@ -385,11 +400,11 @@ class TenantServiceImplTest {
 		@Test
 		@DisplayName("normalizes slug + email (trim + lowercase) before persistence and lookup")
 		void normalizesSlugAndEmail() {
-			RegisterTenantRequest request = sampleRequest("  ACME-co  ", "Founder",
+			RegisterTenantRequest request = sampleRequest("  ACMEco  ", "Founder",
 					"  Founder@ACME.test  ");
 			stubPendingInvite("founder@acme.test");
 
-			when(tenantRepository.findBySlugIgnoreCase("acme-co")).thenReturn(Optional.empty());
+			when(tenantRepository.findByHostnameAliasIgnoreCase("acmeco")).thenReturn(Optional.empty());
 			when(tenantRepository.saveAndFlush(any(Tenant.class)))
 					.thenAnswer(inv -> {
 						Tenant t = inv.getArgument(0);
@@ -410,16 +425,16 @@ class TenantServiceImplTest {
 
 			ArgumentCaptor<Tenant> tenantCaptor = ArgumentCaptor.forClass(Tenant.class);
 			verify(tenantRepository).saveAndFlush(tenantCaptor.capture());
-			assertThat(tenantCaptor.getValue().getSlug()).isEqualTo("acme-co");
+			assertThat(tenantCaptor.getValue().getSlug()).isEqualTo("acmeco");
 		}
 
 		@Test
 		@DisplayName("pre-check: slug already taken → ConflictException(TENANT_SLUG_TAKEN), no inserts")
 		void rejectsTakenSlugUpFront() {
-			RegisterTenantRequest request = sampleRequest("acme-co", "Founder", "founder@acme.test");
+			RegisterTenantRequest request = sampleRequest("acmeco", "Founder", "founder@acme.test");
 			stubPendingInvite("founder@acme.test");
 			Tenant existing = newTenant("acme-co", TenantStatus.ACTIVE);
-			when(tenantRepository.findBySlugIgnoreCase("acme-co")).thenReturn(Optional.of(existing));
+			when(tenantRepository.findByHostnameAliasIgnoreCase("acmeco")).thenReturn(Optional.of(existing));
 
 			assertThatThrownBy(() -> service.register(request))
 					.isInstanceOfSatisfying(ConflictException.class,
@@ -431,12 +446,25 @@ class TenantServiceImplTest {
 		}
 
 		@Test
+		@DisplayName("rejects a dashed slug before creating a new tenant")
+		void rejectsDashedSlug() {
+			RegisterTenantRequest request = sampleRequest("acme-co", "Founder", "founder@acme.test");
+
+			assertThatThrownBy(() -> service.register(request))
+					.isInstanceOfSatisfying(BadRequestException.class,
+							ex -> assertThat(ex.getCode()).isEqualTo("VALIDATION_ERROR"));
+
+			verify(schoolInvitationService, never()).requirePending(anyString());
+			verify(tenantRepository, never()).saveAndFlush(any(Tenant.class));
+		}
+
+		@Test
 		@DisplayName("race condition: pre-check passes but INSERT trips unique → translates to ConflictException(TENANT_SLUG_TAKEN)")
 		void racingInsertSurfacesAsConflict() {
-			RegisterTenantRequest request = sampleRequest("acme-co", "Founder", "founder@acme.test");
+			RegisterTenantRequest request = sampleRequest("acmeco", "Founder", "founder@acme.test");
 			stubPendingInvite("founder@acme.test");
 
-			when(tenantRepository.findBySlugIgnoreCase("acme-co")).thenReturn(Optional.empty());
+			when(tenantRepository.findByHostnameAliasIgnoreCase("acmeco")).thenReturn(Optional.empty());
 			// The production code inspects the SQLState on the wrapped
 			// SQLException to decide whether to translate to
 			// TENANT_SLUG_TAKEN (unique-index violation, 23505) or

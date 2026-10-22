@@ -11,11 +11,13 @@ import static org.springframework.security.test.web.servlet.request.SecurityMock
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.edushift.infrastructure.multitenancy.MultiTenancyConfiguration;
 import com.edushift.infrastructure.multitenancy.TenantInterceptor;
+import com.edushift.modules.auth.controller.CookieHelper;
 import com.edushift.modules.auth.dto.AuthResponse;
 import com.edushift.modules.auth.dto.UserSummary;
 import com.edushift.modules.auth.entity.UserStatus;
@@ -50,6 +52,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.MediaType;
+import org.springframework.http.ResponseCookie;
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
@@ -72,6 +75,7 @@ class UserInvitationControllerTest {
 	@Autowired private ObjectMapper objectMapper;
 
 	@MockitoBean private UserInvitationService service;
+	@MockitoBean private CookieHelper cookieHelper;
 	@MockitoBean private JwtService jwtService;
 	@MockitoBean private com.edushift.shared.security.LmsRoleAuthorityMapper roleAuthorityMapper;
 
@@ -328,13 +332,17 @@ private static final String BASE = "/v1/users/invitations";
 	class Accept {
 
 		@Test
-		@DisplayName("public + valid token + valid password â†’ 201 with raw AuthResponse")
+		@DisplayName("public + valid token + valid password â†’ 201 with session cookies")
 		void happyPath() throws Exception {
 			AuthResponse session = new AuthResponse(
 					"access.token", "refresh.token", "Bearer", 900L,
 					new UserSummary(UUID.randomUUID(), "Teach Doe",
 							"teach@acme.test", null, UserStatus.ACTIVE));
 			given(service.acceptInvitation(any(AcceptInvitationRequest.class))).willReturn(session);
+			given(cookieHelper.createAccessTokenCookie("access.token", 900L))
+					.willReturn(ResponseCookie.from("edushift_access_token", "access.token").httpOnly(true).build());
+			given(cookieHelper.createRefreshTokenCookie("refresh.token", 7L * 24 * 60 * 60))
+					.willReturn(ResponseCookie.from("edushift_refresh_token", "refresh.token").httpOnly(true).build());
 
 			AcceptInvitationRequest body = new AcceptInvitationRequest(
 					"valid-token-1234567890abcdef", "Sup3rSecret!");
@@ -344,8 +352,9 @@ private static final String BASE = "/v1/users/invitations";
 							.contentType(MediaType.APPLICATION_JSON)
 							.content(json(body)))
 					.andExpect(status().isCreated())
-					.andExpect(jsonPath("$.accessToken").value("access.token"))
-					.andExpect(jsonPath("$.user.email").value("teach@acme.test"));
+					.andExpect(jsonPath("$.accessToken").doesNotExist())
+					.andExpect(jsonPath("$.user.email").value("teach@acme.test"))
+					.andExpect(header().exists("Set-Cookie"));
 		}
 
 		@Test

@@ -18,7 +18,7 @@ import java.util.UUID;
  * pre-computed at the controller layer to avoid N+1 queries:</p>
  * <ul>
  *   <li>{@link #planName} — human-readable name from {@code platform_plans}.</li>
- *   <li>{@link #activeStudents} — count of {@code ACTIVE} students in the tenant.</li>
+	 *   <li>{@link #activeStudents} — count of {@code ENROLLED} students in the tenant.</li>
  *   <li>{@link #nextBillingDate} — from {@code b2b_subscriptions.next_billing_at}
  *       when the tenant has an active subscription; {@code null} otherwise.</li>
  * </ul>
@@ -32,6 +32,7 @@ public record AdminTenantSummary(
 		String plan,
 		String planName,
 		Integer activeStudents,
+		Integer maxStudents,
 		LocalDate nextBillingDate,
 		Instant trialEndsAt,
 		Instant createdAt,

@@ -47,6 +47,9 @@ public record CreateInvitationRequest(
 		@Size(min = 1, max = 100, message = "lastName must be between 1 and 100 characters")
 		String lastName,
 
+		@Size(max = 100, message = "secondLastName must be at most 100 characters")
+		String secondLastName,
+
 		@NotNull(message = "roles must not be null")
 		@NotEmpty(message = "roles must contain at least one role")
 		Set<String> roles,
@@ -75,6 +78,13 @@ public record CreateInvitationRequest(
 	public CreateInvitationRequest(String email, String firstName,
 			String lastName, Set<String> roles,
 			DocumentType documentType, String documentNumber) {
-		this(email, firstName, lastName, roles, documentType, documentNumber, null);
+		this(email, firstName, lastName, null, roles, documentType, documentNumber, null);
+	}
+
+	public CreateInvitationRequest(String email, String firstName,
+			String lastName, Set<String> roles,
+			DocumentType documentType, String documentNumber,
+			Map<String, Object> metadata) {
+		this(email, firstName, lastName, null, roles, documentType, documentNumber, metadata);
 	}
 }

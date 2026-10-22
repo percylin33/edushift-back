@@ -222,7 +222,9 @@ public class JwtServiceImpl implements JwtService {
 					type,
 					parseUuid(body.get(CLAIM_JWT_ID, String.class), CLAIM_JWT_ID),
 					body.getIssuedAt() == null ? null : body.getIssuedAt().toInstant(),
-					body.getExpiration() == null ? null : body.getExpiration().toInstant()
+					body.getExpiration() == null ? null : body.getExpiration().toInstant(),
+					body.get("impersonatedBy", String.class) == null ? null
+							: parseUuid(body.get("impersonatedBy", String.class), "impersonatedBy")
 			);
 		}
 		catch (ExpiredJwtException e) {

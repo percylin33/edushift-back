@@ -478,7 +478,8 @@ public class AuthController {
 	@PatchMapping("/me/onboarding")
 	@Operation(
 			summary = "Complete first-login onboarding",
-			description = "Changes password, updates User profile, and write-backs "
+			description = "Uses the authenticated first-login session without repeating the temporary password. "
+					+ "Requires mustChangePassword=true. Changes password, updates User profile, and write-backs "
 					+ "linked Student/Guardian. Real email is optional.",
 			security = @SecurityRequirement(name = "bearerAuth"))
 	public ApiResponse<UserResponse> completeOnboarding(

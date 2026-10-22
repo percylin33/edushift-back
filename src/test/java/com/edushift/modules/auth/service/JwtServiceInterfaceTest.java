@@ -54,7 +54,7 @@ class JwtServiceInterfaceTest {
         UUID tenantId = UUID.randomUUID();
         var claims = new JwtService.JwtClaims(userId.toString(), tenantId, "acme",
                 Set.of("TENANT_ADMIN"), JwtService.TokenType.ACCESS, UUID.randomUUID(),
-                java.time.Instant.now(), java.time.Instant.now().plusSeconds(900));
+                java.time.Instant.now(), java.time.Instant.now().plusSeconds(900), null);
         assertThat(claims.subject()).isEqualTo(userId.toString());
         assertThat(claims.tenantId()).isEqualTo(tenantId);
         assertThat(claims.tenantSlug()).isEqualTo("acme");

@@ -8,6 +8,9 @@ import com.edushift.modules.auth.entity.UserStatus;
 import com.edushift.modules.auth.events.UserStatusChangeEvent;
 import com.edushift.modules.auth.repository.RefreshTokenRepository;
 import com.edushift.modules.auth.repository.UserRepository;
+import com.edushift.modules.audit.events.AuditAction;
+import com.edushift.modules.audit.service.AuditLogger;
+import com.edushift.modules.students.repository.StudentRepository;
 import com.edushift.modules.auth.service.PasswordResetService;
 import com.edushift.modules.auth.util.TemporaryPasswordGenerator;
 import com.edushift.modules.tenants.entity.Tenant;
@@ -33,9 +36,9 @@ import java.util.LinkedHashSet;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.hibernate.query.criteria.HibernateCriteriaBuilder;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -66,7 +69,6 @@ import org.springframework.transaction.annotation.Transactional;
  */
 @Slf4j
 @Service
-@RequiredArgsConstructor
 public class UserManagementServiceImpl implements UserManagementService {
 
 	private final UserRepository userRepository;
@@ -77,6 +79,43 @@ public class UserManagementServiceImpl implements UserManagementService {
 	private final TenantRepository tenantRepository;
 	private final PasswordEncoder passwordEncoder;
 	private final RefreshTokenRepository refreshTokenRepository;
+	private final StudentRepository studentRepository;
+	private final AuditLogger auditLogger;
+
+	@Autowired
+	public UserManagementServiceImpl(
+			UserRepository userRepository,
+			UserManagementMapper mapper,
+			ApplicationEventPublisher eventPublisher,
+			PasswordResetService passwordResetService,
+			TenantRepository tenantRepository,
+			PasswordEncoder passwordEncoder,
+			RefreshTokenRepository refreshTokenRepository,
+			StudentRepository studentRepository,
+			AuditLogger auditLogger) {
+		this.userRepository = userRepository;
+		this.mapper = mapper;
+		this.eventPublisher = eventPublisher;
+		this.passwordResetService = passwordResetService;
+		this.tenantRepository = tenantRepository;
+		this.passwordEncoder = passwordEncoder;
+		this.refreshTokenRepository = refreshTokenRepository;
+		this.studentRepository = studentRepository;
+		this.auditLogger = auditLogger;
+	}
+
+	/** Compatibility constructor for isolated service fixtures. */
+	public UserManagementServiceImpl(
+			UserRepository userRepository,
+			UserManagementMapper mapper,
+			ApplicationEventPublisher eventPublisher,
+			PasswordResetService passwordResetService,
+			TenantRepository tenantRepository,
+			PasswordEncoder passwordEncoder,
+			RefreshTokenRepository refreshTokenRepository) {
+		this(userRepository, mapper, eventPublisher, passwordResetService,
+				tenantRepository, passwordEncoder, refreshTokenRepository, null, null);
+	}
 
 	// ===========================================================================
 	// Read paths
@@ -113,8 +152,30 @@ public class UserManagementServiceImpl implements UserManagementService {
 			return mapper.toDetail(user);
 		}
 
+		String oldFullName = user.fullName();
 		mapper.applyUpdate(request, user);
+		if (studentRepository != null) studentRepository.findByUserId(user.getPublicUuid()).ifPresent(student -> {
+			String oldStudentFullName = student.fullName();
+			if (request.firstName() != null) student.setFirstName(user.getFirstName());
+			if (request.lastName() != null) student.setLastName(user.getLastName());
+			if (request.secondLastName() != null) {
+				student.setSecondLastName(user.getSecondLastName());
+			}
+			studentRepository.save(student);
+			if (auditLogger != null && !oldStudentFullName.equals(student.fullName())) {
+				auditLogger.log(AuditAction.UPDATE, "student", student.getPublicUuid(),
+						"Linked student legal name updated from user profile",
+						java.util.Map.of("linkedUserPublicUuid", user.getPublicUuid().toString()),
+						"students");
+			}
+		});
 		User saved = userRepository.save(user);
+		if (auditLogger != null && !oldFullName.equals(saved.fullName())) {
+			auditLogger.log(AuditAction.UPDATE, "user", saved.getPublicUuid(),
+					"User identity updated",
+					java.util.Map.of("previousFullName", oldFullName,
+							"currentFullName", saved.fullName()), "users");
+		}
 		log.info("[users] profile updated -- publicUuid={} by={}",
 				saved.getPublicUuid(), currentAdminPublicUuid());
 		return mapper.toDetail(saved);

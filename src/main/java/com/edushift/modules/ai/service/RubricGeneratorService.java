@@ -102,6 +102,7 @@ public class RubricGeneratorService {
 
         // 3. Build prompt.
         LlmRequest llmRequest = promptBuilder.build(request, seedName, seedSummary);
+        quotaService.reserveForRequest(llmRequest);
 
         // 4. Persist PENDING audit row.
         AiGeneration gen = newGeneration(tenantId, userId, llmRequest, request.seedRubricId());
@@ -189,6 +190,7 @@ public class RubricGeneratorService {
         }
 
         LlmRequest llmRequest = promptBuilder.build(request, seedName, seedSummary);
+        quotaService.reserveForRequest(llmRequest);
 
         AiGeneration gen = newGeneration(tenantId, userId, llmRequest, request.seedRubricId());
         gen.setStatus(AiGeneration.Status.PENDING);

@@ -45,6 +45,10 @@ class QuizQuestionPromptBuilderTest {
 
         // System prompt has the contract.
         assertThat(req.systemPrompt())
+                .contains("ALCANCE:")
+                .contains("Si TEMA es un saludo")
+                .contains("NO generes preguntas ni JSON")
+                .contains("No copies ni reproduzcas los ejemplos")
                 .contains("REGLAS DURAS")
                 .contains("\"questions\"")
                 .contains("MC")

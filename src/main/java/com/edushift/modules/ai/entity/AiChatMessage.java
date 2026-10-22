@@ -8,11 +8,14 @@ import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.Table;
+import java.util.List;
 import java.util.UUID;
 import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 /**
  * AI chat message (Sprint 8 / BE-8.3).
@@ -72,6 +75,10 @@ public class AiChatMessage extends TenantAwareEntity {
 
     @Column(name = "content", nullable = false, columnDefinition = "text")
     private String content;
+
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "citations", nullable = false, columnDefinition = "jsonb")
+    private List<AiCitationRef> citations = List.of();
 
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 20)

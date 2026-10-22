@@ -2,6 +2,8 @@ package com.edushift.modules.admin.plans;
 
 import com.edushift.shared.exception.ConflictException;
 import com.edushift.shared.exception.NotFoundException;
+import com.edushift.modules.audit.events.AuditAction;
+import com.edushift.modules.audit.service.AuditLogger;
 import java.util.List;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
@@ -13,9 +15,11 @@ import org.springframework.transaction.annotation.Transactional;
 public class PlatformPlanService {
 
     private final PlatformPlanRepository planRepository;
+    private final AuditLogger auditLogger;
 
-    public List<PlanResponse> listAll() {
-        return planRepository.findByIsActiveTrueOrderBySortOrder().stream()
+    public List<PlanResponse> listAll(boolean includeInactive) {
+        return (includeInactive ? planRepository.findAllByOrderBySortOrderAscCodeAsc()
+                : planRepository.findByIsActiveTrueOrderBySortOrder()).stream()
                 .map(PlanResponse::from)
                 .toList();
     }
@@ -45,6 +49,7 @@ public class PlatformPlanService {
         plan.setActive(true);
 
         plan = planRepository.save(plan);
+        auditLogger.log(AuditAction.CREATE, "platform_plan", plan.getId(), "Created platform plan");
         return PlanResponse.from(plan);
     }
 
@@ -57,14 +62,17 @@ public class PlatformPlanService {
         if (request.code() != null) plan.setCode(request.code().toUpperCase());
         if (request.description() != null) plan.setDescription(request.description());
         if (request.pricePerStudentCents() != null) plan.setPricePerStudentCents(request.pricePerStudentCents());
-        if (request.maxStudents() != null) plan.setMaxStudents(request.maxStudents());
-        if (request.maxTeachers() != null) plan.setMaxTeachers(request.maxTeachers());
+        if (request.clearMaxStudents()) plan.setMaxStudents(null);
+        else if (request.maxStudents() != null) plan.setMaxStudents(request.maxStudents());
+        if (request.clearMaxTeachers()) plan.setMaxTeachers(null);
+        else if (request.maxTeachers() != null) plan.setMaxTeachers(request.maxTeachers());
         if (request.maxStorageMb() != null) plan.setMaxStorageMb(request.maxStorageMb());
         if (request.features() != null) plan.setFeatures(request.features());
         if (request.sortOrder() != null) plan.setSortOrder(request.sortOrder());
         if (request.isActive() != null) plan.setActive(request.isActive());
 
         plan = planRepository.save(plan);
+        auditLogger.log(AuditAction.CONFIG_CHANGED, "platform_plan", plan.getId(), "Updated platform plan configuration");
         return PlanResponse.from(plan);
     }
 
@@ -74,5 +82,6 @@ public class PlatformPlanService {
                 .orElseThrow(() -> new NotFoundException("PLAN_NOT_FOUND", "Plan not found"));
         plan.setActive(false);
         planRepository.save(plan);
+        auditLogger.log(AuditAction.CONFIG_CHANGED, "platform_plan", plan.getId(), "Deactivated platform plan");
     }
 }

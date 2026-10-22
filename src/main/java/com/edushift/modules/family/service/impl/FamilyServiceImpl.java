@@ -5,9 +5,13 @@ import com.edushift.modules.attendance.repository.AttendanceRecordRepository;
 import com.edushift.modules.attendance.service.AttendanceExportService;
 import com.edushift.modules.evaluations.graderecord.entity.GradeRecord;
 import com.edushift.modules.evaluations.graderecord.repository.GradeRecordRepository;
+import com.edushift.modules.evaluations.competencyresult.entity.StudentCompetencyResult;
+import com.edushift.modules.evaluations.competencyresult.repository.StudentCompetencyResultRepository;
+import com.edushift.modules.evaluations.entity.EvaluationStatus;
 import com.edushift.modules.family.dto.FamilyActivityItemDto;
 import com.edushift.modules.family.dto.FamilyAttendanceRecordDto;
 import com.edushift.modules.family.dto.FamilyChildSummary;
+import com.edushift.modules.family.dto.FamilyCompetencyResultDto;
 import com.edushift.modules.family.dto.FamilyGradeItemDto;
 import com.edushift.modules.family.dto.FamilyPaymentItemDto;
 import com.edushift.modules.family.service.FamilyService;
@@ -60,6 +64,7 @@ public class FamilyServiceImpl implements FamilyService {
 	private final AttendanceRecordRepository attendanceRecordRepository;
 	private final AttendanceExportService attendanceExportService;
 	private final GradeRecordRepository gradeRecordRepository;
+	private final StudentCompetencyResultRepository competencyResultRepository;
 	private final SubmissionRepository submissionRepository;
 	private final StudentEnrollmentRepository enrollmentRepository;
 	private final TaskRepository taskRepository;
@@ -139,6 +144,34 @@ public class FamilyServiceImpl implements FamilyService {
 		items.sort(Comparator.comparing(
 				FamilyGradeItemDto::recordedAt, Comparator.nullsLast(Comparator.reverseOrder())));
 		return items;
+	}
+
+	@Override
+	@Transactional(readOnly = true)
+	public List<FamilyCompetencyResultDto> getChildCompetencyResults(
+			UUID studentPublicUuid, UUID parentUserPublicUuid) {
+		Student student = loadLinkedStudent(studentPublicUuid, parentUserPublicUuid);
+		return competencyResultRepository.findFamilyVisibleResults(student, EvaluationStatus.CLOSED)
+				.stream()
+				.map(this::toFamilyCompetencyResult)
+				.toList();
+	}
+
+	private FamilyCompetencyResultDto toFamilyCompetencyResult(StudentCompetencyResult result) {
+		var evaluation = result.getEvaluation();
+		var assignment = evaluation.getTeacherAssignment();
+		return new FamilyCompetencyResultDto(
+				result.getPublicUuid(),
+				evaluation.getName(),
+				evaluation.getScheduledDate(),
+				assignment.getCourse().getName(),
+				assignment.getSection().getName(),
+				result.getCompetency().getCode(),
+				result.getCompetency().getName(),
+				result.getAchievementLevel(),
+				result.getEvidenceSummary(),
+				result.getDescriptiveConclusion(),
+				result.getRecordedAt());
 	}
 
 	@Override

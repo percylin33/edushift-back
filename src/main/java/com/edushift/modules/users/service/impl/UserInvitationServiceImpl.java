@@ -138,6 +138,9 @@ public class UserInvitationServiceImpl implements UserInvitationService {
 		invitation.setEmail(email);
 		invitation.setFirstName(request.firstName().trim());
 		invitation.setLastName(request.lastName().trim());
+		invitation.setSecondLastName(request.secondLastName() == null
+				? null : request.secondLastName().trim().isEmpty()
+						? null : request.secondLastName().trim());
 		invitation.setDocumentType(request.documentType());
 		invitation.setDocumentNumber(request.documentNumber().trim());
 		invitation.setRoleNames(roles.stream().map(UserRole::name)
@@ -243,6 +246,7 @@ public class UserInvitationServiceImpl implements UserInvitationService {
 				invitation.getEmail(),
 				invitation.getFirstName(),
 				invitation.getLastName(),
+				invitation.getSecondLastName(),
 				tenant.getName(),
 				tenant.getSlug()
 		);
@@ -272,6 +276,7 @@ public class UserInvitationServiceImpl implements UserInvitationService {
 			newUser.setEmail(email);
 			newUser.setFirstName(invitation.getFirstName());
 			newUser.setLastName(invitation.getLastName());
+			newUser.setSecondLastName(invitation.getSecondLastName());
 			newUser.setPasswordHash(passwordHash);
 			newUser.setStatus(UserStatus.ACTIVE);
 			newUser.setEmailVerified(true);   // accepting via the token IS the verification step

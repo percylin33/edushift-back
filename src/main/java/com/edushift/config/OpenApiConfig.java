@@ -32,6 +32,9 @@ public class OpenApiConfig {
 	@Value("${spring.application.name:edushift-back}")
 	private String applicationName;
 
+	@Value("${edushift.contact.support-email:soporte@edushift.pe}")
+	private String supportEmail;
+
 	@Bean
 	OpenAPI edushiftOpenAPI() {
 		return new OpenAPI()
@@ -46,7 +49,7 @@ public class OpenApiConfig {
 								token for protected endpoints.
 								""")
 						.version("v1")
-						.contact(new Contact().name("EduShift Engineering").email("dev@edushift.pe"))
+						.contact(new Contact().name("EduShift").email(supportEmail))
 						.license(new License().name("Proprietary").url("https://edushift.pe")))
 				.servers(List.of(
 						new Server().url("/api").description("Same-origin (default; respects context-path)"),

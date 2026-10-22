@@ -41,6 +41,7 @@ public record UserResponse(
 		UUID publicUuid,
 		String firstName,
 		String lastName,
+		String secondLastName,
 		String fullName,
 		String email,
 		String phone,
@@ -56,4 +57,14 @@ public record UserResponse(
 		Instant createdAt,
 		Instant updatedAt
 ) {
+	public UserResponse(UUID publicUuid, String firstName, String lastName,
+			String fullName, String email, String phone, String avatarUrl,
+			UserStatus status, boolean emailVerified, EmailSource emailSource,
+			boolean mustChangePassword, boolean mfaEnabled, Set<String> roles,
+			Set<String> permissions, Instant lastLoginAt, Instant createdAt,
+			Instant updatedAt) {
+		this(publicUuid, firstName, lastName, null, fullName, email, phone, avatarUrl,
+				status, emailVerified, emailSource, mustChangePassword, mfaEnabled,
+				roles, permissions, lastLoginAt, createdAt, updatedAt);
+	}
 }

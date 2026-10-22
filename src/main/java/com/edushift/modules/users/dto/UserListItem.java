@@ -22,10 +22,17 @@ public record UserListItem(
 		String email,
 		String firstName,
 		String lastName,
+		String secondLastName,
 		String fullName,
 		UserStatus status,
 		Set<String> roles,
 		Instant lastLoginAt,
 		Instant createdAt
 ) {
+	public UserListItem(UUID publicUuid, String email, String firstName,
+			String lastName, String fullName, UserStatus status, Set<String> roles,
+			Instant lastLoginAt, Instant createdAt) {
+		this(publicUuid, email, firstName, lastName, null, fullName, status,
+				roles, lastLoginAt, createdAt);
+	}
 }

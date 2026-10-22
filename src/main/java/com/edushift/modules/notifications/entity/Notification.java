@@ -52,7 +52,9 @@ public class Notification extends TenantAwareEntity {
         /** Email only (via outbox). */
         EMAIL,
         /** Both channels (default for critical events). */
-        BOTH
+        BOTH,
+        /** Push opt-in preference. Not persisted as a notification row channel. */
+        PUSH
     }
 
     /** Lifecycle status. */

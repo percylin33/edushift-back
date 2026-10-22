@@ -35,6 +35,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 /**
  * Notification service (Sprint 9 / BE-9.1).
@@ -105,6 +107,30 @@ public class NotificationService {
     }
 
     /**
+     * Queues a tenant-branded email for recipients who do not yet have an EduShift account,
+     * such as families responding to a public admission offer. SMTP-disabled environments
+     * deliberately skip delivery while the application continues to expose a copyable link.
+     */
+    @Transactional
+    public boolean enqueueDirectEmail(String toEmail, String subject, String bodyHtml) {
+        if (!emailEnabled || toEmail == null || toEmail.isBlank()) return false;
+        UUID tenantId = TenantContext.currentRequired();
+        String body = bodyHtml == null ? "" : bodyHtml;
+        if (emailLayoutRenderer != null) {
+            EmailBrandingContext branding = emailBrandingResolver == null
+                    ? null : emailBrandingResolver.forTenantId(tenantId);
+            body = emailLayoutRenderer.wrap(body, subject, branding);
+        }
+        EmailOutbox outbox = new EmailOutbox();
+        outbox.setTenantId(tenantId);
+        outbox.setToEmail(toEmail.trim().toLowerCase());
+        outbox.setSubject(subject == null || subject.isBlank() ? "Notificación de EduShift" : subject.trim());
+        outbox.setBodyHtml(body);
+        outboxRepo.save(outbox);
+        return true;
+    }
+
+    /**
      * Notify many recipients in a single transaction (bulk). Used by
      * the attendance and grade hooks (1 teacher marks 30 students
      * absent → 30 emails). One template read per distinct key, one
@@ -127,7 +153,9 @@ public class NotificationService {
                     optedOut.getOrDefault(cmd.category(), Map.of());
             boolean inAppOptOut = optedOut(byUser, cmd.recipientUserId(), Channel.IN_APP);
             boolean emailOptOut = optedOut(byUser, cmd.recipientUserId(), Channel.EMAIL);
-            if (inAppOptOut && emailOptOut) {
+            boolean pushOptOut = optedOut(byUser, cmd.recipientUserId(), Channel.PUSH)
+                    || !pushEligible(cmd.category());
+            if (inAppOptOut && emailOptOut && pushOptOut) {
                 log.debug("[Notify] user={} opted out of all channels for category={}, skipping",
                         cmd.recipientUserId(), cmd.category());
                 continue;
@@ -170,7 +198,8 @@ public class NotificationService {
                 }
             }
             pending.add(new PendingDelivery(
-                    n, enqueue, toEmail, rendered.subject(), rendered.bodyHtml(), cmd, channel, emailOptOut));
+                    n, enqueue, toEmail, rendered.subject(), rendered.bodyHtml(), cmd, channel,
+                    emailOptOut, pushOptOut));
         }
 
         if (pending.isEmpty()) {
@@ -203,7 +232,7 @@ public class NotificationService {
         }
 
         for (PendingDelivery delivery : pending) {
-            if (delivery.failed() || fcmSender == null || delivery.emailOptOut()) {
+            if (delivery.failed() || fcmSender == null || delivery.pushOptOut()) {
                 continue;
             }
             NotifyCommand cmd = delivery.command();
@@ -211,8 +240,19 @@ public class NotificationService {
             data.put("notificationPublicUuid", delivery.notification().getPublicUuid().toString());
             data.put("templateKey", cmd.templateKey());
             data.put("category", cmd.category().name());
-            data.put("channel", delivery.channel().name());
-            fcmSender.send(cmd.recipientUserId(), delivery.subject(), delivery.bodyHtml(), data);
+            data.put("channel", Channel.PUSH.name());
+            Runnable sendPush = () -> fcmSender.send(cmd.recipientUserId(), cmd.category(), data);
+            if (TransactionSynchronizationManager.isSynchronizationActive()) {
+                TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                    @Override
+                    public void afterCommit() {
+                        sendPush.run();
+                    }
+                });
+            }
+            else {
+                sendPush.run();
+            }
         }
 
         return pending.stream().map(d -> d.notification().getPublicUuid()).toList();
@@ -552,7 +592,18 @@ public class NotificationService {
     private static boolean optedOut(
             Map<UUID, EnumMap<Channel, Boolean>> byUser, UUID userId, Channel channel) {
         EnumMap<Channel, Boolean> channels = byUser.get(userId);
-        return channels != null && Boolean.TRUE.equals(channels.get(channel));
+        if (channels == null) {
+            return channel == Channel.PUSH;
+        }
+        return channels.getOrDefault(channel, channel == Channel.PUSH);
+    }
+
+    private static boolean pushEligible(Category category) {
+        return category == Category.ANNOUNCEMENT
+                || category == Category.ABSENCE
+                || category == Category.TASK
+                || category == Category.QUIZ
+                || category == Category.GRADE;
     }
 
     private EmailBrandingContext brandingFor(UUID tenantId, List<PendingDelivery> pending) {
@@ -602,10 +653,11 @@ public class NotificationService {
             String bodyHtml,
             NotifyCommand command,
             Channel channel,
-            boolean emailOptOut
+            boolean emailOptOut,
+            boolean pushOptOut
     ) {
         static PendingDelivery failed(Notification notification) {
-            return new PendingDelivery(notification, false, null, null, null, null, null, true);
+            return new PendingDelivery(notification, false, null, null, null, null, null, true, true);
         }
 
         boolean failed() {

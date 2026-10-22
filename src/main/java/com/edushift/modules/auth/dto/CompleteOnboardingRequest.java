@@ -10,7 +10,6 @@ import java.time.LocalDate;
  * CRED-7 first-login submit: password change + light profile (role-aware).
  */
 public record CompleteOnboardingRequest(
-		@NotBlank String currentPassword,
 		@NotBlank @ValidPassword String newPassword,
 		@Size(max = 100) String firstName,
 		@Size(max = 100) String lastName,

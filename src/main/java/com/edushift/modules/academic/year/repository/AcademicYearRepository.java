@@ -5,6 +5,8 @@ import com.edushift.modules.academic.year.entity.AcademicYearStatus;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import jakarta.persistence.LockModeType;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -21,6 +23,10 @@ import org.springframework.stereotype.Repository;
 public interface AcademicYearRepository extends JpaRepository<AcademicYear, UUID> {
 
 	Optional<AcademicYear> findByPublicUuid(UUID publicUuid);
+
+	@Lock(LockModeType.PESSIMISTIC_WRITE)
+	@Query("select y from AcademicYear y where y.publicUuid = :publicUuid")
+	Optional<AcademicYear> findByPublicUuidForUpdate(@Param("publicUuid") UUID publicUuid);
 
 	@Query("select y from AcademicYear y where lower(y.name) = lower(:name)")
 	Optional<AcademicYear> findByNameIgnoreCase(@Param("name") String name);

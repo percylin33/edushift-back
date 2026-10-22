@@ -89,6 +89,9 @@ public class User extends TenantAwareEntity {
 	@Column(name = "last_name", nullable = false, length = 100)
 	private String lastName;
 
+	@Column(name = "second_last_name", length = 100)
+	private String secondLastName;
+
 	/**
 	 * Lowercased and trimmed before persistence. Uniqueness is enforced at the
 	 * database level by a partial unique index on {@code (tenant_id, lower(email))}
@@ -260,7 +263,9 @@ public class User extends TenantAwareEntity {
 		if (lastName == null) {
 			return firstName;
 		}
-		return firstName + " " + lastName;
+		return java.util.stream.Stream.of(firstName, lastName, secondLastName)
+				.filter(value -> value != null && !value.isBlank())
+				.collect(java.util.stream.Collectors.joining(" "));
 	}
 
 	/** Records a successful authentication. */

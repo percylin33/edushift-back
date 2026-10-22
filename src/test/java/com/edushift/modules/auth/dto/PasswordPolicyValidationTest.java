@@ -120,7 +120,7 @@ class PasswordPolicyValidationTest {
 	@DisplayName("RegisterTenant: 8-digit numeric-only password is REJECTED")
 	void registerTenantRejectsTrivialPasswords() {
 		RegisterTenantRequest body = new RegisterTenantRequest(
-				"Acme Corp", "acme-co", "founder@acme.test", "12345678",
+			"Acme Corp", "acmeco", "founder@acme.test", "12345678",
 				"Founder", "Doe", "tokentokentoken12");
 
 		Set<? extends jakarta.validation.ConstraintViolation<?>> violations =
@@ -133,7 +133,7 @@ class PasswordPolicyValidationTest {
 	@DisplayName("RegisterTenant: policy-compliant password is ACCEPTED")
 	void registerTenantAcceptsStrongPassword() {
 		RegisterTenantRequest body = new RegisterTenantRequest(
-				"Acme Corp", "acme-co", "founder@acme.test", "Sup3rSecret!",
+			"Acme Corp", "acmeco", "founder@acme.test", "Sup3rSecret!",
 				"Founder", "Doe", "tokentokentoken12");
 
 		Set<? extends jakarta.validation.ConstraintViolation<?>> violations =

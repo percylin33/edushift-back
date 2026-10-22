@@ -29,6 +29,7 @@ public class UserManagementMapper {
 				user.getEmail(),
 				user.getFirstName(),
 				user.getLastName(),
+				user.getSecondLastName(),
 				user.fullName(),
 				user.getStatus(),
 				user.getRoleNames(),
@@ -43,6 +44,7 @@ public class UserManagementMapper {
 				user.getEmail(),
 				user.getFirstName(),
 				user.getLastName(),
+				user.getSecondLastName(),
 				user.fullName(),
 				user.getPhone(),
 				user.getAvatarUrl(),
@@ -80,6 +82,10 @@ public class UserManagementMapper {
 		}
 		if (patch.lastName() != null) {
 			user.setLastName(patch.lastName().trim());
+		}
+		if (patch.secondLastName() != null) {
+			user.setSecondLastName(patch.secondLastName().isBlank()
+					? null : patch.secondLastName().trim());
 		}
 		if (patch.phone() != null) {
 			user.setPhone(patch.phone().isBlank() ? null : patch.phone().trim());

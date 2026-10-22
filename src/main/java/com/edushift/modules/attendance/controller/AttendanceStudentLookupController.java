@@ -56,7 +56,7 @@ public class AttendanceStudentLookupController {
 	@GetMapping(value = "/attendance/students/lookup",
 			produces = MediaType.APPLICATION_JSON_VALUE)
 	@SecurityRequirement(name = "bearerAuth")
-	@PreAuthorize("hasAnyRole('TENANT_ADMIN','TEACHER')")
+	@PreAuthorize("hasAnyRole('TENANT_ADMIN','TEACHER') or hasAuthority('ATTENDANCE:READ')")
 	@Operation(summary = "Search students for the manual check-in picker",
 			description = "Returns paginated, tenant-scoped, ACTIVE-enrolled "
 					+ "students matching the supplied filters. The 'q' "

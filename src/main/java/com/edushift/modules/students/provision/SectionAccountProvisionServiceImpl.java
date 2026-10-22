@@ -102,6 +102,7 @@ public class SectionAccountProvisionServiceImpl implements SectionAccountProvisi
 				CreatedAccount created = createPortalUser(
 						student.getFirstName(),
 						student.getLastName(),
+						student.getSecondLastName(),
 						student.getEmail(),
 						student.getDocumentNumber(),
 						UserRole.STUDENT,
@@ -142,6 +143,7 @@ public class SectionAccountProvisionServiceImpl implements SectionAccountProvisi
 			CreatedAccount created = createPortalUser(
 					guardian.getFirstName(),
 					guardian.getLastName(),
+					null,
 					guardian.getEmail(),
 					guardian.getDocumentNumber(),
 					UserRole.PARENT,
@@ -281,6 +283,7 @@ public class SectionAccountProvisionServiceImpl implements SectionAccountProvisi
 	private CreatedAccount createPortalUser(
 			String firstName,
 			String lastName,
+			String secondLastName,
 			String rosterEmail,
 			String documentNumber,
 			UserRole role,
@@ -317,6 +320,8 @@ public class SectionAccountProvisionServiceImpl implements SectionAccountProvisi
 		User user = new User();
 		user.setFirstName(blankToPlaceholder(firstName));
 		user.setLastName(blankToPlaceholder(lastName));
+		user.setSecondLastName(secondLastName == null || secondLastName.isBlank()
+				? null : secondLastName.trim());
 		user.setEmail(email);
 		user.setPasswordHash(passwordEncoder.encode(temporaryPassword));
 		user.setStatus(UserStatus.ACTIVE);

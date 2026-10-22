@@ -1,17 +1,20 @@
 package com.edushift.modules.ai.service;
 
 import com.edushift.modules.ai.entity.TenantAiSettings;
-import com.edushift.modules.ai.entity.TenantAiUsage;
 import com.edushift.modules.ai.exception.AiDisabledException;
 import com.edushift.modules.ai.exception.AiQuotaExceededException;
+import com.edushift.modules.ai.llm.LlmClient.LlmRequest;
 import com.edushift.modules.ai.repository.TenantAiSettingsRepository;
 import com.edushift.modules.ai.repository.TenantAiUsageRepository;
 import com.edushift.shared.multitenancy.TenantContext;
+import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
+import java.time.ZoneOffset;
 import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
@@ -24,21 +27,15 @@ import org.springframework.transaction.annotation.Transactional;
  * <h3>Quota semantics</h3>
  * <ul>
  *   <li><b>Master switch</b> ({@code ai_enabled}): if false → 403.</li>
- *   <li><b>Daily request quota</b> ({@code daily_request_quota}): if
- *       non-null and today's {@code request_count} would exceed it
- *       on increment → 429.</li>
- *   <li><b>Monthly token quota</b> ({@code monthly_token_quota}): if
- *       non-null and the sum of tokens this month would exceed it
- *       on increment → 429. (Checked optimistically: we don't know
- *       the token count yet; we pre-check the current sum and let
- *       the actual tokensIn/tokensOut settle the row.)</li>
+ *   <li><b>Daily request quota</b>: reserved atomically before the LLM call.</li>
+ *   <li><b>Monthly token quota</b>: a conservative per-request token
+ *       bound is reserved before the provider call. Actual usage settles
+ *       the reservation once and releases the unused hold.</li>
  * </ul>
  *
  * <h3>Counters</h3>
- * The {@link #incrementCounters} method runs a single PostgreSQL
- * UPSERT (native query) so the counters are bumped atomically with
- * the rest of the call's transaction. A crash between LLM and DB
- * rolls back everything (LLM call, counters, audit row) consistently.
+ * Request reservations and outcome counters commit independently of the
+ * generation transaction so a rollback cannot erase a paid call.
  */
 @Service
 public class AiQuotaService {
@@ -48,17 +45,27 @@ public class AiQuotaService {
     private final TenantAiSettingsRepository settingsRepo;
     private final TenantAiUsageRepository usageRepo;
     private final AiTenantKeyResolver aiTenantKeyResolver;
+    private final AiEntitlementService entitlementService;
+    private final AiDailyQuotaReservationService reservationService;
+    private final AiMonthlyTokenReservationService monthlyReservations;
+    private final ThreadLocal<Pending> pending = new ThreadLocal<>();
 
     public AiQuotaService(TenantAiSettingsRepository settingsRepo,
                           TenantAiUsageRepository usageRepo,
-                          AiTenantKeyResolver aiTenantKeyResolver) {
+                          AiTenantKeyResolver aiTenantKeyResolver,
+                          AiEntitlementService entitlementService,
+                          AiDailyQuotaReservationService reservationService,
+                          AiMonthlyTokenReservationService monthlyReservations) {
         this.settingsRepo = settingsRepo;
         this.usageRepo = usageRepo;
         this.aiTenantKeyResolver = aiTenantKeyResolver;
+        this.entitlementService = entitlementService;
+        this.reservationService = reservationService;
+        this.monthlyReservations = monthlyReservations;
     }
 
     /**
-     * Verifies the current tenant can make one more AI request right now.
+     * Verifies access and reserves one daily AI request atomically.
      * Throws {@link AiDisabledException} or {@link AiQuotaExceededException}
      * if not. Otherwise returns the {@link TenantAiSettings} (for the
      * caller to read the {@code defaultModel}).
@@ -68,9 +75,14 @@ public class AiQuotaService {
      * {@code tenants.public_uuid}, so this method temporarily rebinds the
      * tenant context to that key for Hibernate {@code @TenantId} filtering.</p>
      */
-    @Transactional(readOnly = true)
     public TenantAiSettings verifyCanCall() {
+        return verifyCanCall(AiEntitlementService.GENERATE);
+    }
+
+    public TenantAiSettings verifyCanCall(String feature) {
+        pending.remove();
         UUID internalTenantId = TenantContext.currentRequired();
+        AiEntitlementService.EffectiveAiPlan plan = entitlementService.require(feature);
         UUID aiTenantKey = aiTenantKeyResolver.resolve(internalTenantId);
 
         TenantAiSettings settings = settingsRepo.findActiveByTenantId(aiTenantKey).orElse(null);
@@ -81,27 +93,52 @@ public class AiQuotaService {
             throw new AiDisabledException();
         }
 
-        LocalDate today = LocalDate.now();
-        TenantAiUsage usage = TenantContext.runAs(aiTenantKey,
-                () -> usageRepo.findByUsageDay(today).orElse(null));
-        int currentRequests = usage == null ? 0 : usage.getRequestCount();
-        if (settings.getDailyRequestQuota() != null
-                && currentRequests + 1 > settings.getDailyRequestQuota()) {
-            throw new AiQuotaExceededException(
-                    "Daily AI request quota exhausted for this tenant "
-                            + "(" + settings.getDailyRequestQuota() + " requests/day). "
-                            + "The quota resets at 00:00 UTC.");
+        int dailyLimit = settings.getDailyRequestQuota() == null
+                ? plan.dailyRequestLimit()
+                : Math.min(settings.getDailyRequestQuota(), plan.dailyRequestLimit());
+        long monthlyLimit = settings.getMonthlyTokenQuota() == null
+                ? plan.monthlyTokenLimit()
+                : Math.min(settings.getMonthlyTokenQuota(), plan.monthlyTokenLimit());
+        reservationService.reserve(aiTenantKey, dailyLimit, monthlyLimit);
+        pending.set(new Pending(aiTenantKey, monthlyLimit, null));
+        return settings;
+    }
+
+    /** Reserve a conservative upper bound before the provider receives the request. */
+    public void reserveForRequest(LlmRequest request) {
+        Pending current = pending.get();
+        if (current == null || current.reservationId() != null) {
+            throw new IllegalStateException("AI quota must be verified once before reserving tokens");
         }
-        if (settings.getMonthlyTokenQuota() != null) {
-            long currentMonthTokens = usageRepo.sumTokensThisMonth(aiTenantKey);
-            if (currentMonthTokens >= settings.getMonthlyTokenQuota()) {
-                throw new AiQuotaExceededException(
-                        "Monthly AI token quota exhausted for this tenant "
-                                + "(" + settings.getMonthlyTokenQuota() + " tokens/month). "
-                                + "The quota resets on the 1st of next month UTC.");
+        long bound = request.systemPrompt().getBytes(StandardCharsets.UTF_8).length
+                + request.userPrompt().getBytes(StandardCharsets.UTF_8).length
+                + (request.maxTokens() == null ? 8192L : request.maxTokens()) + 512L;
+        if (request.history() != null) {
+            for (var item : request.history()) {
+                bound += item.content().getBytes(StandardCharsets.UTF_8).length + 32L;
             }
         }
-        return settings;
+        UUID id = monthlyReservations.reserve(current.tenantId(), current.monthlyLimit(), bound);
+        pending.set(new Pending(current.tenantId(), current.monthlyLimit(), id));
+    }
+
+    /** Transfers a caller-thread reservation to an async worker. */
+    public UUID detachReservation() {
+        Pending current = pending.get();
+        pending.remove();
+        if (current == null || current.reservationId() == null) {
+            throw new IllegalStateException("No AI token reservation to dispatch");
+        }
+        return current.reservationId();
+    }
+
+    public void bindReservation(UUID reservationId) {
+        UUID tenantId = aiTenantKeyResolver.resolve(TenantContext.currentRequired());
+        pending.set(new Pending(tenantId, 0, reservationId));
+    }
+
+    public void clearReservation() {
+        pending.remove();
     }
 
     /**
@@ -111,18 +148,36 @@ public class AiQuotaService {
      * request; only successful LLM responses add to {@code success_count}
      * and the token totals.
      */
-    @Transactional
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void incrementCounters(boolean success, long tokensIn, long tokensOut) {
+        Pending current = pending.get();
+        pending.remove();
+        if (current == null) {
+            throw new IllegalStateException("AI quota was already settled or never reserved");
+        }
         UUID internalTenantId = TenantContext.currentRequired();
         UUID aiTenantKey = aiTenantKeyResolver.resolve(internalTenantId);
-        LocalDate today = LocalDate.now();
+        if (!aiTenantKey.equals(current.tenantId())) {
+            throw new IllegalStateException("AI reservation tenant mismatch");
+        }
+        if (current.reservationId() != null) {
+            if (!monthlyReservations.settle(aiTenantKey, current.reservationId(),
+                    success, tokensIn, tokensOut)) {
+                log.warn("AI token reservation already settled or absent tenant={} reservation={}",
+                        aiTenantKey, current.reservationId());
+            }
+            return;
+        }
+        LocalDate today = LocalDate.now(ZoneOffset.UTC);
         int successDelta = success ? 1 : 0;
         int failedDelta  = success ? 0 : 1;
-        long tokensInDelta  = success ? tokensIn  : 0L;
-        long tokensOutDelta = success ? tokensOut : 0L;
-        usageRepo.incrementCounters(aiTenantKey, today, 1, successDelta, failedDelta,
+        long tokensInDelta  = Math.max(0, tokensIn);
+        long tokensOutDelta = Math.max(0, tokensOut);
+        usageRepo.incrementCounters(aiTenantKey, today, 0, successDelta, failedDelta,
                 tokensInDelta, tokensOutDelta);
         log.debug("Incremented AI usage for tenant={} day={} success={} tokensIn={} tokensOut={}",
                 aiTenantKey, today, success, tokensIn, tokensOut);
     }
+
+    private record Pending(UUID tenantId, long monthlyLimit, UUID reservationId) {}
 }

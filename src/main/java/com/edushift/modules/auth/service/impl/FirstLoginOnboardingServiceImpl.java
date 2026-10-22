@@ -65,7 +65,6 @@ public class FirstLoginOnboardingServiceImpl implements FirstLoginOnboardingServ
 
 		List<String> required = new ArrayList<>();
 		List<String> optional = new ArrayList<>();
-		required.add("currentPassword");
 		required.add("newPassword");
 		if (isBlankOrPlaceholder(firstName)) {
 			required.add("firstName");
@@ -107,11 +106,11 @@ public class FirstLoginOnboardingServiceImpl implements FirstLoginOnboardingServ
 		User user = requireCurrentUserEntity();
 		String role = resolveRole(user);
 
-		if (!passwordEncoder.matches(request.currentPassword(), user.getPasswordHash())) {
-			throw new UnauthorizedException("BAD_CREDENTIALS",
-					"Current password is incorrect");
+		if (!user.isMustChangePassword()) {
+			throw new UnauthorizedException("PASSWORD_CHANGE_NOT_REQUIRED",
+					"This account cannot use the initial password change flow");
 		}
-		if (request.newPassword().equals(request.currentPassword())) {
+		if (passwordEncoder.matches(request.newPassword(), user.getPasswordHash())) {
 			throw new BadRequestException("PASSWORD_UNCHANGED",
 					"New password must be different from the current one");
 		}

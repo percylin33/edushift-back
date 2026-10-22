@@ -243,7 +243,9 @@ public class PaymentService {
      */
     @Transactional
     public InvoiceResponse submitEvidence(UUID invoicePublicUuid, SubmitPaymentEvidenceRequest request) {
-        Invoice invoice = mustFindInvoice(invoicePublicUuid);
+        Invoice invoice = invoiceRepo.findByPublicUuidForUpdate(invoicePublicUuid)
+                .orElseThrow(() -> new InvoiceNotFoundException(
+                        "Invoice not found in the current tenant: " + invoicePublicUuid));
         assertOwnership(invoice);
         if (invoice.getStatus() != Invoice.Status.PENDING
                 && invoice.getStatus() != Invoice.Status.OVERDUE

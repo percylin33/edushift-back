@@ -89,6 +89,19 @@ while ($i -lt $lines.Count) {
     $loaded++
 }
 Write-Host "[run-dev] Variables cargadas: $loaded" -ForegroundColor Gray
+if ($env:MINIMAX_BASE_URL -like "https://openrouter.ai/*") {
+    # Do not send a stored MiniMax credential to OpenRouter by mistake.
+    $openRouterKey = $env:OPENROUTER_API_KEY
+    if ([string]::IsNullOrWhiteSpace($openRouterKey) -and $env:MINIMAX_API_KEY -like "sk-or-*") {
+        # Backward-compatible: the user's existing OpenRouter key may still
+        # be stored under the old MINIMAX_API_KEY setting.
+        $openRouterKey = $env:MINIMAX_API_KEY
+    }
+    $env:MINIMAX_API_KEY = $openRouterKey
+    if ([string]::IsNullOrWhiteSpace($openRouterKey)) {
+        Write-Host "[run-dev] OPENROUTER_API_KEY vacia: se usara MockLlmClient hasta configurarla." -ForegroundColor Yellow
+    }
+}
 if ($env:STORAGE_PROVIDER -eq "FIREBASE") {
     $jsonLen = if ($env:STORAGE_FIREBASE_CREDENTIALS_JSON) { $env:STORAGE_FIREBASE_CREDENTIALS_JSON.Length } else { 0 }
     $pathSet = [string]::IsNullOrWhiteSpace($env:STORAGE_FIREBASE_CREDENTIALS_PATH) -eq $false
@@ -128,12 +141,12 @@ if ($env:OLLAMA_ENABLED -eq "true") {
     Write-Host "[run-dev] LLM: Ollama ($($env:OLLAMA_DEFAULT_MODEL) @ $($env:OLLAMA_BASE_URL))" -ForegroundColor Green
     Write-Host "[run-dev]   MiniMax queda apagado mientras Ollama esta activo." -ForegroundColor Gray
 } elseif ($env:MINIMAX_ENABLED -eq "true") {
-    Write-Host "[run-dev] LLM: MiniMax" -ForegroundColor Green
+    $providerName = if ($env:MINIMAX_BASE_URL -like "https://openrouter.ai/*") { "OpenRouter (adaptador OpenAI-compatible)" } else { "MiniMax" }
+    Write-Host "[run-dev] LLM: $providerName" -ForegroundColor Green
     Write-Host "[run-dev]   base-url: $env:MINIMAX_BASE_URL" -ForegroundColor Gray
     Write-Host "[run-dev]   model:    $env:MINIMAX_DEFAULT_MODEL" -ForegroundColor Gray
     if ($env:MINIMAX_API_KEY) {
-        $keyPreview = $env:MINIMAX_API_KEY.Substring(0, [Math]::Min(20, $env:MINIMAX_API_KEY.Length))
-        Write-Host "[run-dev]   api-key:  ${keyPreview}..." -ForegroundColor Gray
+        Write-Host "[run-dev]   api-key:  configurada" -ForegroundColor Gray
     }
 } else {
     Write-Host "[run-dev] LLM: MockLlmClient (Ollama y MiniMax apagados)" -ForegroundColor Yellow

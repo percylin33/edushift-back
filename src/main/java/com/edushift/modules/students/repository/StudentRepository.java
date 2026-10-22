@@ -3,11 +3,17 @@ package com.edushift.modules.students.repository;
 import com.edushift.modules.students.entity.DocumentType;
 import com.edushift.modules.students.entity.EnrollmentStatus;
 import com.edushift.modules.students.entity.Student;
+import jakarta.persistence.LockModeType;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.Collection;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.repository.Lock;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 /**
@@ -29,6 +35,21 @@ public interface StudentRepository extends JpaRepository<Student, UUID>,
 		JpaSpecificationExecutor<Student> {
 
 	Optional<Student> findByPublicUuid(UUID publicUuid);
+
+	@Lock(LockModeType.PESSIMISTIC_WRITE)
+	@Query("select s from Student s where s.publicUuid = :publicUuid")
+	Optional<Student> findByPublicUuidForUpdate(@Param("publicUuid") UUID publicUuid);
+
+	List<Student> findAllByPublicUuidIn(Collection<UUID> publicUuids);
+
+	@Query("""
+			SELECT s FROM Student s
+			WHERE LOWER(CONCAT(s.firstName, ' ', s.lastName)) LIKE LOWER(CONCAT('%', :term, '%'))
+			   OR LOWER(CONCAT(s.lastName, ' ', s.firstName)) LIKE LOWER(CONCAT('%', :term, '%'))
+			   OR s.documentNumber LIKE CONCAT('%', :term, '%')
+			ORDER BY s.lastName ASC, s.firstName ASC
+			""")
+	List<Student> searchForPaymentAccessOverride(@Param("term") String term, Pageable pageable);
 
 	/**
 	 * Pre-check before insert / update: enforces the natural-identity
@@ -73,6 +94,23 @@ public interface StudentRepository extends JpaRepository<Student, UUID>,
 	 * {@code SUPER_ADMIN_SENTINEL} which bypasses Hibernate's auto-filter.
 	 */
 	long countByTenantId(UUID tenantId);
+
+	/** Explicit cross-tenant aggregate for the SUPER_ADMIN institution directory. */
+	@Query("""
+			SELECT s.tenantId AS tenantId, COUNT(s) AS studentCount
+			FROM Student s
+			WHERE s.tenantId IN :tenantIds
+			  AND s.enrollmentStatus = :status
+			GROUP BY s.tenantId
+			""")
+	List<TenantStudentCount> countEnrolledStudentsByTenantIds(
+			@Param("tenantIds") Collection<UUID> tenantIds,
+			@Param("status") EnrollmentStatus status);
+
+	interface TenantStudentCount {
+		UUID getTenantId();
+		Long getStudentCount();
+	}
 
 	/**
 	 * DEBT-STUDENT-PRIVACY (Fase 0.2): resolve the {@code Student.publicUuid}

@@ -42,7 +42,7 @@ public record UpdateTeacherRequest(
 		String email,
 
 		@Size(max = 32, message = "phone too long")
-		@Pattern(regexp = "^[+0-9\\s\\-()]{6,32}$",
+		@Pattern(regexp = "^(?:[+0-9\\s\\-()]{6,32})?$",
 				message = "phone must contain only digits, spaces, dashes, parentheses, and an optional leading +")
 		String phone,
 

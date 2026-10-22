@@ -146,6 +146,50 @@ public class AdminMfaOnboardingService {
 				});
 	}
 
+	public AdminAuthService.LoginOutcome completeLoginChallenge(
+			String mfaToken, String code, String clientIp) {
+		if (mfaToken == null || mfaToken.isBlank()) {
+			throw new UnauthorizedException("MFA_TOKEN_MISSING", "MFA token is required");
+		}
+	JwtClaims claims;
+	try {
+		claims = jwtService.parseAndValidate(mfaToken);
+	} catch (RuntimeException ex) {
+		throw new UnauthorizedException("MFA_TOKEN_INVALID", "MFA token is invalid or expired");
+	}
+	if (claims.type() != JwtService.TokenType.MFA
+			|| !TenantIdResolver.SUPER_ADMIN_SENTINEL.equals(claims.tenantId())) {
+		throw new UnauthorizedException("MFA_TOKEN_INVALID", "Token is not a platform MFA token");
+	}
+	UUID userPublicUuid = UUID.fromString(claims.subject());
+	return TenantContext.runAs(TenantIdResolver.SUPER_ADMIN_SENTINEL, () ->
+			new TransactionTemplate(txManager).execute(status -> {
+				User user = userRepository.findByPublicUuid(userPublicUuid)
+						.orElseThrow(() -> new UnauthorizedException("USER_NOT_FOUND", "User not found"));
+				if (!user.hasRole(com.edushift.modules.auth.entity.UserRole.SUPER_ADMIN)
+						|| user.getStatus() != com.edushift.modules.auth.entity.UserStatus.ACTIVE
+						|| !user.isMfaEnabled()) {
+					throw new UnauthorizedException("MFA_NOT_ENABLED", "Active Super Admin MFA is required");
+				}
+				mfaService.verifyChallenge(userPublicUuid, code);
+				user.recordSuccessfulLogin();
+				userRepository.saveAndFlush(user);
+				Tenant sentinel = new Tenant();
+				sentinel.setId(TenantIdResolver.SUPER_ADMIN_SENTINEL);
+				sentinel.setSlug("edushift-system");
+				sentinel.setName("edushift-system");
+				String accessToken = jwtService.issueAccessToken(user, sentinel, user.getRoleNames());
+				String refreshToken = jwtService.issueRefreshToken(user, sentinel);
+				AdminUserSummary summary = new AdminUserSummary(user.getPublicUuid().toString(),
+						user.getEmail(), user.getFirstName(), user.getLastName(), buildFullName(user),
+						new ArrayList<>(user.getRoleNames()));
+				auditLogger.log(AuditAction.LOGIN, "admin", userPublicUuid,
+						"SUPER_ADMIN login completed with MFA from " + clientIp);
+				return AdminLoginResponse.bearer(accessToken, refreshToken,
+						jwtService.accessTokenTtlSeconds(), summary);
+			}));
+	}
+
 	private static String buildFullName(User user) {
 		String first = user.getFirstName() == null ? "" : user.getFirstName().trim();
 		String last = user.getLastName() == null ? "" : user.getLastName().trim();
@@ -175,7 +219,27 @@ public class AdminMfaOnboardingService {
 			throw new UnauthorizedException("ONBOARDING_TOKEN_INVALID",
 					"Onboarding token tenant mismatch");
 		}
-		return UUID.fromString(claims.subject());
+		UUID userPublicUuid;
+		try {
+			userPublicUuid = UUID.fromString(claims.subject());
+		}
+		catch (RuntimeException e) {
+			throw new UnauthorizedException("ONBOARDING_TOKEN_INVALID",
+					"Onboarding token subject is invalid");
+		}
+		UUID principal = userPublicUuid;
+		TenantContext.runAs(TenantIdResolver.SUPER_ADMIN_SENTINEL, () -> {
+			new TransactionTemplate(txManager).executeWithoutResult(status -> {
+				User user = userRepository.findByPublicUuid(principal)
+						.orElseThrow(() -> new UnauthorizedException("USER_NOT_FOUND", "User not found"));
+				if (user.isMustChangePassword()) {
+					throw new UnauthorizedException("PASSWORD_CHANGE_REQUIRED",
+							"Change the temporary password before enrolling MFA");
+				}
+			});
+			return null;
+		});
+		return userPublicUuid;
 	}
 
 	// ========================================================================

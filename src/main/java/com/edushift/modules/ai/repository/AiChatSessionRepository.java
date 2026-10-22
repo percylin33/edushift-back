@@ -1,6 +1,7 @@
 package com.edushift.modules.ai.repository;
 
 import com.edushift.modules.ai.entity.AiChatSession;
+import com.edushift.modules.ai.entity.AiAgentType;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
@@ -36,6 +37,18 @@ public interface AiChatSessionRepository extends JpaRepository<AiChatSession, UU
             ORDER BY s.updatedAt DESC
             """)
     Page<AiChatSession> findActiveByUser(@Param("userId") UUID userId, Pageable pageable);
+
+    @Query("""
+            SELECT s FROM AiChatSession s
+            WHERE s.userId = :userId
+              AND s.agentType = :agentType
+              AND s.status = com.edushift.modules.ai.entity.AiChatSession.Status.ACTIVE
+            ORDER BY s.updatedAt DESC
+            """)
+    Page<AiChatSession> findActiveByUserAndAgent(
+            @Param("userId") UUID userId,
+            @Param("agentType") AiAgentType agentType,
+            Pageable pageable);
 
     /**
      * Sessions past their TTL (used by {@code ChatSessionSweeper}).

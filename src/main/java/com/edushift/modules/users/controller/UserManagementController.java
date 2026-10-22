@@ -10,7 +10,12 @@ import com.edushift.modules.users.dto.UserDetailResponse;
 import com.edushift.modules.users.dto.UserListFilters;
 import com.edushift.modules.users.dto.UserListItem;
 import com.edushift.modules.users.service.UserManagementService;
+import com.edushift.modules.tenants.dto.ReplaceStaffAccessRequest;
+import com.edushift.modules.tenants.dto.StaffAccessState;
+import com.edushift.modules.tenants.service.StaffUserAccessService;
 import com.edushift.shared.api.ApiResponse;
+import com.edushift.shared.exception.ForbiddenException;
+import com.edushift.shared.security.CurrentUserProvider;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
@@ -29,6 +34,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -64,6 +70,8 @@ import org.springframework.web.bind.annotation.RestController;
 public class UserManagementController {
 
 	private final UserManagementService service;
+	private final StaffUserAccessService staffUserAccessService;
+	private final CurrentUserProvider currentUserProvider;
 
 	// ===========================================================================
 	// Read
@@ -195,6 +203,33 @@ public class UserManagementController {
 			return ResponseEntity.ok(ApiResponse.ok(response));
 		}
 		return ResponseEntity.accepted().body(ApiResponse.ok(response));
+	}
+
+	@GetMapping("/{publicUuid}/staff-access")
+	@SecurityRequirement(name = "bearerAuth")
+	@PreAuthorize("hasRole('TENANT_ADMIN')")
+	@Operation(summary = "Get an individual STAFF user's access profiles and effective permissions")
+	public ResponseEntity<ApiResponse<StaffAccessState>> getStaffAccess(
+			@PathVariable UUID publicUuid) {
+		return ResponseEntity.ok(ApiResponse.ok(
+				staffUserAccessService.getForUser(requireTenantId(), publicUuid)));
+	}
+
+	@PutMapping("/{publicUuid}/staff-access")
+	@SecurityRequirement(name = "bearerAuth")
+	@PreAuthorize("hasRole('TENANT_ADMIN')")
+	@Operation(summary = "Replace an individual STAFF user's profiles and permission exceptions")
+	public ResponseEntity<ApiResponse<StaffAccessState>> replaceStaffAccess(
+			@PathVariable UUID publicUuid,
+			@Valid @RequestBody ReplaceStaffAccessRequest request) {
+		return ResponseEntity.ok(ApiResponse.ok(
+				staffUserAccessService.replaceForUser(requireTenantId(), publicUuid, request)));
+	}
+
+	private UUID requireTenantId() {
+		return currentUserProvider.currentTenantId()
+				.orElseThrow(() -> new ForbiddenException(
+						"Staff access profiles require a tenant context"));
 	}
 
 }

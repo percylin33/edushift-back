@@ -38,6 +38,23 @@ public interface StudentEnrollmentRepository extends JpaRepository<StudentEnroll
 
 	Optional<StudentEnrollment> findByPublicUuid(UUID publicUuid);
 
+	@Query("""
+			select count(e) from StudentEnrollment e
+			where e.section = :section
+			  and e.status = com.edushift.modules.students.enrollments.entity.StudentEnrollmentStatus.ACTIVE
+			""")
+	long countActiveBySection(@Param("section") Section section);
+
+	@Query("""
+			select count(e) from StudentEnrollment e
+			where e.academicYear = :year
+			  and e.section.grade = :grade
+			  and e.status = com.edushift.modules.students.enrollments.entity.StudentEnrollmentStatus.ACTIVE
+			""")
+	long countActiveByYearAndGrade(
+			@Param("year") AcademicYear year,
+			@Param("grade") Grade grade);
+
 	/**
 	 * Looks up the active enrollment for {@code (student, year)}; the
 	 * unique partial index in V20 guarantees this is at most one row.

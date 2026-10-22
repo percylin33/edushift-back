@@ -24,7 +24,7 @@ class AuditControllerTest extends AbstractControllerTest {
 
     @Test
     void search_returnsOk_whenSuperAdmin() throws Exception {
-        given(auditLogRepository.search(any(), any(), any(), any(), any(), any(), any()))
+        given(auditLogRepository.search(any(), any(), any(), any(), any(), any(), any(), any(), any()))
                 .willReturn(new PageImpl<>(java.util.List.of()));
 
         mockMvc.perform(get("/v1/admin/audit").with(auth(superAdmin())))

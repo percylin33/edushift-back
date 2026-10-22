@@ -62,13 +62,13 @@ public class AcademicYearController {
 
 	@GetMapping
 	@SecurityRequirement(name = "bearerAuth")
-	@PreAuthorize("hasAnyRole('TENANT_ADMIN','TEACHER')")
+	@PreAuthorize("hasAnyRole('TENANT_ADMIN','TEACHER','STAFF')")
 	@Operation(
-			summary = "List academic years in the current tenant (TENANT_ADMIN, TEACHER read-only)",
+				summary = "List academic years in the current tenant (TENANT_ADMIN, TEACHER, STAFF read-only)",
 			description = "Sorted by status (ACTIVE first) then startDate desc. "
 					+ "Optional ?status filter to slice by lifecycle stage. "
-					+ "TEACHER needs read access to resolve the active year when "
-					+ "loading section pickers (attendance / LMS)."
+					+ "TEACHER and STAFF need read access to resolve the active year "
+					+ "when loading their authorized workspaces."
 	)
 	public ResponseEntity<List<AcademicYearListItem>> list(
 			@Parameter(description = "Filter by exact lifecycle status")

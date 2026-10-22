@@ -12,6 +12,12 @@ import java.util.Map;
  * page, the service looks up the course's {@code code} here and inserts
  * the bundle if (and only if) the course has zero competencies yet.</p>
  *
+ * <h3>Coverage and provenance</h3>
+ * This is a deliberately small, curated summary for Primary Mathematics
+ * and Communication. It is not a complete EBR catalog and must not be
+ * presented as a complete official transcription. Each seeded row carries
+ * this source release and the covered CNEB cycles for traceability.
+ *
  * <h3>Why static and not externalised to YAML / DB?</h3>
  * <ol>
  *   <li><strong>Tiny set</strong>: 4-6 entries today; YAML overhead not worth it.</li>
@@ -30,6 +36,10 @@ import java.util.Map;
  * admin sees a clean picklist (the school can flesh them out later).
  */
 public final class CompetencyDefaults {
+
+	public static final String SOURCE_CATALOG_VERSION = "CNEB-EBR-2017-RM159-2017";
+	public static final String SOURCE_LEVEL_CODE = "PRIMARY";
+	public static final String SOURCE_CYCLE_CODES = "III,IV,V";
 
 	private CompetencyDefaults() {
 		throw new AssertionError("config class — not instantiable");

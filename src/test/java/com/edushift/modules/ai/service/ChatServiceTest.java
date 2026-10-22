@@ -66,7 +66,9 @@ class ChatServiceTest {
         ollamaProperties.setEnabled(false);
         service = new ChatService(sessionRepo, messageRepo, tenantCtx, quotaService,
                 rateLimitService, piiFilter, llmClient,
-                new ActiveLlmSettings(miniMaxProperties, ollamaProperties));
+                new ActiveLlmSettings(miniMaxProperties, ollamaProperties),
+                mock(AiAgentAccessService.class), mock(AiAgentPromptService.class),
+                mock(AiTutorDailyLimitService.class));
         TenantContext.set(tenantId);
     }
 

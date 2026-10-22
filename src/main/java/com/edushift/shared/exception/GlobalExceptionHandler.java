@@ -212,8 +212,11 @@ public class GlobalExceptionHandler {
 	@ExceptionHandler(AccessDeniedException.class)
 	public ResponseEntity<ApiErrorResponse> handleAccessDenied(
 			AccessDeniedException ex, HttpServletRequest req) {
-		ApiError error = ApiError.of("FORBIDDEN", "Access is denied");
-		return build(HttpStatus.FORBIDDEN, "Forbidden", List.of(error), req, ex, false);
+		String message = "No tienes permiso para realizar esta acción. "
+				+ "Si lo necesitas para tu trabajo, solicita acceso al director "
+				+ "o al administrador de tu colegio.";
+		ApiError error = ApiError.of("FORBIDDEN", message);
+		return build(HttpStatus.FORBIDDEN, message, List.of(error), req, ex, false);
 	}
 
 	// ---------------------------------------------------------------------------

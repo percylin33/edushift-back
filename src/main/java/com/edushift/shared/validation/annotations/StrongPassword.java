@@ -13,7 +13,8 @@ import java.lang.annotation.Target;
  * Enforces a configurable password complexity policy.
  * <p>
  * Defaults: 8-72 chars (72 is the bcrypt input limit), at least one upper
- * case, lower case, digit and non-alphanumeric character.
+ * case, lower case, digit and non-alphanumeric character. The shared
+ * {@link ValidPassword} policy opts out of the special-character requirement.
  * <p>
  * Use with {@code @NotBlank} when the password field is required; this
  * constraint accepts {@code null} so it can be combined with group-aware

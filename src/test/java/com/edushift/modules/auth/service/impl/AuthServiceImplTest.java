@@ -495,7 +495,7 @@ class AuthServiceImplTest {
 		User user = newUser(EMAIL, UserStatus.ACTIVE, HASH);
 		JwtClaims accessClaims = new JwtClaims(user.getPublicUuid().toString(),
 				tenant.getId(), tenant.getSlug(), Set.of(),
-				TokenType.ACCESS, UUID.randomUUID(), Instant.now(), Instant.now().plusSeconds(900));
+				TokenType.ACCESS, UUID.randomUUID(), Instant.now(), Instant.now().plusSeconds(900), null);
 
 		when(jwtService.parseAndValidate("any")).thenReturn(accessClaims);
 
@@ -640,7 +640,7 @@ class AuthServiceImplTest {
 				TokenType.REFRESH,
 				UUID.randomUUID(),
 				Instant.now().minusSeconds(60),
-				Instant.now().plusSeconds(3600));
+				Instant.now().plusSeconds(3600), null);
 	}
 
 	/**

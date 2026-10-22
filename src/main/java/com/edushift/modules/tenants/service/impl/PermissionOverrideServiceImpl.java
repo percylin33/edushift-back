@@ -86,6 +86,13 @@ public class PermissionOverrideServiceImpl implements PermissionOverrideService 
 			UUID actorUserId
 	) {
 		if (granted
+				&& role == UserRole.TENANT_ADMIN
+				&& LmsAuthorities.LMS_DISCLOSURE_MANAGE.equals(authority)) {
+			throw new BusinessException(
+					"TENANT_ADMIN_DISCLOSURE_PREPARATION_DISABLED",
+					"The Tenant Admin can review and publish annual disclosures but cannot prepare them");
+		}
+		if (granted
 				&& role == UserRole.STUDENT
 				&& (LmsAuthorities.LMS_ANNOUNCEMENTS_CREATE.equals(authority)
 						|| LmsAuthorities.LMS_ANNOUNCEMENTS_CREATE_OWN.equals(authority))) {

@@ -22,6 +22,7 @@ public record UserDetailResponse(
 		String email,
 		String firstName,
 		String lastName,
+		String secondLastName,
 		String fullName,
 		String phone,
 		String avatarUrl,
@@ -34,4 +35,13 @@ public record UserDetailResponse(
 		Instant createdAt,
 		Instant updatedAt
 ) {
+	public UserDetailResponse(UUID publicUuid, String email, String firstName,
+			String lastName, String fullName, String phone, String avatarUrl,
+			UserStatus status, boolean emailVerified, boolean mfaEnabled,
+			EmailSource emailSource, Set<String> roles, Instant lastLoginAt,
+			Instant createdAt, Instant updatedAt) {
+		this(publicUuid, email, firstName, lastName, null, fullName, phone, avatarUrl,
+				status, emailVerified, mfaEnabled, emailSource, roles, lastLoginAt,
+				createdAt, updatedAt);
+	}
 }

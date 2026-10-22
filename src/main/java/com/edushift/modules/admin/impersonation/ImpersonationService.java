@@ -85,18 +85,26 @@ public class ImpersonationService {
     public void logImpersonation(UUID adminUuid, UUID targetUuid, UUID targetTenantId,
                                   String action, String path, String method, String ip,
                                   String bodyHash) {
+        logImpersonation(adminUuid, targetUuid, targetTenantId, action, path, method, ip, bodyHash, null);
+    }
+
+    public void logImpersonation(UUID adminUuid, UUID targetUuid, UUID targetTenantId,
+                                  String action, String path, String method, String ip,
+                                  String bodyHash, String reason) {
+        java.util.Map<String, Object> metadata = new java.util.LinkedHashMap<>();
+        metadata.put("adminId", adminUuid.toString());
+        metadata.put("targetId", targetUuid.toString());
+        if (targetTenantId != null) metadata.put("tenantId", targetTenantId.toString());
+        metadata.put("action", action);
+        metadata.put("path", path);
+        metadata.put("method", method);
+        metadata.put("ip", ip != null ? ip : "unknown");
+        metadata.put("bodySha256", bodyHash != null ? bodyHash : "");
+        if (reason != null && !reason.isBlank()) metadata.put("reason", reason.trim());
         auditLogger.log(AuditAction.IMPERSONATE, "user", targetUuid,
                 "Impersonation: admin=" + adminUuid + " target=" + targetUuid
                         + " action=" + action + " path=" + path,
-                java.util.Map.of(
-                        "adminId", adminUuid.toString(),
-                        "targetId", targetUuid.toString(),
-                        "tenantId", targetTenantId != null ? targetTenantId.toString() : null,
-                        "action", action,
-                        "path", path,
-                        "method", method,
-                        "ip", ip != null ? ip : "unknown",
-                        "bodySha256", bodyHash != null ? bodyHash : ""));
+                metadata);
         log.info("[impersonation] admin={} impersonates user={} for {} {} (bodyHash={})",
                 adminUuid, targetUuid, method, path,
                 bodyHash != null ? bodyHash.substring(0, Math.min(16, bodyHash.length())) : "");

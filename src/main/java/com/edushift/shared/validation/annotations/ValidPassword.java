@@ -13,13 +13,13 @@ import java.lang.annotation.Target;
 /**
  * Composite constraint for required, policy-compliant passwords.
  * <p>
- * Combines {@link NotBlank} and {@link StrongPassword} (default rules:
- * 8-72 chars, mixed case + digit + special). Sub-violations collapse into a
- * single {@code WEAK_PASSWORD} error.
+ * Combines {@link NotBlank} and {@link StrongPassword} (8-72 chars, mixed
+ * case and digit; a special character is not required). Sub-violations
+ * collapse into a single {@code WEAK_PASSWORD} error.
  */
 @Documented
 @NotBlank
-@StrongPassword
+@StrongPassword(requireSpecial = false)
 @ReportAsSingleViolation
 @Constraint(validatedBy = {})
 @Target({ ElementType.FIELD, ElementType.PARAMETER, ElementType.METHOD, ElementType.ANNOTATION_TYPE })

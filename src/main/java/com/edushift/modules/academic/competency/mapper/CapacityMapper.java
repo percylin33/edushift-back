@@ -27,7 +27,10 @@ public class CapacityMapper {
 				capacity.getDisplayOrder(),
 				capacity.getIsActive(),
 				capacity.getCreatedAt(),
-				capacity.getUpdatedAt()
+				capacity.getUpdatedAt(),
+				capacity.getSourceCatalogVersion(),
+				capacity.getSourceCatalogCode(),
+				capacity.getSourceContentStatus()
 		);
 	}
 

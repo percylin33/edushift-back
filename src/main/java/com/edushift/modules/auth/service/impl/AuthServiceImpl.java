@@ -22,6 +22,7 @@ import com.edushift.modules.tenants.entity.Tenant;
 import com.edushift.modules.tenants.entity.TenantStatus;
 import com.edushift.modules.tenants.exception.TenantNotFoundException;
 import com.edushift.modules.tenants.repository.TenantRepository;
+import com.edushift.modules.students.repository.StudentRepository;
 import com.edushift.shared.exception.UnauthorizedException;
 import com.edushift.shared.multitenancy.TenantContext;
 import java.nio.charset.StandardCharsets;
@@ -113,6 +114,7 @@ public class AuthServiceImpl implements AuthService {
 	private final LoginAttemptService loginAttemptService;
 	/** Sprint 17 / BE-17.2: MFA (TOTP) support. */
 	private final MfaService mfaService;
+	private final StudentRepository studentRepository;
 
 	public AuthServiceImpl(TenantRepository tenantRepository,
 	                       UserRepository userRepository,
@@ -123,7 +125,8 @@ public class AuthServiceImpl implements AuthService {
 	                       PlatformTransactionManager txManager,
 	                       AuditLogger auditLogger,
 	                       LoginAttemptService loginAttemptService,
-	                       MfaService mfaService) {
+	                       MfaService mfaService,
+	                       StudentRepository studentRepository) {
 		this.tenantRepository = tenantRepository;
 		this.userRepository = userRepository;
 		this.refreshTokenRepository = refreshTokenRepository;
@@ -134,6 +137,7 @@ public class AuthServiceImpl implements AuthService {
 		this.auditLogger = auditLogger;
 		this.loginAttemptService = loginAttemptService;
 		this.mfaService = mfaService;
+		this.studentRepository = studentRepository;
 	}
 
 	/**
@@ -593,6 +597,10 @@ public class AuthServiceImpl implements AuthService {
 		if (request.lastName() != null && !request.lastName().isBlank()) {
 			user.setLastName(request.lastName().trim());
 		}
+		if (request.secondLastName() != null) {
+			String secondLastName = request.secondLastName().trim();
+			user.setSecondLastName(secondLastName.isEmpty() ? null : secondLastName);
+		}
 		if (request.phone() != null) {
 			String phone = request.phone().trim();
 			user.setPhone(phone.isEmpty() ? null : phone);
@@ -618,7 +626,28 @@ public class AuthServiceImpl implements AuthService {
 			// Unchanged address that is still synthetic must stay SYNTHETIC
 			// (CRED-7 first-login: real email is optional).
 		}
+		if (studentRepository != null) studentRepository.findByUserId(user.getPublicUuid()).ifPresent(student -> {
+			String oldStudentFullName = student.fullName();
+			if (request.firstName() != null && !request.firstName().isBlank()) {
+				student.setFirstName(user.getFirstName());
+			}
+			if (request.lastName() != null && !request.lastName().isBlank()) {
+				student.setLastName(user.getLastName());
+			}
+			if (request.secondLastName() != null) {
+				student.setSecondLastName(user.getSecondLastName());
+			}
+			studentRepository.save(student);
+			if (!oldStudentFullName.equals(student.fullName())) {
+				auditLogger.log(AuditAction.UPDATE, "student", student.getPublicUuid(),
+						"Student legal name updated from self-service profile",
+						java.util.Map.of("linkedUserPublicUuid", user.getPublicUuid().toString()),
+						"students");
+			}
+		});
 		User saved = userRepository.saveAndFlush(user);
+		auditLogger.log(AuditAction.UPDATE, "user", saved.getPublicUuid(),
+				"User profile updated", java.util.Map.of("source", "self-service"), "auth");
 		return userMapper.toResponse(saved);
 	}
 

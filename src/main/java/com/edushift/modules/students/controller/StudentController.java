@@ -5,16 +5,20 @@ import com.edushift.modules.students.dto.InviteStudentResponse;
 import com.edushift.modules.students.dto.LinkStudentUserRequest;
 import com.edushift.modules.students.dto.StudentListFilters;
 import com.edushift.modules.students.dto.StudentListItem;
+import com.edushift.modules.students.dto.StudentPaymentRecipient;
 import com.edushift.modules.students.dto.StudentResponse;
 import com.edushift.modules.students.dto.UpdateStudentRequest;
 import com.edushift.modules.students.entity.EnrollmentStatus;
 import com.edushift.modules.students.service.StudentService;
 import com.edushift.shared.api.ApiResponse;
+import com.edushift.shared.security.LmsAuthorities;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Size;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
@@ -43,7 +47,8 @@ import org.springframework.web.bind.annotation.RestController;
  * <table>
  *   <caption>Student endpoints</caption>
  *   <tr><th>Method</th><th>Path</th><th>Auth</th><th>Returns</th></tr>
- *   <tr><td>GET   </td><td>/                      </td><td>TENANT_ADMIN</td><td>{@link Page}&lt;{@link StudentListItem}&gt;</td></tr>
+	 *   <tr><td>GET   </td><td>/                      </td><td>TENANT_ADMIN, STUDENTS:READ</td><td>{@link Page}&lt;{@link StudentListItem}&gt;</td></tr>
+	 *   <tr><td>GET   </td><td>/payment-recipients    </td><td>TENANT_ADMIN, PAYMENTS:ISSUE, LMS_PAYMENT_ADMIN</td><td>{@link Page}&lt;{@link StudentPaymentRecipient}&gt;</td></tr>
  *   <tr><td>GET   </td><td>/{publicUuid}          </td><td>TENANT_ADMIN</td><td>{@link StudentResponse}</td></tr>
  *   <tr><td>POST  </td><td>/                      </td><td>TENANT_ADMIN</td><td>{@link StudentResponse} (201)</td></tr>
  *   <tr><td>PUT   </td><td>/{publicUuid}          </td><td>TENANT_ADMIN</td><td>{@link StudentResponse}</td></tr>
@@ -69,9 +74,9 @@ public class StudentController {
 
 	@GetMapping
 	@SecurityRequirement(name = "bearerAuth")
-	@PreAuthorize("hasRole('TENANT_ADMIN')")
+	@PreAuthorize("hasRole('TENANT_ADMIN') or hasAuthority('STUDENTS:READ')")
 	@Operation(
-			summary = "List students in the current tenant (TENANT_ADMIN)",
+			summary = "List students in the current tenant (TENANT_ADMIN or STUDENTS:READ)",
 			description = "Paginated list with optional filters: case-insensitive "
 					+ "substring search across firstName/lastName/documentNumber, "
 					+ "exact enrollmentStatus, gradeLevelId (forward-compat, "
@@ -99,9 +104,33 @@ public class StudentController {
 		return ResponseEntity.ok(service.listStudents(filters, pageable));
 	}
 
+	@GetMapping("/payment-recipients")
+	@SecurityRequirement(name = "bearerAuth")
+	@PreAuthorize("hasRole('TENANT_ADMIN') "
+			+ "or hasAuthority('" + LmsAuthorities.PAYMENTS_ISSUE + "') "
+			+ "or hasAuthority('" + LmsAuthorities.LMS_PAYMENT_ADMIN + "')")
+	@Operation(
+			summary = "Search minimal student identities for invoice issuance",
+			description = "Returns only UUID, name and document identity; "
+					+ "the current tenant scope is enforced by the student service."
+	)
+	public ResponseEntity<Page<StudentPaymentRecipient>> listPaymentRecipients(
+			@Parameter(description = "Substring match on first name, last name or document number")
+			@RequestParam @NotBlank @Size(min = 2, max = 100) String search,
+			@PageableDefault(size = 15, sort = "lastName", direction = Sort.Direction.ASC)
+			Pageable pageable
+	) {
+		StudentListFilters filters = new StudentListFilters(search, null, null, null, null);
+		Page<StudentPaymentRecipient> recipients = service.listStudents(filters, pageable)
+				.map(student -> new StudentPaymentRecipient(
+						student.publicUuid(), student.documentType(),
+						student.documentNumber(), student.fullName()));
+		return ResponseEntity.ok(recipients);
+	}
+
 	@GetMapping("/{publicUuid}")
 	@SecurityRequirement(name = "bearerAuth")
-	@PreAuthorize("hasRole('TENANT_ADMIN')")
+	@PreAuthorize("hasRole('TENANT_ADMIN') or hasAuthority('STUDENTS:READ')")
 	@Operation(summary = "Get a student by public UUID (TENANT_ADMIN)")
 	public ResponseEntity<ApiResponse<StudentResponse>> getOne(@PathVariable UUID publicUuid) {
 		return ResponseEntity.ok(ApiResponse.ok(service.getStudent(publicUuid)));
@@ -110,7 +139,7 @@ public class StudentController {
 	@PostMapping
 	@ResponseStatus(HttpStatus.CREATED)
 	@SecurityRequirement(name = "bearerAuth")
-	@PreAuthorize("hasRole('TENANT_ADMIN')")
+	@PreAuthorize("hasRole('TENANT_ADMIN') or hasAuthority('STUDENTS:CREATE')")
 	@Operation(
 			summary = "Create a student (TENANT_ADMIN)",
 			description = "Returns 201 with the persisted projection. "
@@ -127,7 +156,7 @@ public class StudentController {
 
 	@PutMapping("/{publicUuid}")
 	@SecurityRequirement(name = "bearerAuth")
-	@PreAuthorize("hasRole('TENANT_ADMIN')")
+	@PreAuthorize("hasRole('TENANT_ADMIN') or hasAuthority('STUDENTS:UPDATE')")
 	@Operation(
 			summary = "Update a student (TENANT_ADMIN)",
 			description = "Partial-merge semantics: null fields = no change, "
@@ -144,7 +173,7 @@ public class StudentController {
 
 	@PostMapping("/{publicUuid}/link-user")
 	@SecurityRequirement(name = "bearerAuth")
-	@PreAuthorize("hasRole('TENANT_ADMIN')")
+	@PreAuthorize("hasRole('TENANT_ADMIN') or hasAuthority('USERS:PROVISION_STUDENT')")
 	@Operation(
 			summary = "Link a student to an existing user (TENANT_ADMIN)",
 			description = "User must be in the same tenant and have the STUDENT role. "
@@ -160,7 +189,7 @@ public class StudentController {
 
 	@PostMapping("/{publicUuid}/invite")
 	@SecurityRequirement(name = "bearerAuth")
-	@PreAuthorize("hasRole('TENANT_ADMIN')")
+	@PreAuthorize("hasRole('TENANT_ADMIN') or hasAuthority('USERS:PROVISION_STUDENT')")
 	@Operation(
 			summary = "Invite a student to claim a portal account (TENANT_ADMIN)",
 			description = "Creates a user_invitations row with role STUDENT and "

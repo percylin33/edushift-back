@@ -252,7 +252,8 @@ class TenantsTenantIsolationIT extends IntegrationTest {
 		@Test
 		@DisplayName("creates tenant + admin atomically and returns a session with TENANT_ADMIN")
 		void registerCreatesTenantAndAdminWithRole() throws Exception {
-			final String newSlug = "it-signup-" + UUID.randomUUID().toString().substring(0, 8);
+			final String newSlug = "itsignup"
+					+ UUID.randomUUID().toString().replace("-", "").substring(0, 8);
 			final String adminEmail = "owner@" + newSlug + ".test";
 			final String inviteToken = seedSchoolInvite(adminEmail);
 
@@ -295,7 +296,7 @@ class TenantsTenantIsolationIT extends IntegrationTest {
 		@Test
 		@DisplayName("rejects a duplicate slug with HTTP 409 TENANT_SLUG_TAKEN")
 		void registerRejectsDuplicateSlug() throws Exception {
-			final String taken = "it-dup-" + UUID.randomUUID().toString().substring(0, 8);
+			final String taken = "itdup" + UUID.randomUUID().toString().replace("-", "").substring(0, 8);
 			final String firstEmail = "first@" + taken + ".test";
 			final String secondEmail = "second@" + taken + ".test";
 

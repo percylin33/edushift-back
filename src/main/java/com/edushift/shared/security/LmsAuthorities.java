@@ -47,6 +47,11 @@ public final class LmsAuthorities {
 	// Mirrored in edushift-front/.../core/enums/permission.enum.ts
 	// (Permission.AiUse).
 	public static final String LMS_AI_GENERATE = "LMS_AI_GENERATE";
+	public static final String AI_TUTOR_USE = "AI:TUTOR_USE";
+	public static final String AI_TEACHER_USE = "AI:TEACHER_USE";
+	public static final String AI_FAMILY_USE = "AI:FAMILY_USE";
+	public static final String AI_SOURCE_MANAGE = "AI:SOURCE_MANAGE";
+	public static final String AI_PROMPT_MANAGE = "AI:PROMPT_MANAGE";
 
 	// Payments admin (Sprint 11 / BE-11.7). Gates the
 	// /api/v1/admin/payments/* endpoints (reconcile, refund, mark-paid-cash).
@@ -91,6 +96,19 @@ public final class LmsAuthorities {
 	// Family portal permissions
 	public static final String LMS_FAMILY_READ = "LMS_FAMILY_READ";
 	public static final String LMS_ATTENDANCE_JUSTIFY = "LMS_ATTENDANCE_JUSTIFY";
+	public static final String LMS_DISCLOSURE_READ = "LMS_DISCLOSURE_READ";
+	public static final String LMS_DISCLOSURE_MANAGE = "LMS_DISCLOSURE_MANAGE";
+	public static final String LMS_DISCLOSURE_SUBMIT = "LMS_DISCLOSURE_SUBMIT";
+	public static final String LMS_DISCLOSURE_REVIEW = "LMS_DISCLOSURE_REVIEW";
+	public static final String LMS_DISCLOSURE_PUBLISH = "LMS_DISCLOSURE_PUBLISH";
+	public static final String LMS_ADMISSION_MANAGE = "LMS_ADMISSION_MANAGE";
+	public static final String ADMISSIONS_INQUIRIES_READ = "ADMISSIONS_INQUIRIES_READ";
+	public static final String ADMISSIONS_INQUIRIES_MANAGE = "ADMISSIONS_INQUIRIES_MANAGE";
+	public static final String ADMISSIONS_APPLICATIONS_READ = "ADMISSIONS_APPLICATIONS_READ";
+	public static final String ADMISSIONS_APPLICATIONS_MANAGE = "ADMISSIONS_APPLICATIONS_MANAGE";
+	public static final String ADMISSIONS_DECIDE = "ADMISSIONS_DECIDE";
+	public static final String ADMISSIONS_OFFERS_MANAGE = "ADMISSIONS_OFFERS_MANAGE";
+	public static final String ADMISSIONS_ENROLL = "ADMISSIONS_ENROLL";
 
 	// Student workspace (DEBT-STUDENT-PRIVACY / Fase 1-3): the
 	// /api/v1/me/* endpoints are the canonical STUDENT-facing surface
@@ -112,6 +130,31 @@ public final class LmsAuthorities {
 	 * Granted to TENANT_ADMIN and STAFF by default.
 	 */
 	public static final String USERS_PROVISION_SECTION = "USERS_PROVISION_SECTION";
+
+	// Staff-facing operational permissions. These are deliberately scoped
+	// by action so a school can delegate daily work without granting the
+	// TENANT_ADMIN role.
+	public static final String STUDENTS_READ = "STUDENTS:READ";
+	public static final String STUDENTS_CREATE = "STUDENTS:CREATE";
+	public static final String STUDENTS_UPDATE = "STUDENTS:UPDATE";
+	public static final String USERS_PROVISION_STUDENT = "USERS:PROVISION_STUDENT";
+	public static final String GUARDIANS_READ = "GUARDIANS:READ";
+	public static final String GUARDIANS_MANAGE = "GUARDIANS:MANAGE";
+	public static final String USERS_PROVISION_GUARDIAN = "USERS:PROVISION_GUARDIAN";
+	public static final String ENROLLMENTS_READ = "ENROLLMENTS:READ";
+	public static final String ENROLLMENTS_MANAGE = "ENROLLMENTS:MANAGE";
+	public static final String ATTENDANCE_READ = "ATTENDANCE:READ";
+	public static final String ATTENDANCE_REGISTER = "ATTENDANCE:REGISTER";
+	public static final String ATTENDANCE_CORRECT = "ATTENDANCE:CORRECT";
+	public static final String PAYMENTS_READ = "PAYMENTS:READ";
+	public static final String PAYMENTS_RECEIVE = "PAYMENTS:RECEIVE";
+	public static final String PAYMENTS_RECONCILE = "PAYMENTS:RECONCILE";
+	public static final String PAYMENTS_ISSUE = "PAYMENTS:ISSUE";
+	public static final String PAYMENTS_REFUND = "PAYMENTS:REFUND";
+	public static final String PAYMENTS_EXPORT = "PAYMENTS:EXPORT";
+	public static final String PAYMENT_CONCEPTS_MANAGE = "PAYMENT_CONCEPTS:MANAGE";
+	public static final String ACADEMIC_READ = "ACADEMIC:READ";
+	public static final String REPORTS_READ = "REPORTS:READ";
 
 	private LmsAuthorities() {
 		// utility class

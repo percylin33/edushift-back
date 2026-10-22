@@ -1,12 +1,14 @@
 package com.edushift.modules.admin.auth.controller;
 
 import com.edushift.modules.admin.auth.AdminMfaOnboardingService;
+import com.edushift.modules.auth.controller.CookieHelper;
 import com.edushift.modules.admin.auth.AdminMfaOnboardingService.DevEnrolmentResult;
 import com.edushift.modules.admin.auth.dto.AdminDevMfaCompleteResponse;
 import com.edushift.shared.api.ApiResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import lombok.RequiredArgsConstructor;
@@ -15,6 +17,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Profile;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
+import org.springframework.http.ResponseCookie;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestHeader;
@@ -51,8 +54,10 @@ import org.springframework.web.bind.annotation.RestController;
 		description = "Dev-only MFA bypass — bean only registered in dev/local profiles")
 @RequiredArgsConstructor
 public class AdminDevMfaController {
+	private static final long REFRESH_COOKIE_MAX_AGE_SEC = 7L * 24 * 60 * 60;
 
 	private final AdminMfaOnboardingService onboardingService;
+	private final CookieHelper cookieHelper;
 
 	@Value("${edushift.admin.dev-bypass.code:dev-bypass}")
 	private String expectedDevCode;
@@ -73,7 +78,8 @@ public class AdminDevMfaController {
 	public ResponseEntity<ApiResponse<AdminDevMfaCompleteResponse>> completeMfa(
 			@RequestHeader(value = "Authorization", required = false) String authHeader,
 			@RequestHeader(value = "X-Dev-Code", required = false) String devCode,
-			HttpServletRequest httpRequest) {
+			HttpServletRequest httpRequest,
+			HttpServletResponse httpResponse) {
 
 		String ip = resolveClientIp(httpRequest);
 
@@ -94,6 +100,12 @@ public class AdminDevMfaController {
 
 		DevEnrolmentResult result = onboardingService.completeEnrolmentDev(
 				onboardingToken, devCode, ip);
+		ResponseCookie accessCookie = cookieHelper.createAccessTokenCookie(
+				result.session().accessToken(), result.session().expiresInSec());
+		ResponseCookie refreshCookie = cookieHelper.createRefreshTokenCookie(
+				result.session().refreshToken(), REFRESH_COOKIE_MAX_AGE_SEC);
+		httpResponse.addHeader("Set-Cookie", accessCookie.toString());
+		httpResponse.addHeader("Set-Cookie", refreshCookie.toString());
 		return ResponseEntity.ok(ApiResponse.ok(new AdminDevMfaCompleteResponse(
 				result.session(), result.bootstrap())));
 	}

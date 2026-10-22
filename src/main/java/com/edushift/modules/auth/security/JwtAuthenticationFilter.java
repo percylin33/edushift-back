@@ -93,17 +93,27 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 	}
 
 	private static String extractBearer(HttpServletRequest request) {
+		// Explicit stop endpoint authenticates with the preserved SUPER_ADMIN cookie.
+		if (request.getRequestURI().endsWith("/admin/impersonate/stop")) {
+			String adminCookie = getCookieValue(request, "edushift_access_token");
+			return adminCookie == null || adminCookie.isEmpty() ? null : adminCookie;
+		}
+
+		// During support mode use only the short-lived impersonation cookie.
+		// This prevents a stale Authorization header from silently reverting
+		// requests to the administrator's identity.
+		if ("1".equals(request.getHeader("X-Admin-Impersonation"))) {
+			String impersonationCookie = getCookieValue(request, "edushift_impersonation_access_token");
+			return impersonationCookie == null || impersonationCookie.isEmpty()
+					? null : impersonationCookie;
+		}
+
 		// SECURITY FIX: Try Authorization header first (backward compat with Bearer tokens)
 		String header = request.getHeader(HttpHeaders.AUTHORIZATION);
-		if (header != null) {
-			// Bearer scheme is case-insensitive per RFC 6750 §2.1.
-			if (header.length() > BEARER_PREFIX.length()
-					&& header.regionMatches(true, 0, BEARER_PREFIX, 0, BEARER_PREFIX.length())) {
-				String token = header.substring(BEARER_PREFIX.length()).trim();
-				if (!token.isEmpty()) {
-					return token;
-				}
-			}
+		if (header != null && header.length() > BEARER_PREFIX.length()
+				&& header.regionMatches(true, 0, BEARER_PREFIX, 0, BEARER_PREFIX.length())) {
+			String token = header.substring(BEARER_PREFIX.length()).trim();
+			if (!token.isEmpty()) return token;
 		}
 
 		// SECURITY FIX: Try httpOnly cookie (primary method after migration)
@@ -143,9 +153,21 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 			return;
 		}
 
-		if (claims.type() != TokenType.ACCESS) {
+		boolean impersonationToken = claims.type() == TokenType.IMPERSONATION;
+		if (claims.type() != TokenType.ACCESS && !impersonationToken) {
 			log.debug("[auth] reject bearer ({}): not an access token (type={})",
 					request.getRequestURI(), claims.type());
+			return;
+		}
+		if (impersonationToken && (!"1".equals(request.getHeader("X-Admin-Impersonation"))
+				|| claims.impersonatedBy() == null
+				|| claims.tenantId() == null
+				|| com.edushift.infrastructure.multitenancy.TenantIdResolver.SUPER_ADMIN_SENTINEL
+						.equals(claims.tenantId())
+				|| claims.roles() == null
+				|| claims.roles().contains("SUPER_ADMIN"))) {
+			log.debug("[auth] reject impersonation bearer ({}): invalid support-token context",
+					request.getRequestURI());
 			return;
 		}
 
@@ -174,6 +196,11 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 					publicUuid, request.getRequestURI());
 			return;
 		}
+		if (impersonationToken && !claims.tenantId().equals(user.getTenantId())) {
+			log.warn("[auth] rejecting impersonation bearer with tenant mismatch: publicUuid={}, path={}",
+					publicUuid, request.getRequestURI());
+			return;
+		}
 		if (user.getStatus() != null && !user.getStatus().canAuthenticate()) {
 			log.warn("[auth] rejecting bearer for inactive user: publicUuid={}, status={}, path={}",
 					publicUuid, user.getStatus(), request.getRequestURI());
@@ -182,7 +209,8 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
 		List<GrantedAuthority> authorities = mapAuthorities(
 				claims.tenantId(),
-				claims.roles());
+				claims.roles(),
+				user.getId());
 		JwtAuthenticatedPrincipal principal = new JwtAuthenticatedPrincipal(
 				publicUuid,
 				claims.tenantId() != null ? claims.tenantId() : com.edushift.infrastructure.multitenancy.TenantIdResolver.SUPER_ADMIN_SENTINEL,
@@ -232,7 +260,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 		}
 	}
 
-	private List<GrantedAuthority> mapAuthorities(UUID tenantId, Set<String> roles) {
+	private List<GrantedAuthority> mapAuthorities(UUID tenantId, Set<String> roles, UUID internalUserId) {
 		if (roles == null || roles.isEmpty()) {
 			return List.of();
 		}
@@ -257,7 +285,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 		}
 		// Tenant-aware resolution. SUPER_ADMIN bypasses overrides anyway
 		// (the mapper detects it via the role itself).
-		authorities.addAll(lmsRoleAuthorityMapper.resolveFor(tenantId, parsedRoles));
+		authorities.addAll(lmsRoleAuthorityMapper.resolveFor(tenantId, internalUserId, parsedRoles));
 		return authorities.stream()
 				.<GrantedAuthority>map(SimpleGrantedAuthority::new)
 				.toList();

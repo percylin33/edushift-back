@@ -56,6 +56,7 @@ public class ApplicationSheetGeneratorService {
 		UUID tenantId = TenantContext.currentRequired();
 		UUID userId = currentUser.currentUserId().orElse(null);
 		LlmRequest llmRequest = promptBuilder.build(request);
+		quotaService.reserveForRequest(llmRequest);
 
 		AiGeneration gen = new AiGeneration();
 		gen.setPublicUuid(UUID.randomUUID());

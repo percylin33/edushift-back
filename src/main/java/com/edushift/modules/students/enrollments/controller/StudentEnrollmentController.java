@@ -62,7 +62,7 @@ public class StudentEnrollmentController {
 	@PostMapping("/students/{studentUuid}/enrollments")
 	@ResponseStatus(HttpStatus.CREATED)
 	@SecurityRequirement(name = "bearerAuth")
-	@PreAuthorize("hasRole('TENANT_ADMIN')")
+	@PreAuthorize("hasRole('TENANT_ADMIN') or hasAuthority('ENROLLMENTS:MANAGE')")
 	@Operation(
 			summary = "Enroll a student in a section for a given year",
 			description = "Validations (in order): section.year must equal "
@@ -82,7 +82,7 @@ public class StudentEnrollmentController {
 
 	@GetMapping("/students/{studentUuid}/enrollments")
 	@SecurityRequirement(name = "bearerAuth")
-	@PreAuthorize("hasRole('TENANT_ADMIN')")
+	@PreAuthorize("hasRole('TENANT_ADMIN') or hasAuthority('ENROLLMENTS:READ')")
 	@Operation(
 			summary = "List the full enrollment history of a student",
 			description = "Returns ACTIVE and terminal rows ordered by "
@@ -100,7 +100,7 @@ public class StudentEnrollmentController {
 
 	@PatchMapping("/enrollments/{publicUuid}")
 	@SecurityRequirement(name = "bearerAuth")
-	@PreAuthorize("hasRole('TENANT_ADMIN')")
+	@PreAuthorize("hasRole('TENANT_ADMIN') or hasAuthority('ENROLLMENTS:MANAGE')")
 	@Operation(
 			summary = "Update enrolledAt on an ACTIVE enrollment",
 			description = "enrolledAt must fall inside the academic year. "
@@ -121,7 +121,7 @@ public class StudentEnrollmentController {
 
 	@PostMapping("/enrollments/{publicUuid}/withdraw")
 	@SecurityRequirement(name = "bearerAuth")
-	@PreAuthorize("hasRole('TENANT_ADMIN')")
+	@PreAuthorize("hasRole('TENANT_ADMIN') or hasAuthority('ENROLLMENTS:MANAGE')")
 	@Operation(
 			summary = "Soft-end an enrollment",
 			description = "Transitions the row to WITHDRAWN, TRANSFERRED or "
@@ -144,7 +144,7 @@ public class StudentEnrollmentController {
 
 	@GetMapping("/academic/sections/{sectionUuid}/students")
 	@SecurityRequirement(name = "bearerAuth")
-	@PreAuthorize("hasRole('TENANT_ADMIN')")
+	@PreAuthorize("hasRole('TENANT_ADMIN') or hasAuthority('ENROLLMENTS:READ')")
 	@Operation(
 			summary = "List the currently active students of a section",
 			description = "Roster ordered alphabetically by last name. Only "

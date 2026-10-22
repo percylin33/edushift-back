@@ -2,6 +2,11 @@ package com.edushift.modules.admin.invoicing;
 
 import com.edushift.modules.admin.invoicing.B2BInvoice.B2BInvoiceStatus;
 import com.edushift.shared.api.ApiResponse;
+import com.edushift.infrastructure.multitenancy.TenantIdResolver;
+import com.edushift.modules.tenants.entity.Tenant;
+import com.edushift.modules.tenants.repository.TenantRepository;
+import com.edushift.shared.exception.ResourceNotFoundException;
+import com.edushift.shared.multitenancy.TenantContext;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import java.util.List;
@@ -27,6 +32,7 @@ import org.springframework.web.bind.annotation.RestController;
 public class B2BInvoiceController {
 
     private final B2BInvoiceService invoiceService;
+    private final TenantRepository tenantRepository;
 
     @GetMapping("/invoices")
     @Operation(summary = "List invoices (paginated)")
@@ -39,8 +45,15 @@ public class B2BInvoiceController {
 
     @GetMapping("/tenants/{uuid}/invoices")
     @Operation(summary = "List invoices for a tenant")
-    public ApiResponse<List<InvoiceResponse>> listByTenant(@PathVariable("uuid") UUID tenantId) {
-        return ApiResponse.ok(invoiceService.listByTenant(tenantId));
+    public ApiResponse<List<InvoiceResponse>> listByTenant(@PathVariable("uuid") UUID publicUuid) {
+        List<InvoiceResponse> invoices = TenantContext.runAs(
+                TenantIdResolver.SUPER_ADMIN_SENTINEL,
+                () -> {
+                    Tenant tenant = tenantRepository.findByPublicUuid(publicUuid)
+                            .orElseThrow(() -> new ResourceNotFoundException("tenants/" + publicUuid));
+                    return invoiceService.listByTenant(tenant.getId());
+                });
+        return ApiResponse.ok(invoices);
     }
 
     @GetMapping("/invoices/{uuid}")

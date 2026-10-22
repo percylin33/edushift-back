@@ -9,6 +9,7 @@ import com.edushift.modules.academic.competency.dto.UpdateCompetencyRequest;
 import com.edushift.modules.academic.competency.entity.Capacity;
 import com.edushift.modules.academic.competency.entity.Competency;
 import com.edushift.modules.academic.competency.entity.CompetencyOrigin;
+import com.edushift.modules.academic.competency.entity.CurriculumSourceContentStatus;
 import com.edushift.modules.academic.competency.mapper.CompetencyMapper;
 import com.edushift.modules.academic.competency.repository.CapacityRepository;
 import com.edushift.modules.academic.competency.repository.CompetencyRepository;
@@ -162,6 +163,7 @@ public class CompetencyServiceImpl implements CompetencyService {
 		}
 
 		mapper.applyUpdate(request, competency);
+		markAsInstitutionalAdaptation(competency);
 
 		try {
 			Competency saved = competencyRepository.saveAndFlush(competency);
@@ -198,6 +200,11 @@ public class CompetencyServiceImpl implements CompetencyService {
 						"Competency " + item.publicUuid()
 								+ " does not belong to course '"
 								+ course.getCode() + "'");
+			}
+			if (target.getSourceCatalogCode() != null
+					&& !target.getDisplayOrder().equals(item.displayOrder())) {
+				target.setSourceContentStatus(
+						CurriculumSourceContentStatus.INSTITUTIONAL_ADAPTATION);
 			}
 		}
 
@@ -329,6 +336,13 @@ public class CompetencyServiceImpl implements CompetencyService {
 	private Competency loadCompetency(UUID publicUuid) {
 		return competencyRepository.findByPublicUuid(publicUuid)
 				.orElseThrow(() -> new ResourceNotFoundException("Competency", publicUuid));
+	}
+
+	private static void markAsInstitutionalAdaptation(Competency competency) {
+		if (competency.getSourceCatalogCode() != null) {
+			competency.setSourceContentStatus(
+					CurriculumSourceContentStatus.INSTITUTIONAL_ADAPTATION);
+		}
 	}
 
 	private void ensureCodeAvailable(Course course, String code, UUID excludeInternalId) {

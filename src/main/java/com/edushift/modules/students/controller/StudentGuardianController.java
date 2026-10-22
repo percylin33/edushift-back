@@ -59,7 +59,7 @@ public class StudentGuardianController {
 
 	@GetMapping
 	@SecurityRequirement(name = "bearerAuth")
-	@PreAuthorize("hasRole('TENANT_ADMIN')")
+	@PreAuthorize("hasRole('TENANT_ADMIN') or hasAuthority('GUARDIANS:READ')")
 	@Operation(
 			summary = "List guardians of a student (TENANT_ADMIN)",
 			description = "Returns each active link with the merged guardian "
@@ -75,7 +75,7 @@ public class StudentGuardianController {
 	@PostMapping
 	@ResponseStatus(HttpStatus.CREATED)
 	@SecurityRequirement(name = "bearerAuth")
-	@PreAuthorize("hasRole('TENANT_ADMIN')")
+	@PreAuthorize("hasRole('TENANT_ADMIN') or hasAuthority('GUARDIANS:MANAGE')")
 	@Operation(
 			summary = "Add (or link) a guardian to a student (TENANT_ADMIN)",
 			description = "Looks up an existing guardian by document; reuses it "
@@ -94,7 +94,7 @@ public class StudentGuardianController {
 
 	@PutMapping("/{guardianPublicUuid}")
 	@SecurityRequirement(name = "bearerAuth")
-	@PreAuthorize("hasRole('TENANT_ADMIN')")
+	@PreAuthorize("hasRole('TENANT_ADMIN') or hasAuthority('GUARDIANS:MANAGE')")
 	@Operation(
 			summary = "Edit the relationship metadata (TENANT_ADMIN)",
 			description = "Updates only the link fields (relationship, "
@@ -114,7 +114,7 @@ public class StudentGuardianController {
 
 	@PostMapping("/{guardianPublicUuid}/link-user")
 	@SecurityRequirement(name = "bearerAuth")
-	@PreAuthorize("hasRole('TENANT_ADMIN')")
+	@PreAuthorize("hasRole('TENANT_ADMIN') or hasAuthority('USERS:PROVISION_GUARDIAN')")
 	@Operation(
 			summary = "Link a guardian to an existing PARENT user (TENANT_ADMIN)",
 			description = "Rescue path after inviting from Usuarios. Errors: "
@@ -132,7 +132,7 @@ public class StudentGuardianController {
 
 	@PostMapping("/{guardianPublicUuid}/invite")
 	@SecurityRequirement(name = "bearerAuth")
-	@PreAuthorize("hasRole('TENANT_ADMIN')")
+	@PreAuthorize("hasRole('TENANT_ADMIN') or hasAuthority('USERS:PROVISION_GUARDIAN')")
 	@Operation(
 			summary = "Invite a guardian to claim a PARENT portal (TENANT_ADMIN)",
 			description = "Creates a user_invitations row with role PARENT and "
@@ -151,7 +151,7 @@ public class StudentGuardianController {
 	@DeleteMapping("/{guardianPublicUuid}")
 	@ResponseStatus(HttpStatus.NO_CONTENT)
 	@SecurityRequirement(name = "bearerAuth")
-	@PreAuthorize("hasRole('TENANT_ADMIN')")
+	@PreAuthorize("hasRole('TENANT_ADMIN') or hasAuthority('GUARDIANS:MANAGE')")
 	@Operation(
 			summary = "Unlink a guardian from a student (TENANT_ADMIN)",
 			description = "Soft-delete on the link only — the guardian row is "

@@ -1,6 +1,7 @@
 package com.edushift.modules.payments.dto;
 
 import com.edushift.modules.payments.entity.Invoice;
+import com.edushift.modules.students.entity.DocumentType;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
@@ -27,8 +28,11 @@ public record InvoiceResponse(
         String evidenceRejectionReason,
         long moraCents,
         boolean moraExempt,
-        List<InvoiceItemResponse> items
+        List<InvoiceItemResponse> items,
+        StudentIdentity studentIdentity
 ) {
+	public record StudentIdentity(String fullName, DocumentType documentType, String documentNumber) {}
+
     public static InvoiceResponse from(Invoice i, List<InvoiceItemResponse> items) {
         return new InvoiceResponse(
                 i.getPublicUuid(), i.getSubscriptionId(), i.getStudentId(),
@@ -42,7 +46,17 @@ public record InvoiceResponse(
                 i.getEvidenceRejectionReason(),
                 i.getMoraCents(),
                 i.isMoraExempt(),
-                items
+                items,
+                null
         );
     }
+
+	public InvoiceResponse withStudentIdentity(StudentIdentity identity) {
+		return new InvoiceResponse(
+				publicUuid, subscriptionId, studentId, guardianUserId, periodLabel,
+				currency, subtotalCents, discountCents, taxCents, totalCents,
+				status, issuedAt, dueAt, paidAt, notes, evidenceFilePublicUuid,
+				evidenceSubmittedAt, evidenceNotes, evidenceRejectionReason,
+				moraCents, moraExempt, items, identity);
+	}
 }

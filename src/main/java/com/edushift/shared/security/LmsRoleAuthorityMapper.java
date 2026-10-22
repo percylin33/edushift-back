@@ -2,6 +2,7 @@ package com.edushift.shared.security;
 
 import com.edushift.modules.auth.entity.UserRole;
 import com.edushift.modules.tenants.service.PermissionOverrideService;
+import com.edushift.modules.tenants.service.StaffUserAccessService;
 import java.util.Collection;
 import java.util.EnumMap;
 import java.util.LinkedHashSet;
@@ -9,6 +10,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import org.springframework.context.annotation.Lazy;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 /**
@@ -64,11 +66,37 @@ public class LmsRoleAuthorityMapper {
 				LmsAuthorities.LMS_QUIZ_GRADE,
 				LmsAuthorities.LMS_QUIZ_SUBMIT,
 				LmsAuthorities.LMS_AI_GENERATE,
+				LmsAuthorities.AI_TEACHER_USE,
+				LmsAuthorities.AI_SOURCE_MANAGE,
+				LmsAuthorities.AI_PROMPT_MANAGE,
 				LmsAuthorities.LMS_PAYMENT_ADMIN,
 				LmsAuthorities.LMS_ANNOUNCEMENTS_CREATE,
 				LmsAuthorities.LMS_NOTIFICATIONS_MANAGE,
 				LmsAuthorities.LMS_AI_USAGE,
-				LmsAuthorities.USERS_PROVISION_SECTION
+				LmsAuthorities.LMS_DISCLOSURE_READ,
+				LmsAuthorities.LMS_DISCLOSURE_REVIEW,
+				LmsAuthorities.LMS_DISCLOSURE_PUBLISH,
+				LmsAuthorities.LMS_ADMISSION_MANAGE,
+				LmsAuthorities.USERS_PROVISION_SECTION,
+				LmsAuthorities.STUDENTS_READ,
+				LmsAuthorities.STUDENTS_CREATE,
+				LmsAuthorities.STUDENTS_UPDATE,
+				LmsAuthorities.USERS_PROVISION_STUDENT,
+				LmsAuthorities.GUARDIANS_READ,
+				LmsAuthorities.GUARDIANS_MANAGE,
+				LmsAuthorities.USERS_PROVISION_GUARDIAN,
+				LmsAuthorities.ENROLLMENTS_READ,
+				LmsAuthorities.ENROLLMENTS_MANAGE,
+				LmsAuthorities.ATTENDANCE_READ,
+				LmsAuthorities.ATTENDANCE_REGISTER,
+				LmsAuthorities.ATTENDANCE_CORRECT,
+				LmsAuthorities.PAYMENTS_READ,
+				LmsAuthorities.PAYMENTS_RECEIVE,
+				LmsAuthorities.PAYMENTS_RECONCILE,
+				LmsAuthorities.PAYMENTS_REFUND,
+				LmsAuthorities.PAYMENTS_EXPORT,
+				LmsAuthorities.ACADEMIC_READ
+
 		));
 		DEFAULTS.put(UserRole.TEACHER, Set.of(
 				LmsAuthorities.LMS_TASK_READ,
@@ -81,7 +109,11 @@ public class LmsRoleAuthorityMapper {
 				LmsAuthorities.LMS_QUIZ_CREATE,
 				LmsAuthorities.LMS_QUIZ_GRADE,
 				LmsAuthorities.LMS_AI_GENERATE,
-				LmsAuthorities.LMS_ANNOUNCEMENTS_CREATE_OWN
+				LmsAuthorities.AI_TEACHER_USE,
+				LmsAuthorities.LMS_ANNOUNCEMENTS_CREATE_OWN,
+				LmsAuthorities.ATTENDANCE_READ,
+				LmsAuthorities.ATTENDANCE_REGISTER,
+				LmsAuthorities.ATTENDANCE_CORRECT
 		));
 		DEFAULTS.put(UserRole.STUDENT, Set.of(
 				LmsAuthorities.LMS_TASK_READ,
@@ -98,7 +130,8 @@ public class LmsRoleAuthorityMapper {
 				LmsAuthorities.ME_ATTENDANCE_JUSTIFY,
 				LmsAuthorities.ME_QR_READ,
 				LmsAuthorities.ME_PAYMENTS_READ,
-				LmsAuthorities.ME_PAYMENTS_CHECKOUT
+				LmsAuthorities.ME_PAYMENTS_CHECKOUT,
+				LmsAuthorities.AI_TUTOR_USE
 		));
 		DEFAULTS.put(UserRole.PARENT, Set.of(
 				LmsAuthorities.LMS_FAMILY_READ,
@@ -107,23 +140,32 @@ public class LmsRoleAuthorityMapper {
 				LmsAuthorities.LMS_TASK_SUBMIT,
 				LmsAuthorities.LMS_MATERIAL_READ,
 				LmsAuthorities.LMS_QUIZ_READ,
-				LmsAuthorities.LMS_QUIZ_SUBMIT
+				LmsAuthorities.LMS_QUIZ_SUBMIT,
+				LmsAuthorities.AI_FAMILY_USE
 		));
 		DEFAULTS.put(UserRole.STAFF, Set.of(
 				LmsAuthorities.LMS_TASK_READ,
 				LmsAuthorities.LMS_MATERIAL_READ,
 				LmsAuthorities.LMS_QUIZ_READ,
-				LmsAuthorities.LMS_PAYMENT_ADMIN,
-				LmsAuthorities.USERS_PROVISION_SECTION
+				LmsAuthorities.LMS_DISCLOSURE_READ
 		));
 		// SUPER_ADMIN intentionally not in DEFAULTS — its authority set is
 		// assembled inline in resolveFor() because it bypasses tenant overrides.
 	}
 
 	private final PermissionOverrideService overrideService;
+	private final StaffUserAccessService staffUserAccessService;
 
 	public LmsRoleAuthorityMapper(@Lazy PermissionOverrideService overrideService) {
+		this(overrideService, null);
+	}
+
+	@Autowired
+	public LmsRoleAuthorityMapper(
+			@Lazy PermissionOverrideService overrideService,
+			@Lazy StaffUserAccessService staffUserAccessService) {
 		this.overrideService = overrideService;
+		this.staffUserAccessService = staffUserAccessService;
 	}
 
 	/**
@@ -137,17 +179,44 @@ public class LmsRoleAuthorityMapper {
 	 * @param roles    the user's coarse roles.
 	 */
 	public Set<String> resolveFor(UUID tenantId, Collection<UserRole> roles) {
+		return resolveFor(tenantId, null, roles);
+	}
+
+	/** Resolves role permissions plus individual staff profiles and overrides. */
+	public Set<String> resolveFor(UUID tenantId, UUID internalUserId, Collection<UserRole> roles) {
 		if (roles == null || roles.isEmpty()) {
 			return Set.of();
 		}
 		Set<String> out = new LinkedHashSet<>();
+		boolean hasStaffRole = false;
 		for (UserRole role : roles) {
 			if (role == null) continue;
 			if (role == UserRole.SUPER_ADMIN) {
 				out.addAll(superAdminAuthorities());
+			} else if (role == UserRole.STAFF) {
+				hasStaffRole = true;
+				// Resolve STAFF separately so an individual STAFF denial never
+				// removes an authority independently granted by another role.
+				if (tenantId == null || internalUserId == null) {
+					out.addAll(resolveForNonSuper(tenantId, role));
+				}
 			} else {
 				out.addAll(resolveForNonSuper(tenantId, role));
 			}
+		}
+		if (hasStaffRole && tenantId != null && internalUserId != null) {
+			Set<String> staffAuthorities = new LinkedHashSet<>(
+					resolveForNonSuper(tenantId, UserRole.STAFF));
+			if (staffUserAccessService != null) {
+				staffAuthorities.addAll(staffUserAccessService
+						.profileAuthoritiesFor(tenantId, internalUserId));
+				staffUserAccessService.overridesFor(tenantId, internalUserId)
+						.forEach((authority, granted) -> {
+							if (granted) staffAuthorities.add(authority);
+							else staffAuthorities.remove(authority);
+						});
+			}
+			out.addAll(staffAuthorities);
 		}
 		return out;
 	}
@@ -204,10 +273,18 @@ public class LmsRoleAuthorityMapper {
 				LmsAuthorities.LMS_QUIZ_GRADE,
 				LmsAuthorities.LMS_QUIZ_SUBMIT,
 				LmsAuthorities.LMS_AI_GENERATE,
+				LmsAuthorities.AI_TEACHER_USE,
+				LmsAuthorities.AI_SOURCE_MANAGE,
+				LmsAuthorities.AI_PROMPT_MANAGE,
 				LmsAuthorities.LMS_AI_USAGE,
 				LmsAuthorities.LMS_PAYMENT_ADMIN,
 				LmsAuthorities.LMS_ANNOUNCEMENTS_CREATE,
-				LmsAuthorities.LMS_NOTIFICATIONS_MANAGE
+				LmsAuthorities.LMS_NOTIFICATIONS_MANAGE,
+				LmsAuthorities.LMS_DISCLOSURE_READ,
+				LmsAuthorities.LMS_DISCLOSURE_MANAGE,
+				LmsAuthorities.LMS_DISCLOSURE_REVIEW,
+				LmsAuthorities.LMS_DISCLOSURE_PUBLISH,
+				LmsAuthorities.LMS_ADMISSION_MANAGE
 		);
 	}
 

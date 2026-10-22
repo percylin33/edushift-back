@@ -2,6 +2,10 @@ package com.edushift.modules.students.listener;
 
 import com.edushift.modules.students.entity.Student;
 import com.edushift.modules.students.repository.StudentRepository;
+import com.edushift.modules.auth.entity.User;
+import com.edushift.modules.auth.repository.UserRepository;
+import com.edushift.modules.audit.events.AuditAction;
+import com.edushift.modules.audit.service.AuditLogger;
 import com.edushift.modules.students.service.impl.StudentServiceImpl;
 import com.edushift.modules.users.events.InvitationAcceptedEvent;
 import java.util.UUID;
@@ -21,6 +25,8 @@ import org.springframework.stereotype.Component;
 public class StudentInvitationListener {
 
 	private final StudentRepository studentRepository;
+	private final UserRepository userRepository;
+	private final AuditLogger auditLogger;
 
 	@EventListener
 	public void onInvitationAccepted(InvitationAcceptedEvent event) {
@@ -52,6 +58,19 @@ public class StudentInvitationListener {
 
 		student.setUserId(event.userPublicUuid());
 		studentRepository.save(student);
+		userRepository.findByPublicUuid(event.userPublicUuid()).ifPresent(user -> {
+			String oldFullName = user.fullName();
+			user.setFirstName(student.getFirstName());
+			user.setLastName(student.getLastName());
+			user.setSecondLastName(student.getSecondLastName());
+			userRepository.save(user);
+			if (!oldFullName.equals(user.fullName())) {
+				auditLogger.log(AuditAction.UPDATE, "user", user.getPublicUuid(),
+						"Account identity synchronized from student during invitation acceptance",
+						java.util.Map.of("studentPublicUuid", student.getPublicUuid().toString()),
+						"students");
+			}
+		});
 		log.info("[students.invitations] linked student={} to user={} via invitation={}",
 				student.getPublicUuid(), event.userPublicUuid(),
 				event.invitationPublicUuid());

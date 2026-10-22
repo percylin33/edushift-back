@@ -350,7 +350,7 @@ class JwtAuthenticationFilterTest {
 	                                 String tenantSlug, Set<String> roles) {
 		Instant now = Instant.now();
 		return new JwtClaims(subject, tenantId, tenantSlug, roles, type, UUID.randomUUID(), now,
-				now.plusSeconds(900));
+				now.plusSeconds(900), null);
 	}
 
 	private static void assertNoAuthSet() {

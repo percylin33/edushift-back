@@ -13,21 +13,27 @@
 FROM eclipse-temurin:21-jdk-jammy AS build
 WORKDIR /workspace
 
-# Cache dependencies separately from source for faster incremental builds.
+# Resolve dependencies during the actual package lifecycle. Running
+# dependency:go-offline first duplicates Maven resolution and may stall on
+# plugins not needed by the package lifecycle.
 COPY pom.xml ./
 COPY .mvn .mvn
 COPY mvnw ./
-RUN chmod +x mvnw && ./mvnw -B -ntp dependency:go-offline
-
-# Now copy source and build.
 # CACHE_BUST: bump or pass --build-arg CACHE_BUST=$(date +%s) / Render "Clear build cache"
 # so source changes are never skipped by a stale layer cache.
 ARG CACHE_BUST=2026-08-25-paas-oom
 COPY src ./src
-RUN echo "cache-bust=${CACHE_BUST}" && ./mvnw -B -ntp -DskipTests package
+RUN chmod +x mvnw && echo "cache-bust=${CACHE_BUST}" && ./mvnw -B -ntp -Dmaven.test.skip=true package
 
 # ---- Stage 2: runtime ----
 FROM eclipse-temurin:21-jre-jammy AS runtime
+
+# OCR fallback for scanned pages in RAG PDFs. Spanish and English language
+# data are installed explicitly so runtime behavior does not depend on PATH
+# or packages from the host machine.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends tesseract-ocr tesseract-ocr-spa tesseract-ocr-eng \
+ && rm -rf /var/lib/apt/lists/*
 
 # Run as non-root (defence in depth; ECS/Fargate also has its own UID).
 RUN groupadd --system --gid 1001 edushift \

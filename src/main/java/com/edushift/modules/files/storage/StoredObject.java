@@ -37,8 +37,11 @@ public record StoredObject(
 			"branding",
 			"attendance",
 			"schedule-bootstrap",
+			"ai-sources",
+			"ai-global-sources",
 			"reports",
-			"payments");
+			"payments",
+			"disclosures");
 
 
 	private static final DateTimeFormatter YEAR = DateTimeFormatter.ofPattern("yyyy")

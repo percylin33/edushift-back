@@ -86,15 +86,18 @@ public class DayScheduleTemplateServiceImpl implements DayScheduleTemplateServic
 		}
 
 		DayScheduleTemplate template = templateMapper.fromCreate(request, year, level, grade);
+		DayScheduleTemplate saved;
 		try {
-			DayScheduleTemplate saved = templateRepository.saveAndFlush(template);
-			log.info("[schedule.day-template] created -- uuid={} year={} level={}",
-					saved.getPublicUuid(), year.getPublicUuid(), level.getCode());
-			return toResponseWithBlocks(saved);
+			saved = templateRepository.saveAndFlush(template);
 		} catch (DataIntegrityViolationException ex) {
 			throw new ConflictException("DAY_TEMPLATE_SCOPE_EXISTS",
 					"A template already exists for this year/level/grade/shift scope");
 		}
+		ensureDefaultBlocks(saved, level.getCode());
+		saved = templateRepository.saveAndFlush(saved);
+		log.info("[schedule.day-template] created -- uuid={} year={} level={}",
+				saved.getPublicUuid(), year.getPublicUuid(), level.getCode());
+		return toResponseWithBlocks(saved);
 	}
 
 	@Override
@@ -252,10 +255,12 @@ public class DayScheduleTemplateServiceImpl implements DayScheduleTemplateServic
 					request.lunch().startTime(), request.lunch().endTime(),
 					"DAY_PLAN_LUNCH_INVALID");
 		}
+		validatePlanIntervals(request);
 
 		for (DayScheduleBlock block : blockRepository.findByTemplateOrdered(template)) {
 			DayBlockType type = block.getBlockType();
-			if (type == DayBlockType.RECESS || type == DayBlockType.LUNCH) {
+			if (type == DayBlockType.RECESS || type == DayBlockType.LUNCH
+					|| (request.activities() != null && isEditableActivity(type))) {
 				blockRepository.delete(block);
 			}
 		}
@@ -271,6 +276,12 @@ public class DayScheduleTemplateServiceImpl implements DayScheduleTemplateServic
 			saveBlock(template, DayBlockType.LUNCH, label,
 					request.lunch().startTime(), request.lunch().endTime());
 		}
+		if (request.activities() != null) {
+			for (ApplyDayPlanRequest.DayPlanActivityRequest activity : request.activities()) {
+				saveBlock(template, activity.blockType(), activity.label(),
+						activity.startTime(), activity.endTime(), activity.dayOfWeek());
+			}
+		}
 
 		template.setDayStart(request.dayStart());
 		template.setDayEnd(request.dayEnd());
@@ -280,6 +291,50 @@ public class DayScheduleTemplateServiceImpl implements DayScheduleTemplateServic
 				saved.getPublicUuid(), saved.getDayStart(), saved.getDayEnd(),
 				saved.getPeriodMinutes());
 		return toResponseWithBlocks(saved);
+	}
+
+	private void validatePlanIntervals(ApplyDayPlanRequest request) {
+		List<PlanInterval> intervals = new ArrayList<>();
+		if (request.recesses() != null) {
+			for (ApplyDayPlanRequest.DayPlanWindowRequest recess : request.recesses()) {
+				intervals.add(new PlanInterval(null, recess.startTime(), recess.endTime()));
+			}
+		}
+		if (request.lunch() != null) {
+			intervals.add(new PlanInterval(null, request.lunch().startTime(), request.lunch().endTime()));
+		}
+		if (request.activities() != null) {
+			for (ApplyDayPlanRequest.DayPlanActivityRequest activity : request.activities()) {
+				if (!isEditableActivity(activity.blockType())) {
+					throw new BadRequestException("DAY_PLAN_ACTIVITY_TYPE_INVALID",
+							"Activities must be ASSEMBLY, GUIDANCE, or SPECIALIST_RESERVED");
+				}
+				DayPlanCalculator.validateWindowInsideDay(request.dayStart(), request.dayEnd(),
+						activity.startTime(), activity.endTime(), "DAY_PLAN_ACTIVITY_INVALID");
+				intervals.add(new PlanInterval(activity.dayOfWeek(), activity.startTime(), activity.endTime()));
+			}
+		}
+		for (int i = 0; i < intervals.size(); i++) {
+			PlanInterval current = intervals.get(i);
+			for (int j = i + 1; j < intervals.size(); j++) {
+				PlanInterval other = intervals.get(j);
+				boolean appliesSameDay = current.dayOfWeek() == null || other.dayOfWeek() == null
+						|| current.dayOfWeek().equals(other.dayOfWeek());
+				if (appliesSameDay && current.start().isBefore(other.end())
+						&& other.start().isBefore(current.end())) {
+					throw new BadRequestException("DAY_PLAN_BLOCKS_OVERLAP",
+							"Day plan blocks cannot overlap");
+				}
+			}
+		}
+	}
+
+	private boolean isEditableActivity(DayBlockType type) {
+		return type == DayBlockType.ASSEMBLY || type == DayBlockType.GUIDANCE
+				|| type == DayBlockType.SPECIALIST_RESERVED;
+	}
+
+	private record PlanInterval(Short dayOfWeek, LocalTime start, LocalTime end) {
 	}
 
 	@Override
@@ -402,12 +457,18 @@ public class DayScheduleTemplateServiceImpl implements DayScheduleTemplateServic
 
 	private void saveBlock(DayScheduleTemplate template, DayBlockType type, String label,
 			LocalTime start, LocalTime end) {
+		saveBlock(template, type, label, start, end, null);
+	}
+
+	private void saveBlock(DayScheduleTemplate template, DayBlockType type, String label,
+			LocalTime start, LocalTime end, Short dayOfWeek) {
 		DayScheduleBlock block = new DayScheduleBlock();
 		block.setTemplate(template);
 		block.setBlockType(type);
-		block.setLabel(label);
+		block.setLabel(label == null || label.isBlank() ? type.name() : label.trim());
 		block.setStartTime(start);
 		block.setEndTime(end);
+		block.setDayOfWeek(dayOfWeek);
 		blockRepository.save(block);
 	}
 

@@ -68,8 +68,11 @@ public class EmailSender {
     private final PiiSafetyFilter piiFilter;
     private final UnsubscribeTokenSigner unsubscribeSigner;
 
-    @Value("${app.notifications.email.from:noreply@edushift.local}")
+    @Value("${app.notifications.email.from:noreply@edushift.pe}")
     private String fromAddress;
+
+    @Value("${edushift.contact.support-email:soporte@edushift.pe}")
+    private String replyToAddress;
 
     @Value("${app.notifications.email.enabled:false}")
     private boolean enabled;
@@ -116,6 +119,7 @@ public class EmailSender {
             MimeMessage msg = mailSender.createMimeMessage();
             MimeMessageHelper helper = new MimeMessageHelper(msg, true, "UTF-8");
             helper.setFrom(fromAddress);
+            helper.setReplyTo(replyToAddress);
             helper.setTo(to);
             helper.setSubject(safeSubject);
             helper.setText(safeBody, true);

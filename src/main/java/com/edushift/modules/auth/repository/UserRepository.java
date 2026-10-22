@@ -80,6 +80,39 @@ public interface UserRepository extends JpaRepository<User, UUID>,
 	 */
 	long countByTenantId(UUID tenantId);
 
+	/** Active, non-Super-Admin users available for a support impersonation picker. */
+	@Query(value = """
+			select * from edushift.users u
+			where u.tenant_id = :tenantId
+			  and u.deleted = false
+			  and u.status = 'ACTIVE'
+			  and not ('SUPER_ADMIN' = any(u.roles))
+			  and (
+			    :search = ''
+			    or lower(u.first_name) like lower(concat('%', :search, '%'))
+			    or lower(u.last_name) like lower(concat('%', :search, '%'))
+			    or lower(u.email) like lower(concat('%', :search, '%'))
+			  )
+			order by u.first_name, u.last_name, u.email
+			""",
+		countQuery = """
+			select count(*) from edushift.users u
+			where u.tenant_id = :tenantId
+			  and u.deleted = false
+			  and u.status = 'ACTIVE'
+			  and not ('SUPER_ADMIN' = any(u.roles))
+			  and (
+			    :search = ''
+			    or lower(u.first_name) like lower(concat('%', :search, '%'))
+			    or lower(u.last_name) like lower(concat('%', :search, '%'))
+			    or lower(u.email) like lower(concat('%', :search, '%'))
+			  )
+			""", nativeQuery = true)
+	Page<User> findActiveSupportUsersByTenantId(
+			@Param("tenantId") UUID tenantId,
+			@Param("search") String search,
+			Pageable pageable);
+
 	/**
 	 * Bulk-updates the last successful login timestamp without loading the entity.
 	 * Tenant-scoped via Hibernate's automatic {@code @TenantId} filter.

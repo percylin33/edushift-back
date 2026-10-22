@@ -4,6 +4,8 @@ import com.edushift.modules.admin.auth.AdminAuthService;
 import com.edushift.modules.admin.auth.AdminAuthService.LoginOutcome;
 import com.edushift.modules.admin.auth.AdminLoginRequest;
 import com.edushift.modules.admin.auth.AdminLoginResponse;
+import com.edushift.modules.admin.auth.dto.AdminInitialPasswordChangeRequest;
+import com.edushift.modules.admin.auth.dto.AdminMfaRequiredResponse;
 import com.edushift.modules.auth.controller.CookieHelper;
 import com.edushift.modules.auth.dto.RefreshTokenRequest;
 import com.edushift.shared.api.ApiResponse;
@@ -17,6 +19,7 @@ import org.springframework.http.ResponseCookie;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -76,6 +79,18 @@ public class AdminAuthController {
 		return ResponseEntity.ok(outcome);
 	}
 
+	@PostMapping("/initial-password")
+	@Operation(summary = "Change the initial password before MFA enrolment",
+			description = "Requires the short-lived onboarding bearer from login and only newPassword.")
+	public ResponseEntity<AdminMfaRequiredResponse> changeInitialPassword(
+			@RequestHeader(value = "Authorization", required = false) String authHeader,
+			@Valid @RequestBody AdminInitialPasswordChangeRequest request,
+			HttpServletRequest httpRequest) {
+		String token = stripBearer(authHeader);
+		return ResponseEntity.ok(adminAuthService.changeInitialPassword(
+				token, request, resolveClientIp(httpRequest)));
+	}
+
 	@PostMapping("/logout")
 	@Operation(summary = "Revoke the admin refresh token")
 	public ApiResponse<Void> logout(
@@ -99,5 +114,12 @@ public class AdminAuthController {
 			return comma < 0 ? xff.trim() : xff.substring(0, comma).trim();
 		}
 		return request.getRemoteAddr();
+	}
+
+	private static String stripBearer(String header) {
+		if (header == null) return null;
+		String prefix = "Bearer ";
+		return header.regionMatches(true, 0, prefix, 0, prefix.length())
+				? header.substring(prefix.length()).trim() : header.trim();
 	}
 }
