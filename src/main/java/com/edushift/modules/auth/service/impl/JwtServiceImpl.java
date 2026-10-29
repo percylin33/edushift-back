@@ -200,7 +200,7 @@ public class JwtServiceImpl implements JwtService {
 					.parseSignedClaims(token);
 
 			Claims body = jws.getPayload();
-			
+
 			// SECURITY FIX: Validate audience if configured
 			String expectedAudience = properties.getAudience();
 			if (expectedAudience != null && !expectedAudience.isBlank()) {
@@ -209,7 +209,7 @@ public class JwtServiceImpl implements JwtService {
 					throw new UnauthorizedException("INVALID_TOKEN", "Token audience mismatch");
 				}
 			}
-			
+
 			TokenType type = parseTokenType(body.get(CLAIM_TYPE, String.class));
 			UUID tenantId = parseUuid(body.get(CLAIM_TENANT_ID, String.class), CLAIM_TENANT_ID);
 			Set<String> roles = parseRoles(body.get(CLAIM_ROLES));
