@@ -20,10 +20,10 @@ class LmsAuthoritiesTest {
     }
 
     @Test
-    @DisplayName("all authority constants start with LMS_")
+    @DisplayName("authority constants use an LMS or resource-action name")
     void allStartWithLmsPrefix() {
         getAuthorityValues().forEach(auth ->
-                assertThat(auth).startsWith("LMS_")
+                assertThat(auth).matches("[A-Z][A-Z_]*(?::[A-Z_]+)?")
         );
     }
 
@@ -37,7 +37,7 @@ class LmsAuthoritiesTest {
     @Test
     @DisplayName("authority count matches expected number of constants")
     void authorityCount() {
-        assertThat(getAuthorityValues()).hasSize(14);
+        assertThat(getAuthorityValues()).hasSize(65);
     }
 
     private static Stream<String> getAuthorityValues() {

@@ -8,8 +8,14 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.edushift.modules.students.provision.PortalEmailResolver;
+import com.edushift.modules.auth.entity.User;
+import com.edushift.modules.auth.entity.UserRole;
+import com.edushift.modules.auth.repository.UserRepository;
+import com.edushift.modules.payments.service.SubscriptionService;
 import com.edushift.modules.students.dto.AddGuardianRequest;
 import com.edushift.modules.students.dto.GuardianResponse;
+import com.edushift.modules.students.dto.LinkGuardianUserRequest;
 import com.edushift.modules.students.dto.UpdateGuardianLinkRequest;
 import com.edushift.modules.students.entity.DocumentType;
 import com.edushift.modules.students.entity.EnrollmentStatus;
@@ -22,6 +28,7 @@ import com.edushift.modules.students.repository.GuardianRepository;
 import com.edushift.modules.students.repository.StudentGuardianRepository;
 import com.edushift.modules.students.repository.StudentRepository;
 import com.edushift.modules.users.repository.UserInvitationRepository;
+import com.edushift.modules.users.service.UserInvitationService;
 import com.edushift.shared.exception.BusinessException;
 import com.edushift.shared.exception.ConflictException;
 import com.edushift.shared.exception.ForbiddenException;
@@ -48,6 +55,10 @@ class StudentGuardianServiceImplTest {
 	@Mock private StudentRepository studentRepository;
 	@Mock private GuardianRepository guardianRepository;
 	@Mock private StudentGuardianRepository linkRepository;
+	@Mock private UserRepository userRepository;
+	@Mock private UserInvitationService invitationService;
+	@Mock private PortalEmailResolver portalEmailResolver;
+	@Mock private SubscriptionService subscriptionService;
 	@Spy private StudentGuardianMapper mapper =
 			new StudentGuardianMapper(Mockito.mock(UserInvitationRepository.class));
 
@@ -357,6 +368,45 @@ class StudentGuardianServiceImplTest {
 	}
 
 	@Nested
+	@DisplayName("linkUser")
+	class LinkUser {
+
+		@Test
+		@DisplayName("linking an existing account adds PARENT and preserves its other roles")
+		void grantsParentRoleWhenLinking() {
+			Student student = newStudent();
+			Guardian guardian = newGuardian("11111111", "Anna");
+			StudentGuardian link = newLink(student, guardian, RelationshipType.MOTHER, true);
+			UUID userPublicUuid = UUID.randomUUID();
+			User user = new User();
+			user.setPublicUuid(userPublicUuid);
+			user.setEmail("parent@acme.test");
+			user.setFirstName("Existing");
+			user.setLastName("Account");
+			user.addRole(UserRole.STAFF);
+
+			when(studentRepository.findByPublicUuid(student.getPublicUuid()))
+					.thenReturn(Optional.of(student));
+			when(guardianRepository.findByPublicUuid(guardian.getPublicUuid()))
+					.thenReturn(Optional.of(guardian));
+			when(linkRepository.findActivePair(student.getId(), guardian.getId()))
+					.thenReturn(Optional.of(link));
+			when(guardianRepository.findByUserId(userPublicUuid)).thenReturn(Optional.empty());
+			when(userRepository.findByPublicUuid(userPublicUuid)).thenReturn(Optional.of(user));
+			when(guardianRepository.saveAndFlush(any(Guardian.class)))
+					.thenAnswer(inv -> inv.getArgument(0));
+
+			service.linkUser(student.getPublicUuid(), guardian.getPublicUuid(),
+					new LinkGuardianUserRequest(userPublicUuid));
+
+			assertThat(user.getRoleSet()).containsExactlyInAnyOrder(UserRole.STAFF, UserRole.PARENT);
+			assertThat(guardian.getUserId()).isEqualTo(userPublicUuid);
+			verify(userRepository).save(user);
+			verify(subscriptionService).synchronizeGuardianForBillingRules(guardian.getId());
+		}
+	}
+
+	@Nested
 	@DisplayName("assertParentLinkedToStudent")
 	class AssertParentLinkedToStudent {
 		@Test
@@ -460,4 +510,19 @@ class StudentGuardianServiceImplTest {
 			throw new IllegalStateException(e);
 		}
 	}
+ @Test void invitesGuardianWithoutPersonalEmail() {
+  Student student = newStudent();
+  Guardian guardian = newGuardian("12345678", "Anna");
+  guardian.setEmail(null);
+  var link = newLink(student, guardian, RelationshipType.MOTHER, true);
+  String email = "anna.anna.12345678.abcdef@school.com";
+  when(studentRepository.findByPublicUuid(student.getPublicUuid())).thenReturn(Optional.of(student));
+  when(guardianRepository.findByPublicUuid(guardian.getPublicUuid())).thenReturn(Optional.of(guardian));
+  when(linkRepository.findActivePair(student.getId(), guardian.getId())).thenReturn(Optional.of(link));
+  when(portalEmailResolver.resolve(null, guardian.getFirstName(), guardian.getLastName(), guardian.getDocumentNumber())).thenReturn(email);
+  when(invitationService.createInvitation(any())).thenReturn(Mockito.mock(com.edushift.modules.users.dto.InvitationResponse.class));
+  assertThat(service.invite(student.getPublicUuid(), guardian.getPublicUuid()).email()).isEqualTo(email);
+  verify(guardianRepository).save(guardian);
+ }
+
 }

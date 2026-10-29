@@ -1,11 +1,20 @@
 package com.edushift.modules.admissions.controller;
 
 import com.edushift.modules.admissions.dto.AdmissionApplicationResponse;
+import com.edushift.modules.admissions.dto.AdmissionEnrollmentCompletionResponse;
 import com.edushift.modules.admissions.dto.AdmissionApplicationDetailResponse;
 import com.edushift.modules.admissions.dto.CreatePresentialAdmissionRequest;
+import com.edushift.modules.admissions.dto.CreatePresentialInquiryRequest;
 import com.edushift.modules.admissions.dto.AdmissionStatusEventResponse;
 import com.edushift.modules.admissions.dto.CreateAdmissionApplicationRequest;
 import com.edushift.modules.admissions.dto.GradeVacancyResponse;
+import com.edushift.modules.admissions.dto.AdmissionReservationResponse;
+import com.edushift.modules.admissions.dto.AdmissionReservationEventResponse;
+import com.edushift.modules.admissions.dto.AdmissionReservationAdvanceResponse;
+import com.edushift.modules.admissions.dto.CreateAdmissionReservationRequest;
+import com.edushift.modules.admissions.dto.RecordAdmissionReservationAdvanceRequest;
+import com.edushift.modules.admissions.dto.RecordAdmissionReservationAdvanceRefundRequest;
+import com.edushift.modules.admissions.dto.UpdateAdmissionReservationRequest;
 import com.edushift.modules.admissions.dto.LinkAdmissionEnrollmentRequest;
 import com.edushift.modules.admissions.dto.TransitionAdmissionStatusRequest;
 import com.edushift.modules.admissions.dto.AdmissionInquiryResponse;
@@ -16,6 +25,9 @@ import com.edushift.modules.admissions.dto.UpdateAdmissionInquiryRequest;
 import com.edushift.modules.admissions.dto.CompleteAdmissionEnrollmentRequest;
 import com.edushift.modules.admissions.service.AdmissionService;
 import com.edushift.modules.admissions.service.AdmissionWorkflowService;
+import com.edushift.modules.payments.service.AdminPaymentService;
+import com.edushift.modules.students.service.StudentGuardianService;
+import com.edushift.modules.students.dto.GuardianPortalAccessResponse;
 import com.edushift.shared.api.ApiResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
@@ -24,6 +36,7 @@ import jakarta.validation.Valid;
 import java.util.List;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -41,11 +54,14 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/admissions")
 @Validated
 @RequiredArgsConstructor
+@Slf4j
 @Tag(name = "Admissions", description = "Postulaciones, vacantes y vínculo con matrícula por año académico")
 public class AdmissionController {
 
 	private final AdmissionService admissionService;
 	private final AdmissionWorkflowService workflowService;
+	private final AdminPaymentService adminPaymentService;
+	private final StudentGuardianService guardianService;
 
     @PatchMapping("/applications/{applicationPublicUuid}/applicant")
     @PreAuthorize("hasAnyAuthority('LMS_ADMISSION_MANAGE','ADMISSIONS_APPLICATIONS_MANAGE')")
@@ -96,6 +112,18 @@ public class AdmissionController {
 	@Operation(summary = "Listar consultas recibidas por el colegio para un año y grado")
 	public ResponseEntity<List<AdmissionInquiryResponse>> listInquiries(@PathVariable UUID yearPublicUuid) {
 		return ResponseEntity.ok(workflowService.listInquiries(yearPublicUuid));
+	}
+
+	@PostMapping("/years/{yearPublicUuid}/inquiries")
+	@PreAuthorize("hasAnyAuthority('LMS_ADMISSION_MANAGE','ADMISSIONS_INQUIRIES_MANAGE')")
+	@SecurityRequirement(name = "bearerAuth")
+	@ResponseStatus(HttpStatus.CREATED)
+	@Operation(summary = "Registrar una consulta presencial del colegio sin crear postulación ni ocupar vacante")
+	public ResponseEntity<ApiResponse<AdmissionInquiryResponse>> createPresentialInquiry(
+			@PathVariable UUID yearPublicUuid,
+			@Valid @RequestBody CreatePresentialInquiryRequest request) {
+		return ResponseEntity.status(HttpStatus.CREATED)
+				.body(ApiResponse.ok(workflowService.createPresentialInquiry(yearPublicUuid, request)));
 	}
 
 	@PatchMapping("/inquiries/{inquiryPublicUuid}")
@@ -157,10 +185,50 @@ public class AdmissionController {
 	@PreAuthorize("hasAnyAuthority('LMS_ADMISSION_MANAGE','ADMISSIONS_ENROLL')")
 	@SecurityRequirement(name = "bearerAuth")
 	@Operation(summary = "Completar matrícula de una solicitud admitida sin confirmación familiar")
-	public ResponseEntity<ApiResponse<AdmissionApplicationResponse>> completeEnrollment(
+	public ResponseEntity<ApiResponse<AdmissionEnrollmentCompletionResponse>> completeEnrollment(
 			@PathVariable UUID applicationPublicUuid,
 			@Valid @RequestBody CompleteAdmissionEnrollmentRequest request) {
-		return ResponseEntity.ok(ApiResponse.ok(workflowService.completeEnrollment(applicationPublicUuid, request)));
+		AdmissionApplicationResponse application = workflowService.completeEnrollment(applicationPublicUuid, request);
+		return ResponseEntity.ok(ApiResponse.ok(enrollmentSideEffects(application, applicationPublicUuid)));
+	}
+
+	@PostMapping("/applications/{applicationPublicUuid}/retry-enrollment-setup")
+	@PreAuthorize("hasAnyAuthority('LMS_ADMISSION_MANAGE','ADMISSIONS_ENROLL')")
+	@SecurityRequirement(name = "bearerAuth")
+	@Operation(summary = "Reintentar vinculación del portal y emisión idempotente del cargo tras una matrícula")
+	public ResponseEntity<ApiResponse<AdmissionEnrollmentCompletionResponse>> retryEnrollmentSetup(
+			@PathVariable UUID applicationPublicUuid) {
+		AdmissionApplicationResponse application = workflowService.enrolledApplicationForRetry(applicationPublicUuid);
+		return ResponseEntity.ok(ApiResponse.ok(enrollmentSideEffects(application, applicationPublicUuid)));
+	}
+
+	private AdmissionEnrollmentCompletionResponse enrollmentSideEffects(AdmissionApplicationResponse application,
+			UUID applicationPublicUuid) {
+		AdmissionEnrollmentCompletionResponse.BillingStatus billingStatus;
+		com.edushift.modules.payments.dto.InvoiceResponse invoice = null;
+		GuardianPortalAccessResponse.Status portalAccessStatus = GuardianPortalAccessResponse.Status.PENDING;
+		try {
+			portalAccessStatus = guardianService.ensurePortalAccess(application.studentPublicUuid()).status();
+		}
+		catch (RuntimeException exception) {
+			log.warn("Enrollment completed but guardian portal provisioning remains pending for application {} ({})",
+					applicationPublicUuid, exception.getClass().getSimpleName());
+		}
+		try {
+			invoice = adminPaymentService.emitEnrollmentInvoice(application.publicUuid(), application.studentPublicUuid(),
+					application.academicYearPublicUuid(), application.academicYearName());
+			billingStatus = invoice == null
+					? AdmissionEnrollmentCompletionResponse.BillingStatus.NOT_CONFIGURED
+					: invoice.status() == com.edushift.modules.payments.entity.Invoice.Status.PAID
+							? AdmissionEnrollmentCompletionResponse.BillingStatus.PAID
+							: AdmissionEnrollmentCompletionResponse.BillingStatus.PENDING;
+		}
+		catch (RuntimeException exception) {
+			log.error("Enrollment completed but enrollment invoice issuance failed for application {} ({})",
+					applicationPublicUuid, exception.getClass().getSimpleName());
+			billingStatus = AdmissionEnrollmentCompletionResponse.BillingStatus.ISSUE_FAILED;
+		}
+		return new AdmissionEnrollmentCompletionResponse(application, billingStatus, invoice, portalAccessStatus);
 	}
 
 	@GetMapping("/years/{yearPublicUuid}/applications")
@@ -177,6 +245,87 @@ public class AdmissionController {
 	@Operation(summary = "Consultar aforo, matrícula activa, postulantes admitidos y vacantes por grado")
 	public ResponseEntity<List<GradeVacancyResponse>> listVacancies(@PathVariable UUID yearPublicUuid) {
 		return ResponseEntity.ok(admissionService.listVacancies(yearPublicUuid));
+	}
+
+	@GetMapping("/years/{yearPublicUuid}/reservations")
+	@PreAuthorize("hasAnyAuthority('LMS_ADMISSION_MANAGE','ADMISSIONS_APPLICATIONS_READ')")
+	@SecurityRequirement(name = "bearerAuth")
+	@Operation(summary = "Listar separaciones de vacante e identificar las vencidas del año")
+	public ResponseEntity<List<AdmissionReservationResponse>> listReservations(@PathVariable UUID yearPublicUuid) {
+		return ResponseEntity.ok(admissionService.listReservations(yearPublicUuid));
+	}
+
+	@PostMapping("/applications/{applicationPublicUuid}/reservations")
+	@PreAuthorize("hasAnyAuthority('LMS_ADMISSION_MANAGE','ADMISSIONS_APPLICATIONS_MANAGE')")
+	@SecurityRequirement(name = "bearerAuth")
+	@ResponseStatus(HttpStatus.CREATED)
+	@Operation(summary = "Separar temporalmente una vacante para una postulación")
+	public ResponseEntity<ApiResponse<AdmissionReservationResponse>> reserve(
+			@PathVariable UUID applicationPublicUuid,
+			@Valid @RequestBody CreateAdmissionReservationRequest request) {
+		return ResponseEntity.status(HttpStatus.CREATED)
+				.body(ApiResponse.ok(admissionService.reserve(applicationPublicUuid, request)));
+	}
+
+	@PatchMapping("/reservations/{reservationPublicUuid}")
+	@PreAuthorize("hasAnyAuthority('LMS_ADMISSION_MANAGE','ADMISSIONS_APPLICATIONS_MANAGE')")
+	@SecurityRequirement(name = "bearerAuth")
+	@Operation(summary = "Liberar una separación temporal o comprometida")
+	public ResponseEntity<ApiResponse<AdmissionReservationResponse>> updateReservation(
+			@PathVariable UUID reservationPublicUuid,
+			@Valid @RequestBody UpdateAdmissionReservationRequest request) {
+		return ResponseEntity.ok(ApiResponse.ok(admissionService.updateReservation(reservationPublicUuid, request)));
+	}
+
+	@GetMapping("/reservations/{reservationPublicUuid}/history")
+	@PreAuthorize("hasAnyAuthority('LMS_ADMISSION_MANAGE','ADMISSIONS_APPLICATIONS_READ')")
+	@SecurityRequirement(name = "bearerAuth")
+	@Operation(summary = "Consultar historial inmutable de una separación de vacante")
+	public ResponseEntity<List<AdmissionReservationEventResponse>> reservationHistory(
+			@PathVariable UUID reservationPublicUuid) {
+		return ResponseEntity.ok(admissionService.reservationHistory(reservationPublicUuid));
+	}
+
+	@GetMapping("/reservations/{reservationPublicUuid}/advances")
+	@PreAuthorize("hasAnyAuthority('LMS_ADMISSION_MANAGE','ADMISSIONS_APPLICATIONS_READ') or hasRole('TENANT_ADMIN') or hasAnyAuthority('LMS_PAYMENT_ADMIN','PAYMENTS:READ')")
+	@SecurityRequirement(name = "bearerAuth")
+	@Operation(summary = "Consultar anticipos y saldos de una separación")
+	public ResponseEntity<List<AdmissionReservationAdvanceResponse>> reservationAdvances(
+			@PathVariable UUID reservationPublicUuid) {
+		return ResponseEntity.ok(admissionService.reservationAdvances(reservationPublicUuid));
+	}
+
+	@GetMapping("/reservations/{reservationPublicUuid}/advances/events")
+	@PreAuthorize("hasAnyAuthority('LMS_ADMISSION_MANAGE','ADMISSIONS_APPLICATIONS_READ') or hasRole('TENANT_ADMIN') or hasAnyAuthority('LMS_PAYMENT_ADMIN','PAYMENTS:READ')")
+	@SecurityRequirement(name = "bearerAuth")
+	@Operation(summary = "Consultar el historial inmutable de anticipos y aplicaciones de una separación")
+	public ResponseEntity<List<com.edushift.modules.admissions.dto.AdmissionReservationAdvanceEventResponse>> reservationAdvanceEvents(
+			@PathVariable UUID reservationPublicUuid) {
+		return ResponseEntity.ok(admissionService.reservationAdvanceEvents(reservationPublicUuid));
+	}
+
+	@PostMapping("/reservations/{reservationPublicUuid}/advances")
+	@PreAuthorize("hasRole('TENANT_ADMIN') or hasAnyAuthority('LMS_PAYMENT_ADMIN','PAYMENTS:RECEIVE')")
+	@SecurityRequirement(name = "bearerAuth")
+	@ResponseStatus(HttpStatus.CREATED)
+	@Operation(summary = "Registrar dinero recibido al separar una vacante")
+	public ResponseEntity<ApiResponse<AdmissionReservationAdvanceResponse>> recordReservationAdvance(
+			@PathVariable UUID reservationPublicUuid,
+			@Valid @RequestBody RecordAdmissionReservationAdvanceRequest request) {
+		return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.ok(
+				admissionService.recordReservationAdvance(reservationPublicUuid, request)));
+	}
+
+	@PostMapping("/reservations/{reservationPublicUuid}/advances/{advancePublicUuid}/refund")
+	@PreAuthorize("hasRole('TENANT_ADMIN') or hasAnyAuthority('LMS_PAYMENT_ADMIN','PAYMENTS:RECEIVE')")
+	@SecurityRequirement(name = "bearerAuth")
+	@Operation(summary = "Registrar la devolución total de un anticipo aún no aplicado")
+	public ResponseEntity<ApiResponse<AdmissionReservationAdvanceResponse>> refundReservationAdvance(
+			@PathVariable UUID reservationPublicUuid,
+			@PathVariable UUID advancePublicUuid,
+			@Valid @RequestBody RecordAdmissionReservationAdvanceRefundRequest request) {
+		return ResponseEntity.ok(ApiResponse.ok(admissionService.refundReservationAdvance(
+				reservationPublicUuid, advancePublicUuid, request)));
 	}
 
 	@PostMapping("/years/{yearPublicUuid}/applications")

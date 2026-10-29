@@ -291,7 +291,8 @@ class LmsAssignmentScopeIT extends IntegrationTest {
 	private String createTaskJson(String title, UUID assignmentPublicUuid) {
 		return String.format(
 				"{\"title\":\"%s\",\"description\":\"desc-%s\","
-						+ "\"dueAt\":\"%s\",\"teacherAssignmentPublicUuid\":\"%s\"}",
+						+ "\"dueAt\":\"%s\",\"maxScore\":100,"
+						+ "\"teacherAssignmentPublicUuid\":\"%s\"}",
 				title, title,
 				Instant.now().plus(7, ChronoUnit.DAYS),
 				assignmentPublicUuid);
@@ -326,7 +327,7 @@ class LmsAssignmentScopeIT extends IntegrationTest {
 		assertThat(response.getStatusCode())
 				.as("seed login() requires HTTP 200; body=%s", response.getBody())
 				.isEqualTo(HttpStatus.OK);
-		return objectMapper.readValue(response.getBody(), AuthResponse.class);
+		return readSessionResponse(objectMapper, response);
 	}
 
 	private ResponseEntity<String> doGet(String path, String bearer) {
@@ -369,7 +370,7 @@ class LmsAssignmentScopeIT extends IntegrationTest {
 	}
 
 	private Tenant createTenant(String slugPrefix) {
-		Tenant t = new Tenant();
+		Tenant t = newTestTenant();
 		t.setSlug(slugPrefix + UUID.randomUUID().toString().substring(0, 8));
 		t.setName("IT Tenant " + t.getSlug());
 		t.setStatus(TenantStatus.ACTIVE);

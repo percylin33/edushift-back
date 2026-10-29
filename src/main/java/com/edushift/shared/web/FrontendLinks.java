@@ -16,13 +16,13 @@ public class FrontendLinks {
 
 	private final String frontendUrl;
 
-	public FrontendLinks(@Value("${app.frontend.url:http://localhost:4201}") String frontendUrl) {
+	public FrontendLinks(@Value("${app.frontend.url:http://localhost:4200}") String frontendUrl) {
 		this.frontendUrl = frontendUrl;
 	}
 
 	public String base() {
 		String raw = frontendUrl == null || frontendUrl.isBlank()
-				? "http://localhost:4201"
+				? "http://localhost:4200"
 				: frontendUrl.trim();
 		while (raw.endsWith("/")) {
 			raw = raw.substring(0, raw.length() - 1);

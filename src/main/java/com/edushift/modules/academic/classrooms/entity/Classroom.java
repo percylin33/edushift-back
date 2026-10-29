@@ -9,10 +9,12 @@ import jakarta.persistence.Index;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
+import java.time.Instant;
 import java.util.UUID;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
+import org.hibernate.annotations.SQLDelete;
 
 /**
  * Physical classroom (Sprint cierre-C / B4).
@@ -28,6 +30,7 @@ import lombok.Setter;
  * the same code in a different tenant.</p>
  */
 @Entity
+@SQLDelete(sql = "UPDATE edushift.classrooms SET deleted = true, deleted_at = NOW(), updated_at = NOW() WHERE id = ?")
 @Table(
 		name = "classrooms",
 		schema = "edushift",
@@ -69,6 +72,21 @@ public class Classroom extends TenantAwareEntity {
 
 	@Column(name = "description", length = 500)
 	private String description;
+
+	@Column(name = "deleted_at")
+	private Instant deletedAt;
+
+	@Override
+	public void markDeleted() {
+		super.markDeleted();
+		this.deletedAt = Instant.now();
+	}
+
+	@Override
+	public void restore() {
+		super.restore();
+		this.deletedAt = null;
+	}
 
 	@PrePersist
 	private void onPrePersist() {

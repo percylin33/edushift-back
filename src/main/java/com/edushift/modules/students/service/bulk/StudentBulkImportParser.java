@@ -133,6 +133,19 @@ public class StudentBulkImportParser {
 
 	private HeaderLayout resolveLayout(Sheet sheet, Map<String, String> columnMapping) {
 		int headerRowIndex = detectHeaderRowIndex(sheet);
+		if (columnMapping != null && !columnMapping.isEmpty()) {
+			var mappedHeaders = columnMapping.values().stream()
+					.filter(value -> value != null && !value.isBlank()).toList();
+			if (!mappedHeaders.isEmpty()) {
+				int last = Math.min(sheet.getLastRowNum(), sheet.getFirstRowNum() + 40);
+				for (int row = sheet.getFirstRowNum(); row <= last; row++) {
+					if (readExactHeaders(sheet, row).containsAll(mappedHeaders)) {
+						headerRowIndex = row;
+						break;
+					}
+				}
+			}
+		}
 		List<String> exactHeaders = readExactHeaders(sheet, headerRowIndex);
 		if (exactHeaders.isEmpty()) {
 			throw new BulkImportException("INVALID_FILE",

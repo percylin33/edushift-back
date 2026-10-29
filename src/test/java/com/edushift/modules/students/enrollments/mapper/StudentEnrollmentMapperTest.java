@@ -52,7 +52,7 @@ class StudentEnrollmentMapperTest {
         var mapper = new StudentEnrollmentMapper();
         var resp = mapper.toResponse(enrollment);
         assertThat(resp.publicUuid()).isEqualTo(enrollment.getPublicUuid());
-        assertThat(resp.studentFullName()).isEqualTo("Ana Diaz");
+        assertThat(resp.studentFullName()).isEqualTo("Diaz, Ana");
         assertThat(resp.studentDocumentNumber()).isEqualTo("12345678");
         assertThat(resp.sectionName()).isEqualTo("Section A");
         assertThat(resp.status()).isEqualTo(StudentEnrollmentStatus.ACTIVE);
@@ -83,7 +83,7 @@ class StudentEnrollmentMapperTest {
         var resp = new StudentEnrollmentMapper().toListItem(enrollment);
         assertThat(resp.active()).isFalse();
         assertThat(resp.status()).isEqualTo(StudentEnrollmentStatus.WITHDRAWN);
-        assertThat(resp.studentFullName()).isEqualTo("Ana Diaz");
+        assertThat(resp.studentFullName()).isEqualTo("Diaz, Ana");
     }
 
     @Test
@@ -111,7 +111,7 @@ class StudentEnrollmentMapperTest {
         enrollment.setStatus(StudentEnrollmentStatus.ACTIVE);
 
         var resp = new StudentEnrollmentMapper().toRosterItem(enrollment);
-        assertThat(resp.studentFullName()).isEqualTo("Ana Diaz");
+        assertThat(resp.studentFullName()).isEqualTo("Diaz, Ana");
         assertThat(resp.documentType()).isEqualTo(com.edushift.modules.students.entity.DocumentType.DNI);
         assertThat(resp.documentNumber()).isEqualTo("12345678");
         assertThat(resp.email()).isEqualTo("ana@acme.test");

@@ -88,7 +88,7 @@ class TeacherMapperTest {
             var linked = new User();
             linked.setPublicUuid(linkedUserPub);
             linked.setStatus(UserStatus.ACTIVE);
-            when(userRepository.findById(linkedUserId)).thenReturn(Optional.of(linked));
+            when(userRepository.findByPublicUuid(linkedUserId)).thenReturn(Optional.of(linked));
             TeacherResponse r = mapper.toResponse(t);
             assertThat(r.userPublicUuid()).isEqualTo(linkedUserPub);
         }
@@ -97,7 +97,7 @@ class TeacherMapperTest {
         @DisplayName("with linked user id but user not found → userPublicUuid is null (defensive)")
         void missingLinkedUser() {
             var t = teacher();
-            when(userRepository.findById(t.getUserId())).thenReturn(Optional.empty());
+            when(userRepository.findByPublicUuid(t.getUserId())).thenReturn(Optional.empty());
             TeacherResponse r = mapper.toResponse(t);
             assertThat(r.userPublicUuid()).isNull();
         }

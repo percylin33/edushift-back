@@ -35,12 +35,12 @@ public class MultiTenancyConfiguration implements WebMvcConfigurer {
 	private final RateLimitInterceptor rateLimitInterceptor;
 
 	@Bean
-	CurrentTenantIdentifierResolver<UUID> currentTenantIdentifierResolver() {
+	static CurrentTenantIdentifierResolver<UUID> currentTenantIdentifierResolver() {
 		return new TenantIdResolver();
 	}
 
 	@Bean
-	HibernatePropertiesCustomizer multiTenancyHibernateCustomizer(
+	static HibernatePropertiesCustomizer multiTenancyHibernateCustomizer(
 			CurrentTenantIdentifierResolver<UUID> resolver) {
 		return props -> props.put("hibernate.tenant_identifier_resolver", resolver);
 	}

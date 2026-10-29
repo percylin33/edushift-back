@@ -4,7 +4,7 @@ import com.edushift.modules.academic.section.entity.Section;
 import com.edushift.modules.academic.section.repository.SectionRepository;
 import com.edushift.modules.academic.year.entity.AcademicYear;
 import com.edushift.modules.academic.year.repository.AcademicYearRepository;
-import com.edushift.modules.admissions.repository.AdmissionApplicationRepository;
+import com.edushift.modules.admissions.repository.AdmissionVacancyReservationRepository;
 import com.edushift.modules.students.enrollments.dto.CreateEnrollmentRequest;
 import com.edushift.modules.students.enrollments.dto.EnrollmentListItem;
 import com.edushift.modules.students.enrollments.dto.EnrollmentResponse;
@@ -17,6 +17,7 @@ import com.edushift.modules.students.enrollments.mapper.StudentEnrollmentMapper;
 import com.edushift.modules.students.enrollments.repository.StudentEnrollmentRepository;
 import com.edushift.modules.students.enrollments.service.StudentEnrollmentService;
 import com.edushift.modules.students.entity.Student;
+import com.edushift.modules.students.entity.EnrollmentStatus;
 import com.edushift.modules.students.repository.StudentRepository;
 import com.edushift.modules.payments.service.SubscriptionService;
 import com.edushift.shared.exception.BadRequestException;
@@ -74,7 +75,7 @@ public class StudentEnrollmentServiceImpl implements StudentEnrollmentService {
 	private final AcademicYearRepository yearRepository;
 	private final StudentEnrollmentMapper mapper;
 	private final SubscriptionService subscriptionService;
-	private final AdmissionApplicationRepository admissionApplicationRepository;
+	private final AdmissionVacancyReservationRepository admissionReservationRepository;
 
 	// =========================================================================
 	// Reads
@@ -139,6 +140,11 @@ public class StudentEnrollmentServiceImpl implements StudentEnrollmentService {
 							+ "' already has an active enrollment in year '"
 							+ year.getName() + "'.", ex);
 		}
+		student.setEnrollmentStatus(EnrollmentStatus.ENROLLED);
+		if (student.getEnrollmentDate() == null) {
+			student.setEnrollmentDate(request.enrolledAt());
+		}
+		studentRepository.save(student);
 		subscriptionService.synchronizeStudentForBillingRules(student.getPublicUuid());
 		log.info("[students.enrollments] created -- publicUuid={} student={} section={} year={} enrolledAt={}",
 				saved.getPublicUuid(),
@@ -172,6 +178,15 @@ public class StudentEnrollmentServiceImpl implements StudentEnrollmentService {
 		enrollment.setWithdrawnAt(request.withdrawnAt());
 
 		StudentEnrollment saved = enrollmentRepository.saveAndFlush(enrollment);
+		if (enrollmentRepository.findActiveByStudent(enrollment.getStudent()).isEmpty()) {
+			enrollment.getStudent().setEnrollmentStatus(switch (request.status()) {
+				case TRANSFERRED -> EnrollmentStatus.TRANSFERRED;
+				case GRADUATED -> EnrollmentStatus.GRADUATED;
+				case WITHDRAWN -> EnrollmentStatus.WITHDRAWN;
+				case ACTIVE -> EnrollmentStatus.ENROLLED;
+			});
+			studentRepository.save(enrollment.getStudent());
+		}
 		log.info("[students.enrollments] soft-ended -- publicUuid={} student={} status={} withdrawnAt={}",
 				saved.getPublicUuid(),
 				saved.getStudent().getPublicUuid(),
@@ -263,8 +278,8 @@ public class StudentEnrollmentServiceImpl implements StudentEnrollmentService {
 		if (sections.isEmpty() || sections.stream().anyMatch(item -> item.getCapacity() == null)) return;
 		int capacity = sections.stream().mapToInt(Section::getCapacity).sum();
 		long active = enrollmentRepository.countActiveByYearAndGrade(year, section.getGrade());
-		long reserved = admissionApplicationRepository.countReservedSeatsExcludingStudent(
-				year, section.getGrade(), student.getId());
+		long reserved = admissionReservationRepository.countEffectiveExcludingStudent(
+				year, section.getGrade(), student.getId(), java.time.Instant.now());
 		if (active + reserved >= capacity) {
 			throw new ConflictException("GRADE_CAPACITY_REACHED",
 					"Las vacantes configuradas para " + section.getGrade().getName() + " ya están ocupadas o reservadas.");

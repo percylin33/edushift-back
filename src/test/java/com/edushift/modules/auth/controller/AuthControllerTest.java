@@ -11,6 +11,7 @@ import static org.springframework.security.test.web.servlet.request.SecurityMock
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.cookie;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -184,8 +185,12 @@ class AuthControllerTest {
 							.content(json(body)))
 					.andExpect(status().isOk())
 					.andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
-					.andExpect(jsonPath("$.accessToken").value(FAKE_ACCESS))
-					.andExpect(jsonPath("$.refreshToken").value(FAKE_REFRESH))
+					.andExpect(jsonPath("$.accessToken").doesNotExist())
+					.andExpect(jsonPath("$.refreshToken").doesNotExist())
+					.andExpect(cookie().value("edushift_access_token", FAKE_ACCESS))
+					.andExpect(cookie().httpOnly("edushift_access_token", true))
+					.andExpect(cookie().value("edushift_refresh_token", FAKE_REFRESH))
+					.andExpect(cookie().httpOnly("edushift_refresh_token", true))
 					.andExpect(jsonPath("$.tokenType").value("Bearer"))
 					.andExpect(jsonPath("$.expiresInSec").value(900))
 					.andExpect(jsonPath("$.user.email").value(VALID_EMAIL));
@@ -292,21 +297,26 @@ class AuthControllerTest {
 			mockMvc.perform(post(BASE + "/refresh")
 							.with(csrf())
 							.contentType(MediaType.APPLICATION_JSON)
-							.content("{\"refreshToken\":\"" + FAKE_REFRESH + "\"}"))
+							.cookie(new jakarta.servlet.http.Cookie("edushift_refresh_token", FAKE_REFRESH)))
 					.andExpect(status().isOk())
-					.andExpect(jsonPath("$.accessToken").value(FAKE_ACCESS))
+					.andExpect(jsonPath("$.accessToken").doesNotExist())
+					.andExpect(jsonPath("$.refreshToken").doesNotExist())
+					.andExpect(cookie().value("edushift_access_token", FAKE_ACCESS))
+					.andExpect(cookie().httpOnly("edushift_access_token", true))
+					.andExpect(cookie().value("edushift_refresh_token", FAKE_REFRESH))
+					.andExpect(cookie().httpOnly("edushift_refresh_token", true))
 					.andExpect(jsonPath("$.tokenType").value("Bearer"));
 		}
 
 		@Test
-		@DisplayName("blank token → 400 with VALIDATION error and service untouched")
+		@DisplayName("refresh without a token cookie → 401 and service untouched")
 		void blankToken() throws Exception {
 			mockMvc.perform(post(BASE + "/refresh")
 							.with(csrf())
 							.contentType(MediaType.APPLICATION_JSON)
 							.content("{\"refreshToken\":\"\"}"))
-					.andExpect(status().isBadRequest())
-					.andExpect(jsonPath("$.errors[0].field").value("refreshToken"));
+					.andExpect(status().isUnauthorized())
+					.andExpect(jsonPath("$.errors[0].code").value("INVALID_TOKEN"));
 
 			then(authService).should(never()).refresh(any());
 		}
@@ -321,7 +331,7 @@ class AuthControllerTest {
 			mockMvc.perform(post(BASE + "/refresh")
 							.with(csrf())
 							.contentType(MediaType.APPLICATION_JSON)
-							.content("{\"refreshToken\":\"" + FAKE_REFRESH + "\"}"))
+							.cookie(new jakarta.servlet.http.Cookie("edushift_refresh_token", FAKE_REFRESH)))
 					.andExpect(status().isUnauthorized())
 					.andExpect(jsonPath("$.errors[0].code").value("TOKEN_REUSED"));
 		}
@@ -350,15 +360,17 @@ class AuthControllerTest {
 		}
 
 		@Test
-		@DisplayName("blank token → 400 (validation runs before idempotent logout)")
+		@DisplayName("blank token → 204 and token cookies cleared (idempotent logout)")
 		void blankToken() throws Exception {
 			mockMvc.perform(post(BASE + "/logout")
 							.with(csrf())
 							.contentType(MediaType.APPLICATION_JSON)
 							.content("{\"refreshToken\":\"\"}"))
-					.andExpect(status().isBadRequest());
+					.andExpect(status().isNoContent())
+					.andExpect(cookie().maxAge("edushift_access_token", 0))
+					.andExpect(cookie().maxAge("edushift_refresh_token", 0));
 
-			then(authService).should(never()).logout(any());
+			then(authService).should(times(1)).logout("");
 		}
 
 	}

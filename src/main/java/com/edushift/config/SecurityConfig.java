@@ -55,7 +55,7 @@ import org.springframework.web.servlet.HandlerExceptionResolver;
  *       to revoke it; layering bearer auth on top is defense-in-depth only and
  *       would break logout from clients whose access token has expired.</li>
  *   <li>{@code /swagger-ui/**}, {@code /v3/api-docs/**} — API docs (springdoc).</li>
- *   <li>{@code /actuator/health}, {@code /actuator/info} — liveness probes.</li>
+ *   <li>{@code /actuator/health} — minimal liveness probe.</li>
  * </ul>
  *
  * <h3>Path matchers and the {@code /api} context-path</h3>
@@ -133,7 +133,6 @@ public class SecurityConfig {
 			"/v3/api-docs",
 			"/v3/api-docs/**",
 			"/actuator/health",
-			"/actuator/info",
 			// Sprint 15 / BE-15.1: admin login is public (no tenant context).
 			"/v1/admin/login",
 			// Uses a short-lived ONBOARDING bearer, validated by AdminAuthService.
@@ -228,8 +227,11 @@ public class SecurityConfig {
 						 * Access-Control-* headers, but the security chain still sees
 						 * them. Allowing OPTIONS unconditionally avoids the
 						 * 403-on-preflight class of bug entirely. */
-						.requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
 						.requestMatchers(PUBLIC_PATHS).permitAll()
+						.requestMatchers(HttpMethod.GET, "/actuator/info", "/actuator/metrics", "/actuator/metrics/**")
+								.hasRole("SUPER_ADMIN")
+						.requestMatchers("/actuator/**").denyAll()
+						.requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
 						.anyRequest().authenticated())
 				.exceptionHandling(eh -> eh
 						.authenticationEntryPoint(restAuthenticationEntryPoint())

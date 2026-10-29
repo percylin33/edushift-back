@@ -78,6 +78,8 @@ import org.springframework.test.web.servlet.MockMvc;
 })
 class UserManagementControllerTest {
 
+	@MockitoBean private com.edushift.modules.tenants.service.StaffUserAccessService staffUserAccessService;
+
 	@Autowired private MockMvc mockMvc;
 	@Autowired private ObjectMapper objectMapper;
 

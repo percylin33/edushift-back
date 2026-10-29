@@ -18,6 +18,14 @@ import com.edushift.modules.auth.entity.UserRole;
 import com.edushift.modules.auth.entity.UserStatus;
 import com.edushift.modules.auth.repository.UserRepository;
 import com.edushift.modules.auth.service.JwtService;
+import com.edushift.modules.students.entity.DocumentType;
+import com.edushift.modules.students.entity.Guardian;
+import com.edushift.modules.students.entity.RelationshipType;
+import com.edushift.modules.students.entity.Student;
+import com.edushift.modules.students.entity.StudentGuardian;
+import com.edushift.modules.students.repository.GuardianRepository;
+import com.edushift.modules.students.repository.StudentGuardianRepository;
+import com.edushift.modules.students.repository.StudentRepository;
 import com.edushift.modules.tasks.entity.Task;
 import com.edushift.modules.tasks.repository.TaskRepository;
 import com.edushift.modules.tasks.submission.entity.Submission;
@@ -96,6 +104,9 @@ class LmsRbacIT extends IntegrationTest {
 	@Autowired private SectionRepository sectionRepository;
 	@Autowired private TaskRepository taskRepository;
 	@Autowired private SubmissionRepository submissionRepository;
+	@Autowired private StudentRepository studentRepository;
+	@Autowired private GuardianRepository guardianRepository;
+	@Autowired private StudentGuardianRepository studentGuardianRepository;
 	@Autowired private AcademicSeedService seedService;
 	@Autowired private PlatformTransactionManager txManager;
 
@@ -161,7 +172,7 @@ class LmsRbacIT extends IntegrationTest {
 
 			String body = String.format(
 					"{\"studentPublicUuid\":\"%s\",\"textBody\":\"submitted by parent\"}",
-					f.student().getPublicUuid());
+					f.studentRecord().getPublicUuid());
 			ResponseEntity<String> response = doPost(
 					TASKS_SUBS_BASE.replace("{task}", f.task().getPublicUuid().toString()),
 					bearer,
@@ -285,6 +296,7 @@ class LmsRbacIT extends IntegrationTest {
 			Section section,
 			Task task,
 			Submission submission,
+			Student studentRecord,
 			User student, User teacher, User parent, User staff
 	) {}
 
@@ -299,15 +311,53 @@ class LmsRbacIT extends IntegrationTest {
 		User teacher = createUserWithRole(tenant, "teacher@rbac.test", "TEACHER");
 		User parent = createUserWithRole(tenant, "parent@rbac.test", "PARENT");
 		User staff = createUserWithRole(tenant, "staff@rbac.test", "STAFF");
+		Student studentRecord = createStudentRecord(tenant, student);
+		createParentLink(tenant, studentRecord, parent);
 
 		Task task = createTask(tenant, section, teacher);
 		Submission submission = createSubmission(tenant, task, student);
 
-		return new Fixture(tenant, section, task, submission, student, teacher, parent, staff);
+		return new Fixture(tenant, section, task, submission, studentRecord,
+				student, teacher, parent, staff);
+	}
+
+	private Student createStudentRecord(Tenant tenant, User studentUser) {
+		return TenantContext.runAs(tenant.getId(), () -> tx().execute(s -> {
+			Student student = new Student();
+			student.setDocumentType(DocumentType.DNI);
+			student.setDocumentNumber("RBAC" + UUID.randomUUID().toString()
+					.replace("-", "").substring(0, 12));
+			student.setFirstName("RBAC Student");
+			student.setLastName(tenant.getSlug());
+			student.setUserId(studentUser.getPublicUuid());
+			return studentRepository.saveAndFlush(student);
+		}));
+	}
+
+	private void createParentLink(Tenant tenant, Student student, User parentUser) {
+		TenantContext.runAs(tenant.getId(), () -> tx().execute(s -> {
+			Guardian guardian = new Guardian();
+			guardian.setDocumentType(DocumentType.DNI);
+			guardian.setDocumentNumber("PAR" + UUID.randomUUID().toString()
+					.replace("-", "").substring(0, 12));
+			guardian.setFirstName("RBAC Parent");
+			guardian.setLastName(tenant.getSlug());
+			guardian.setUserId(parentUser.getPublicUuid());
+			guardian = guardianRepository.saveAndFlush(guardian);
+
+			StudentGuardian link = new StudentGuardian();
+			link.setStudent(student);
+			link.setGuardian(guardian);
+			link.setRelationship(RelationshipType.GUARDIAN);
+			link.setPrimaryContact(true);
+			link.setCanPickupStudent(true);
+			studentGuardianRepository.saveAndFlush(link);
+			return null;
+		}));
 	}
 
 	private Tenant createTenant(String slugPrefix) {
-		Tenant t = new Tenant();
+		Tenant t = newTestTenant();
 		t.setSlug(slugPrefix + UUID.randomUUID().toString().substring(0, 8));
 		t.setName("IT Tenant " + t.getSlug());
 		t.setStatus(TenantStatus.ACTIVE);
@@ -379,6 +429,8 @@ class LmsRbacIT extends IntegrationTest {
 			t.setDueAt(Instant.now().plus(7, ChronoUnit.DAYS));
 			t.setOwnerUserId(owner.getPublicUuid());
 			t.setAllowResubmission(true);
+			t.setStatus(com.edushift.modules.tasks.entity.TaskStatus.PUBLISHED);
+			t.setPublishedAt(Instant.now());
 			return taskRepository.saveAndFlush(t);
 		}));
 	}

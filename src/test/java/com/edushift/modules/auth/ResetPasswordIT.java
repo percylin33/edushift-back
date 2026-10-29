@@ -59,7 +59,7 @@ class ResetPasswordIT extends IntegrationTest {
 
 	@BeforeEach
 	void setUp() {
-		tenant = new Tenant();
+		tenant = newTestTenant();
 		tenant.setName("Reset Test Tenant");
 		tenant.setSlug(tenantSlug);
 		tenant.setStatus(TenantStatus.ACTIVE);

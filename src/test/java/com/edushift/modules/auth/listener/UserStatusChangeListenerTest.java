@@ -114,20 +114,16 @@ class UserStatusChangeListenerTest {
 	}
 
 	@Test
-	@DisplayName("DEBT-AUTH-4: ACTIVE → PENDING_VERIFICATION does NOT revoke (still authenticatable after verify)")
-	void pendingVerificationDoesNotRevoke() {
+	@DisplayName("ACTIVE → PENDING_VERIFICATION revokes existing sessions until verification")
+	void pendingVerificationRevokes() {
 		User u = userWithStatus(UserStatus.PENDING_VERIFICATION);
-		// No need to mock findByPublicUuid: the listener skips the revoke
-		// because the new status CAN authenticate (after email verify).
 		when(userRepository.findByPublicUuid(USER_PUBLIC_UUID)).thenReturn(Optional.of(u));
 
 		listener.onUserStatusChange(new UserStatusChangeEvent(
 				USER_PUBLIC_UUID, UserStatus.ACTIVE, UserStatus.PENDING_VERIFICATION,
 				"reset-email", ACTOR_PUBLIC_UUID));
 
-		verify(refreshTokenRepository, never()).revokeAllByUser(
-				(UUID) org.mockito.ArgumentMatchers.any(),
-				org.mockito.ArgumentMatchers.any(RevocationReason.class));
+		verify(refreshTokenRepository).revokeAllByUser(u.getId(), RevocationReason.ADMIN_REVOKE);
 	}
 
 	@Test

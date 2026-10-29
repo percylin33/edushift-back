@@ -174,10 +174,15 @@ public class PaymentService {
                     "INVOICE_CANCELLED", "This invoice has been cancelled");
         }
 
+        long amountDue = i.getBalanceCents();
+        if (amountDue <= 0) {
+            throw new com.edushift.shared.exception.BusinessException(
+                    "INVOICE_NO_BALANCE", "This invoice has no remaining balance");
+        }
         String initPoint = mpClient.createPreference(
                 i.getPublicUuid().toString(),
                 "Cuota EduShift — " + i.getPeriodLabel(),
-                i.getTotalCents(),
+                amountDue,
                 i.getCurrency(),
                 guardianEmail);
 
@@ -188,7 +193,7 @@ public class PaymentService {
         payment.setProvider(Payment.Provider.MERCADOPAGO);
         payment.setExternalReference(i.getPublicUuid().toString());
         payment.setStatus(Payment.Status.PENDING);
-        payment.setAmountCents(i.getTotalCents());
+        payment.setAmountCents(amountDue);
         payment.setCurrency(i.getCurrency());
         payment = paymentRepo.save(payment);
 
@@ -313,7 +318,7 @@ public class PaymentService {
                 .orElse("");
         String amount = String.format(Locale.US, "%s %.2f",
                 inv.getCurrency() == null ? "PEN" : inv.getCurrency(),
-                inv.getTotalCents() / 100.0);
+                inv.getBalanceCents() / 100.0);
         Map<String, Object> payload = new HashMap<>();
         payload.put("invoiceNumber", inv.getPeriodLabel());
         payload.put("concept", "Cuota " + inv.getPeriodLabel());
@@ -383,7 +388,7 @@ public class PaymentService {
                     p.setProvider(Payment.Provider.MERCADOPAGO);
                     p.setExternalId(dataId);
                     p.setExternalReference(mpExternalRef);
-                    p.setAmountCents(invoice.getTotalCents());
+                    p.setAmountCents(invoice.getBalanceCents());
                     p.setCurrency(invoice.getCurrency());
                     return p;
                 });

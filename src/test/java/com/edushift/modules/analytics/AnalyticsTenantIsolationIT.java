@@ -3,15 +3,48 @@ package com.edushift.modules.analytics;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.edushift.IntegrationTest;
+import com.edushift.modules.academic.levelgrade.entity.AcademicLevel;
+import com.edushift.modules.academic.levelgrade.entity.Grade;
+import com.edushift.modules.academic.levelgrade.repository.AcademicLevelRepository;
+import com.edushift.modules.academic.levelgrade.repository.GradeRepository;
+import com.edushift.modules.academic.levelgrade.service.AcademicSeedService;
+import com.edushift.modules.academic.section.entity.Section;
+import com.edushift.modules.academic.section.repository.SectionRepository;
+import com.edushift.modules.academic.year.entity.AcademicYear;
+import com.edushift.modules.academic.year.entity.AcademicYearStatus;
+import com.edushift.modules.academic.year.repository.AcademicYearRepository;
+import com.edushift.modules.admin.plans.PlatformPlanRepository;
+import com.edushift.modules.admin.subscriptions.B2BSubscription;
+import com.edushift.modules.admin.subscriptions.B2BSubscriptionRepository;
 import com.edushift.modules.analytics.dto.KpiResponse;
 import com.edushift.modules.analytics.dto.KpiSummaryResponse;
+import com.edushift.modules.analytics.entity.KpiSnapshot;
+import com.edushift.modules.analytics.entity.MetricKey;
+import com.edushift.modules.analytics.repository.KpiSnapshotRepository;
 import com.edushift.modules.analytics.service.AnalyticsService;
+import com.edushift.modules.attendance.entity.AttendanceRecord;
+import com.edushift.modules.attendance.entity.AttendanceRecordStatus;
+import com.edushift.modules.attendance.entity.AttendanceSession;
+import com.edushift.modules.attendance.entity.AttendanceSessionSlot;
+import com.edushift.modules.attendance.repository.AttendanceRecordRepository;
+import com.edushift.modules.attendance.repository.AttendanceSessionRepository;
+import com.edushift.modules.auth.entity.User;
+import com.edushift.modules.auth.entity.UserRole;
+import com.edushift.modules.auth.entity.UserStatus;
+import com.edushift.modules.auth.repository.UserRepository;
+import com.edushift.modules.students.entity.DocumentType;
+import com.edushift.modules.students.entity.EnrollmentStatus;
+import com.edushift.modules.students.entity.Student;
+import com.edushift.modules.students.repository.StudentRepository;
 import com.edushift.modules.tenants.entity.Tenant;
 import com.edushift.modules.tenants.entity.TenantStatus;
 import com.edushift.modules.tenants.repository.TenantRepository;
 import com.edushift.shared.multitenancy.TenantContext;
 import java.math.BigDecimal;
+import java.util.Map;
 import java.time.Instant;
+import java.sql.Timestamp;
+import java.time.LocalDate;
 import java.util.UUID;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
@@ -24,7 +57,7 @@ import org.springframework.transaction.support.TransactionTemplate;
  * Cross-tenant isolation IT for the {@code analytics} module
  * (Sprint cierre-A / B1).
  *
- * <p>Seeds attendance_records + grade_records + b2b_invoices for
+ * <p>Seeds attendance_records + b2b_invoices for
  * tenants A and B (different UUIDs, same logical shape) and verifies
  * that:</p>
  * <ul>
@@ -37,10 +70,9 @@ import org.springframework.transaction.support.TransactionTemplate;
  *       :tenantId).</li>
  * </ul>
  *
- * <p>Uses native SQL seeds to keep the test independent of every
- * module's service-layer validation. The IT does not exercise the
- * HTTP boundary — that is the responsibility of the controller-level
- * E2E suite.</p>
+ * <p>Builds valid section, student, session, subscription and invoice
+ * fixtures so the foreign keys remain enabled. Snapshot rows are inserted
+ * directly to isolate their tenant filter from the calculation path.</p>
  */
 class AnalyticsTenantIsolationIT extends IntegrationTest {
 
@@ -55,6 +87,18 @@ class AnalyticsTenantIsolationIT extends IntegrationTest {
 
 	@Autowired
 	private TransactionTemplate tx;
+	@Autowired private AcademicSeedService academicSeedService;
+	@Autowired private AcademicLevelRepository levelRepository;
+	@Autowired private GradeRepository gradeRepository;
+	@Autowired private AcademicYearRepository yearRepository;
+	@Autowired private SectionRepository sectionRepository;
+	@Autowired private AttendanceSessionRepository attendanceSessionRepository;
+	@Autowired private AttendanceRecordRepository attendanceRecordRepository;
+	@Autowired private StudentRepository studentRepository;
+	@Autowired private UserRepository userRepository;
+	@Autowired private B2BSubscriptionRepository subscriptionRepository;
+	@Autowired private PlatformPlanRepository platformPlanRepository;
+	@Autowired private KpiSnapshotRepository kpiSnapshotRepository;
 
 	private UUID tenantAId;
 	private UUID tenantBId;
@@ -70,15 +114,19 @@ class AnalyticsTenantIsolationIT extends IntegrationTest {
 		tenantAId = createTenant("alpha");
 		tenantBId = createTenant("bravo");
 
-		tx.executeWithoutResult(s -> seed(tenantAId,
-				2 /* present */, 1 /* late */, 1 /* absent */,
-				3 /* grades: 20, 18, 16 */,
-				1 /* overdue */, 3 /* total invoices */));
+		TenantContext.runAs(tenantAId, () -> {
+			tx.executeWithoutResult(s -> seed(tenantAId,
+					2 /* present */, 1 /* late */, 1 /* absent */,
+					1 /* overdue */, 3 /* total invoices */));
+			return null;
+		});
 
-		tx.executeWithoutResult(s -> seed(tenantBId,
-				0, 0, 5 /* all absent */,
-				0,
-				3 /* all overdue */, 3 /* total invoices */));
+		TenantContext.runAs(tenantBId, () -> {
+			tx.executeWithoutResult(s -> seed(tenantBId,
+					0, 0, 5 /* all absent */,
+					3 /* all overdue */, 3 /* total invoices */));
+			return null;
+		});
 
 		KpiSummaryResponse aSummary = TenantContext.runAs(tenantAId, () -> analyticsService.currentSummary());
 		KpiSummaryResponse bSummary = TenantContext.runAs(tenantBId, () -> analyticsService.currentSummary());
@@ -117,17 +165,20 @@ class AnalyticsTenantIsolationIT extends IntegrationTest {
 		tenantBId = createTenant("delta");
 
 		Instant now = Instant.now();
-		jdbc.update("""
-				INSERT INTO edushift.kpi_snapshots
-				  (id, tenant_id, created_at, updated_at, deleted,
-				   metric_key, period_start, period_end, value_numeric,
-				   dimensions, dimensions_hash, computed_at)
-				VALUES (?, ?, ?, ?, false, 'ATTENDANCE_RATE', ?, ?, 0.9,
-				        '{}'::jsonb, ?, ?)
-				""",
-				UUID.randomUUID(), tenantAId, now, now,
-				now.minusSeconds(3600), now,
-				"deadbeef", now);
+		TenantContext.runAs(tenantAId, () -> {
+			tx.executeWithoutResult(status -> {
+			KpiSnapshot snapshot = new KpiSnapshot();
+			snapshot.setMetricKey(MetricKey.ATTENDANCE_RATE);
+			snapshot.setPeriodStart(now.minusSeconds(3600));
+			snapshot.setPeriodEnd(now);
+			snapshot.setValueNumeric(new BigDecimal("0.9"));
+			snapshot.setDimensions(Map.of());
+			snapshot.setDimensionsHash("tenant-a-snapshot");
+			snapshot.setComputedAt(now);
+			kpiSnapshotRepository.saveAndFlush(snapshot);
+			});
+			return null;
+		});
 
 		Integer aCount = TenantContext.runAs(tenantAId, () ->
 				jdbc.queryForObject(
@@ -147,7 +198,7 @@ class AnalyticsTenantIsolationIT extends IntegrationTest {
 	// -----------------------------------------------------------------
 
 	private UUID createTenant(String slug) {
-		Tenant t = new Tenant();
+		Tenant t = newTestTenant();
 		t.setPublicUuid(UUID.randomUUID());
 		t.setSlug(slug);
 		t.setName("Test " + slug);
@@ -157,62 +208,93 @@ class AnalyticsTenantIsolationIT extends IntegrationTest {
 	}
 
 	private void seed(UUID tenantId, int present, int late, int absent,
-			int gradedScores, int overdueInvoices, int totalInvoices) {
+			int overdueInvoices, int totalInvoices) {
 		Instant now = Instant.now();
-		Instant occurred = now.minusSeconds(60);
+		academicSeedService.seedDefaults(tenantId);
+		AcademicLevel level = levelRepository.findByCodeIgnoreCase("PRIMARIA").orElseThrow();
+		Grade grade = gradeRepository.findAllByLevelOrderByOrdinalAsc(level).get(0);
 
+		AcademicYear year = new AcademicYear();
+		year.setName("Analytics " + UUID.randomUUID());
+		year.setStartDate(LocalDate.of(2026, 1, 1));
+		year.setEndDate(LocalDate.of(2026, 12, 31));
+		year.setStatus(AcademicYearStatus.ACTIVE);
+		year = yearRepository.saveAndFlush(year);
+
+		Section section = new Section();
+		section.setAcademicYear(year);
+		section.setGrade(grade);
+		section.setName("Analytics " + UUID.randomUUID().toString().substring(0, 8));
+		section = sectionRepository.saveAndFlush(section);
+
+		User actor = new User();
+		actor.setEmail("analytics-" + UUID.randomUUID() + "@test.local");
+		actor.setFirstName("Analytics");
+		actor.setLastName("Test");
+		actor.setPasswordHash("unused-test-hash");
+		actor.setRoles(new String[]{UserRole.TENANT_ADMIN.name()});
+		actor.setStatus(UserStatus.ACTIVE);
+		actor.setEmailVerified(true);
+		actor = userRepository.saveAndFlush(actor);
+
+		AttendanceSession session = new AttendanceSession();
+		session.setSection(section);
+		session.setOccurredOn(LocalDate.now());
+		session.setSlot(AttendanceSessionSlot.FULL_DAY);
+		session.setStartsAt(now);
+		session = attendanceSessionRepository.saveAndFlush(session);
+
+		int index = 0;
 		for (int i = 0; i < present; i++) {
-			insertAttendanceRecord(tenantId, "PRESENT", occurred);
+			insertAttendanceRecord(session, actor, AttendanceRecordStatus.PRESENT, index++);
 		}
 		for (int i = 0; i < late; i++) {
-			insertAttendanceRecord(tenantId, "LATE", occurred);
+			insertAttendanceRecord(session, actor, AttendanceRecordStatus.LATE, index++);
 		}
 		for (int i = 0; i < absent; i++) {
-			insertAttendanceRecord(tenantId, "ABSENT", occurred);
+			insertAttendanceRecord(session, actor, AttendanceRecordStatus.ABSENT, index++);
 		}
 
-		for (int i = 0; i < gradedScores; i++) {
-			int score = 20 - (i * 2);
-			insertGradeRecord(tenantId, score, now);
-		}
+		B2BSubscription subscription = new B2BSubscription();
+		subscription.setTenantId(tenantId);
+		subscription.setPlanId(platformPlanRepository.findByCode("BASIC").orElseThrow().getId());
+		subscription.setCurrentPeriodStart(LocalDate.now().withDayOfMonth(1));
+		subscription.setCurrentPeriodEnd(LocalDate.now().withDayOfMonth(1).plusMonths(1));
+		subscription.setNextBillingAt(LocalDate.now().withDayOfMonth(1).plusMonths(1));
+		subscription = subscriptionRepository.saveAndFlush(subscription);
 
 		for (int i = 0; i < overdueInvoices; i++) {
-			insertInvoice(tenantId, "OVERDUE", now);
+			insertInvoice(tenantId, subscription.getId(), "OVERDUE", now, i);
 		}
 		for (int i = overdueInvoices; i < totalInvoices; i++) {
-			insertInvoice(tenantId, "PAID", now);
+			insertInvoice(tenantId, subscription.getId(), "PAID", now, i);
 		}
 	}
 
-	private void insertAttendanceRecord(UUID tenantId, String status, Instant occurredAt) {
-		jdbc.update("""
-				INSERT INTO edushift.attendance_records
-				  (id, tenant_id, public_uuid, created_at, updated_at, deleted,
-				   session_id, student_id, status, occurred_at, scanned_by_user_id,
-				   edited_by_user_id, edited_at)
-				VALUES (?, ?, ?, ?, ?, false, ?, ?, ?, ?, NULL, NULL, NULL)
-				""",
-				UUID.randomUUID(), tenantId, UUID.randomUUID(),
-				occurredAt, occurredAt,
-				UUID.randomUUID(), UUID.randomUUID(),
-				status, occurredAt);
+	private void insertAttendanceRecord(AttendanceSession session, User actor,
+			AttendanceRecordStatus status, int index) {
+		Student student = new Student();
+		student.setDocumentType(DocumentType.DNI);
+		student.setDocumentNumber("AN-" + session.getId().toString().substring(0, 8) + "-" + index);
+		student.setFirstName("Analytics " + index);
+		student.setLastName("Student");
+		student.setEnrollmentStatus(EnrollmentStatus.ENROLLED);
+		student = studentRepository.saveAndFlush(student);
+
+		AttendanceRecord record = new AttendanceRecord();
+		record.setSession(session);
+		record.setStudent(student);
+		record.setStatus(status);
+		record.setOccurredAt(Instant.now().minusSeconds(60));
+		if (status == AttendanceRecordStatus.PRESENT || status == AttendanceRecordStatus.LATE) {
+			record.setScannedByUserId(actor.getPublicUuid());
+		}
+		attendanceRecordRepository.saveAndFlush(record);
 	}
 
-	private void insertGradeRecord(UUID tenantId, int score, Instant recordedAt) {
-		jdbc.update("""
-				INSERT INTO edushift.grade_records
-				  (id, tenant_id, public_uuid, created_at, updated_at, deleted,
-				   evaluation_id, student_id, score, literal, recorded_at,
-				   recorded_by_user_id, is_active)
-				VALUES (?, ?, ?, ?, ?, false, ?, ?, ?, NULL, ?, ?, true)
-				""",
-				UUID.randomUUID(), tenantId, UUID.randomUUID(),
-				recordedAt, recordedAt,
-				UUID.randomUUID(), UUID.randomUUID(),
-				score, recordedAt, UUID.randomUUID());
-	}
-
-	private void insertInvoice(UUID tenantId, String status, Instant issuedAt) {
+	private void insertInvoice(UUID tenantId, UUID subscriptionId, String status,
+			Instant issuedAt, int periodOffset) {
+		LocalDate periodStart = LocalDate.now().withDayOfMonth(1).plusMonths(periodOffset);
 		jdbc.update("""
 				INSERT INTO edushift.b2b_invoices
 				  (id, tenant_id, public_uuid, subscription_id, period_start, period_end,
@@ -222,12 +304,10 @@ class AnalyticsTenantIsolationIT extends IntegrationTest {
 				VALUES (?, ?, ?, ?, ?, ?, 1, 1000, 1000, 0, 1000, ?, ?, ?, NULL, 0, ?, ?, false)
 				""",
 				UUID.randomUUID(), tenantId, UUID.randomUUID(),
-				UUID.randomUUID(),
-				java.sql.Date.valueOf(java.time.LocalDate.now().withDayOfMonth(1)),
-				java.sql.Date.valueOf(java.time.LocalDate.now().withDayOfMonth(1).plusMonths(1)),
-				status, issuedAt,
-				java.sql.Date.valueOf(java.time.LocalDate.now()),
-				issuedAt, issuedAt);
+				subscriptionId, periodStart, periodStart.plusMonths(1),
+				status, Timestamp.from(issuedAt),
+				LocalDate.now(),
+				Timestamp.from(issuedAt), Timestamp.from(issuedAt));
 	}
 
 	private KpiResponse findKpi(KpiSummaryResponse summary, String metricKey) {

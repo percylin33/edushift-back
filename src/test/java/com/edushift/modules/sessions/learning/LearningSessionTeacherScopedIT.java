@@ -8,6 +8,10 @@ import com.edushift.modules.auth.entity.User;
 import com.edushift.modules.auth.entity.UserRole;
 import com.edushift.modules.auth.entity.UserStatus;
 import com.edushift.modules.auth.repository.UserRepository;
+import com.edushift.modules.students.entity.DocumentType;
+import com.edushift.modules.teachers.entity.EmploymentStatus;
+import com.edushift.modules.teachers.entity.Teacher;
+import com.edushift.modules.teachers.repository.TeacherRepository;
 import com.edushift.modules.tenants.entity.Tenant;
 import com.edushift.modules.tenants.entity.TenantStatus;
 import com.edushift.modules.tenants.repository.TenantRepository;
@@ -16,6 +20,7 @@ import com.edushift.modules.admin.plans.PlatformPlanRepository;
 import com.edushift.shared.multitenancy.TenantContext;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.UUID;
+import java.time.LocalDate;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -51,6 +56,7 @@ class LearningSessionTeacherScopedIT extends IntegrationTest {
     @Autowired private TestRestTemplate rest;
     @Autowired private TenantRepository tenantRepository;
     @Autowired private UserRepository userRepository;
+    @Autowired private TeacherRepository teacherRepository;
     @Autowired private PlatformPlanRepository planRepository;
     @Autowired private PasswordEncoder passwordEncoder;
     @Autowired private PlatformTransactionManager txManager;
@@ -121,7 +127,7 @@ class LearningSessionTeacherScopedIT extends IntegrationTest {
         ResponseEntity<String> r = rest.exchange(AUTH_BASE + "/login", HttpMethod.POST,
                 new HttpEntity<>(body, h), String.class);
         assertThat(r.getStatusCode()).as("login body=%s", r.getBody()).isEqualTo(HttpStatus.OK);
-        return objectMapper.readValue(r.getBody(), AuthResponse.class);
+        return readSessionResponse(objectMapper, r);
     }
 
     private ResponseEntity<String> doGet(String path, String bearer) {
@@ -140,20 +146,21 @@ class LearningSessionTeacherScopedIT extends IntegrationTest {
         PlatformPlan basicPlan = planRepository.findAll().stream()
                 .filter(p -> "BASIC".equals(p.getCode()))
                 .findFirst().orElseGet(() -> planRepository.findAll().get(0));
-        Tenant t = new Tenant();
+        Tenant t = newTestTenant();
         t.setSlug("lsscope-" + UUID.randomUUID().toString().substring(0, 8));
         t.setName("LS Scope IT " + t.getSlug());
         t.setStatus(TenantStatus.ACTIVE);
         t.setPlanId(basicPlan.getId());
         Tenant saved = tx().execute(s -> tenantRepository.saveAndFlush(t));
 
-        createUser(saved, TEACHER_EMAIL, TEACHER_PWD, UserRole.TEACHER);
+        User teacher = createUser(saved, TEACHER_EMAIL, TEACHER_PWD, UserRole.TEACHER);
+        createTeacherProfile(saved, teacher);
         createUser(saved, ADMIN_EMAIL, ADMIN_PWD, UserRole.TENANT_ADMIN);
         return saved;
     }
 
-    private void createUser(Tenant tenant, String email, String pwd, UserRole... roles) {
-        TenantContext.runAs(tenant.getId(), () -> tx().execute(s -> {
+    private User createUser(Tenant tenant, String email, String pwd, UserRole... roles) {
+        return TenantContext.runAs(tenant.getId(), () -> tx().execute(s -> {
             User u = new User();
             u.setEmail(email);
             u.setPasswordHash(passwordEncoder.encode(pwd));
@@ -163,7 +170,22 @@ class LearningSessionTeacherScopedIT extends IntegrationTest {
             u.setEmailVerified(true);
             u.setMfaEnabled(false);
             for (UserRole r : roles) { u.addRole(r); }
-            userRepository.saveAndFlush(u);
+            return userRepository.saveAndFlush(u);
+        }));
+    }
+
+    private void createTeacherProfile(Tenant tenant, User user) {
+        TenantContext.runAs(tenant.getId(), () -> tx().execute(s -> {
+            Teacher teacher = new Teacher();
+            teacher.setFirstName(user.getFirstName());
+            teacher.setLastName(user.getLastName());
+            teacher.setEmail(user.getEmail());
+            teacher.setEmploymentStatus(EmploymentStatus.ACTIVE);
+            teacher.setUserId(user.getPublicUuid());
+            teacher.setDocumentType(DocumentType.DNI);
+            teacher.setDocumentNumber(UUID.randomUUID().toString().substring(0, 8));
+            teacher.setBirthDate(LocalDate.of(1985, 1, 1));
+            teacherRepository.saveAndFlush(teacher);
             return null;
         }));
     }

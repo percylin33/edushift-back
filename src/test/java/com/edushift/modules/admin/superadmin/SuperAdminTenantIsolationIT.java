@@ -479,16 +479,18 @@ class SuperAdminTenantIsolationIT extends IntegrationTest {
 					BASE + "/" + newId + "/disable", bearer);
 			assertThat(disableResp.getStatusCode()).isEqualTo(HttpStatus.OK);
 
-			List<AuditLog> logs = auditLogRepository.findAll().stream()
-					.filter(l -> newId.equals(l.getResourceId()))
-					.toList();
-			assertThat(logs)
-					.as("create + disable must emit two audit logs for the new admin")
-					.hasSize(2);
-			assertThat(logs).extracting(AuditLog::getAction)
-					.containsExactlyInAnyOrder(AuditAction.CREATE, AuditAction.UPDATE);
-			assertThat(logs).extracting(AuditLog::getResourceType)
-					.containsOnly("super_admin");
+			org.awaitility.Awaitility.await().atMost(java.time.Duration.ofSeconds(5)).untilAsserted(() -> {
+				List<AuditLog> logs = auditLogRepository.findAll().stream()
+						.filter(l -> newId.equals(l.getResourceId()))
+						.toList();
+				assertThat(logs)
+						.as("create + disable must emit two audit logs for the new admin")
+						.hasSize(2);
+				assertThat(logs).extracting(AuditLog::getAction)
+						.containsExactlyInAnyOrder(AuditAction.CREATE, AuditAction.UPDATE);
+				assertThat(logs).extracting(AuditLog::getResourceType)
+						.containsOnly("super_admin");
+			});
 		}
 	}
 
@@ -561,7 +563,7 @@ class SuperAdminTenantIsolationIT extends IntegrationTest {
 	}
 
 	private Tenant createTenant(String slugPrefix) {
-		Tenant t = new Tenant();
+		Tenant t = newTestTenant();
 		t.setSlug(slugPrefix + UUID.randomUUID().toString().substring(0, 8));
 		t.setName("IT Tenant " + t.getSlug());
 		t.setStatus(TenantStatus.ACTIVE);

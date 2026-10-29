@@ -528,14 +528,15 @@ public class AuthServiceImpl implements AuthService {
 		if (auth == null || !auth.isAuthenticated() || auth.getPrincipal() == null) {
 			throw new UnauthorizedException("MFA_TOKEN_MISSING", "MFA token is required");
 		}
+		if (!(auth.getDetails() instanceof JwtService.JwtClaims claims)
+				|| claims.type() != JwtService.TokenType.MFA) {
+			throw new UnauthorizedException("MFA_TOKEN_INVALID", "A verified MFA token is required");
+		}
 		UUID userPublicUuid = UUID.fromString(auth.getName());
 		Tenant tenant = tenantRepository.findBySlugIgnoreCase(tenantSlug)
 				.orElseThrow(() -> TenantNotFoundException.forSlug(tenantSlug));
 		// Defense in depth: tenant from the JWT must match the slug.
-		JwtService.JwtClaims claims = jwtService.parseAndValidate(
-				(String) auth.getCredentials());
-		if (claims.type() != JwtService.TokenType.MFA
-				|| !tenant.getId().equals(claims.tenantId())) {
+		if (!tenant.getId().equals(claims.tenantId())) {
 			throw new UnauthorizedException("MFA_TOKEN_INVALID",
 					"MFA token does not match the tenant");
 		}

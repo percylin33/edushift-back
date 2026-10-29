@@ -90,7 +90,7 @@ class StudentPortalInviteAcceptFlowIT extends IntegrationTest {
 		assertThat(token).isNotBlank();
 
 		String acceptBody = """
-				{"token":"%s","password":"NewStud-9!"}""".formatted(token);
+				{"token":"%s","password":"Nw!7qR5zH3pM9x"}""".formatted(token);
 		ResponseEntity<String> acceptResp = rest.exchange(
 				INVITATIONS_BASE + "/accept", HttpMethod.POST,
 				new HttpEntity<>(acceptBody, jsonHeaders()), String.class);
@@ -192,8 +192,8 @@ class StudentPortalInviteAcceptFlowIT extends IntegrationTest {
 	}
 
 	@Test
-	@DisplayName("invite student without email → 422 STUDENT_EMAIL_REQUIRED")
-	void inviteRefusedWithoutEmail() throws Exception {
+	@DisplayName("invite student without email generates a school login")
+	void inviteWithoutEmail() throws Exception {
 		Tenant tenant = createTenant("it-st-noemail-");
 		createAdmin(tenant, ADMIN_EMAIL, ADMIN_PASSWORD);
 		Student student = seedStudent(tenant, "55555555", null);
@@ -203,8 +203,10 @@ class StudentPortalInviteAcceptFlowIT extends IntegrationTest {
 				STUDENTS_BASE + "/" + student.getPublicUuid() + "/invite",
 				adminLogin.accessToken(), null);
 
-		assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_ENTITY);
-		assertThat(response.getBody()).contains("STUDENT_EMAIL_REQUIRED");
+		assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        JsonNode data = objectMapper.readTree(response.getBody()).get("data");
+        assertThat(data.get("email").asText()).endsWith("@slud-del-colegio.com");
+        assertThat(data.get("invitationToken").asText()).isNotBlank();
 	}
 
 	private HttpHeaders jsonHeaders() {
@@ -220,7 +222,7 @@ class StudentPortalInviteAcceptFlowIT extends IntegrationTest {
 		ResponseEntity<String> response = rest.exchange(AUTH_BASE + "/login", HttpMethod.POST,
 				new HttpEntity<>(body, headers), String.class);
 		assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
-		return objectMapper.readValue(response.getBody(), AuthResponse.class);
+		return readSessionResponse(objectMapper, response);
 	}
 
 	private ResponseEntity<String> doPost(String path, String bearer, String body) {
@@ -241,7 +243,7 @@ class StudentPortalInviteAcceptFlowIT extends IntegrationTest {
 						.map(PlatformPlan::getId)
 						.orElseThrow(() -> new IllegalStateException(
 								"No platform_plans rows; did Flyway V54 run?")));
-		Tenant t = new Tenant();
+		Tenant t = newTestTenant();
 		t.setSlug(slugPrefix + UUID.randomUUID().toString().substring(0, 8));
 		t.setName("IT Tenant " + t.getSlug());
 		t.setStatus(TenantStatus.ACTIVE);

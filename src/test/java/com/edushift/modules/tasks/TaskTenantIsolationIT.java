@@ -148,8 +148,9 @@ class TaskTenantIsolationIT extends IntegrationTest {
 			AuthResponse loginB = login(fixture.tenantB().getSlug(), SHARED_EMAIL, PASSWORD_B);
 			String body = String.format(
 					"{\"title\":\"hijacked\",\"description\":\"hijack\","
-							+ "\"dueAt\":\"%s\"}",
-					Instant.now().plus(7, ChronoUnit.DAYS));
+							+ "\"dueAt\":\"%s\",\"maxScore\":100,"
+							+ "\"teacherAssignmentPublicUuid\":\"%s\"}",
+					Instant.now().plus(7, ChronoUnit.DAYS), UUID.randomUUID());
 
 			ResponseEntity<String> response = doPost(
 					SECTIONS_TASKS_BASE.replace("{section}",
@@ -249,7 +250,7 @@ class TaskTenantIsolationIT extends IntegrationTest {
 		assertThat(response.getStatusCode())
 				.as("seed login() requires HTTP 200; body=%s", response.getBody())
 				.isEqualTo(HttpStatus.OK);
-		return objectMapper.readValue(response.getBody(), AuthResponse.class);
+		return readSessionResponse(objectMapper, response);
 	}
 
 	private ResponseEntity<String> doGet(String path, String bearer) {
@@ -310,7 +311,7 @@ class TaskTenantIsolationIT extends IntegrationTest {
 	}
 
 	private Tenant createTenant(String slugPrefix) {
-		Tenant t = new Tenant();
+		Tenant t = newTestTenant();
 		t.setSlug(slugPrefix + UUID.randomUUID().toString().substring(0, 8));
 		t.setName("IT Tenant " + t.getSlug());
 		t.setStatus(TenantStatus.ACTIVE);

@@ -22,6 +22,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.transaction.event.TransactionPhase;
 import org.springframework.transaction.event.TransactionalEventListener;
 
@@ -37,6 +39,7 @@ public class SessionClosedAbsencesListener {
 	private final StudentGuardianRepository studentGuardianRepository;
 	private final UserRepository userRepository;
 	private final ApplicationEventPublisher eventPublisher;
+	private final PlatformTransactionManager transactionManager;
 
 	@Async
 	@TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
@@ -50,7 +53,7 @@ public class SessionClosedAbsencesListener {
 			return;
 		}
 
-		TenantContext.runAs(event.tenantId(), () -> {
+		TenantContext.runAs(event.tenantId(), () -> new TransactionTemplate(transactionManager).execute(status -> {
 			Map<UUID, SessionClosedAbsencesEvent.AbsentStudent> byStudentId = event.absents().stream()
 					.filter(a -> a.studentId() != null)
 					.collect(Collectors.toMap(
@@ -62,15 +65,15 @@ public class SessionClosedAbsencesListener {
 			List<StudentGuardian> guardians =
 					studentGuardianRepository.findActiveByStudentIdsWithLinkedGuardian(studentIds);
 
-			Set<UUID> guardianUserInternalIds = new HashSet<>();
+			Set<UUID> guardianUserPublicUuids = new HashSet<>();
 			for (StudentGuardian sg : guardians) {
 				if (sg.getGuardian() != null && sg.getGuardian().getUserId() != null) {
-					guardianUserInternalIds.add(sg.getGuardian().getUserId());
+					guardianUserPublicUuids.add(sg.getGuardian().getUserId());
 				}
 			}
-			Map<UUID, UUID> guardianInternalToPublic = new HashMap<>();
-			for (User u : userRepository.findAllById(guardianUserInternalIds)) {
-				guardianInternalToPublic.put(u.getId(), u.getPublicUuid());
+			Map<UUID, UUID> guardianPublicUuids = new HashMap<>();
+			for (User u : userRepository.findAllByPublicUuidIn(guardianUserPublicUuids)) {
+				guardianPublicUuids.put(u.getPublicUuid(), u.getPublicUuid());
 			}
 
 			int published = 0;
@@ -89,7 +92,7 @@ public class SessionClosedAbsencesListener {
 					skipped++;
 					continue;
 				}
-				UUID guardianPublicUserId = guardianInternalToPublic.get(guardian.getUserId());
+				UUID guardianPublicUserId = guardianPublicUuids.get(guardian.getUserId());
 				if (guardianPublicUserId == null) {
 					log.warn(
 							"[attendance] absence fan-out -- skip; guardian user_id={} not found in users",
@@ -143,6 +146,6 @@ public class SessionClosedAbsencesListener {
 					published,
 					skipped);
 			return Boolean.TRUE;
-		});
+		}));
 	}
 }

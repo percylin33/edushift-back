@@ -17,6 +17,8 @@ public record InvoiceResponse(
         long discountCents,
         long taxCents,
         long totalCents,
+        long advanceAppliedCents,
+        long balanceCents,
         Invoice.Status status,
         Instant issuedAt,
         Instant dueAt,
@@ -38,7 +40,7 @@ public record InvoiceResponse(
                 i.getPublicUuid(), i.getSubscriptionId(), i.getStudentId(),
                 i.getGuardianUserId(), i.getPeriodLabel(), i.getCurrency(),
                 i.getSubtotalCents(), i.getDiscountCents(), i.getTaxCents(),
-                i.getTotalCents(), i.getStatus(), i.getIssuedAt(), i.getDueAt(),
+                i.getTotalCents(), i.getAdvanceAppliedCents(), i.getBalanceCents(), i.getStatus(), i.getIssuedAt(), i.getDueAt(),
                 i.getPaidAt(), i.getNotes(),
                 i.getEvidenceFilePublicUuid(),
                 i.getEvidenceSubmittedAt(),
@@ -55,6 +57,7 @@ public record InvoiceResponse(
 		return new InvoiceResponse(
 				publicUuid, subscriptionId, studentId, guardianUserId, periodLabel,
 				currency, subtotalCents, discountCents, taxCents, totalCents,
+				advanceAppliedCents, balanceCents,
 				status, issuedAt, dueAt, paidAt, notes, evidenceFilePublicUuid,
 				evidenceSubmittedAt, evidenceNotes, evidenceRejectionReason,
 				moraCents, moraExempt, items, identity);

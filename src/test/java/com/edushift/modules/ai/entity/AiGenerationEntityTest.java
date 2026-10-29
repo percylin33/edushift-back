@@ -8,9 +8,9 @@ import org.junit.jupiter.api.Test;
 class AiGenerationEntityTest {
 
     @Test
-    @DisplayName("Feature enum exposes 4 values")
+    @DisplayName("Feature enum includes application sheet suggestions")
     void features() {
-        assertThat(AiGeneration.Feature.values()).hasSize(4);
+        assertThat(AiGeneration.Feature.values()).containsExactly(AiGeneration.Feature.QUIZ_QUESTION_SUGGEST, AiGeneration.Feature.RUBRIC_SUGGEST, AiGeneration.Feature.SESSION_OUTLINE_SUGGEST, AiGeneration.Feature.APPLICATION_SHEET_SUGGEST, AiGeneration.Feature.OTHER);
         assertThat(AiGeneration.Feature.QUIZ_QUESTION_SUGGEST).isNotNull();
         assertThat(AiGeneration.Feature.RUBRIC_SUGGEST).isNotNull();
         assertThat(AiGeneration.Feature.SESSION_OUTLINE_SUGGEST).isNotNull();

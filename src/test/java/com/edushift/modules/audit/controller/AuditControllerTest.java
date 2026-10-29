@@ -18,6 +18,8 @@ import org.springframework.test.web.servlet.MockMvc;
 @WebMvcTest(AuditController.class)
 @Import({com.edushift.test.EdushiftWebMvcTestConfig.class, com.edushift.test.TestSecurityConfig.class})
 class AuditControllerTest extends AbstractControllerTest {
+    @org.springframework.test.context.bean.override.mockito.MockitoBean
+    com.edushift.modules.audit.repository.AuditDirectoryRepository auditDirectoryRepository;
 
     @Autowired MockMvc mockMvc;
     @MockitoBean AuditLogRepository auditLogRepository;

@@ -142,8 +142,10 @@ public class UserManagementController {
 	@PreAuthorize("hasRole('TENANT_ADMIN')")
 	@Operation(
 			summary = "Replace a user's roles (TENANT_ADMIN)",
-			description = "Wholesale replacement: persists exactly the set in "
-					+ "the body. 422 INVALID_ROLE on unknown role names; "
+			description = "Wholesale replacement: persists the set in the body. "
+					+ "TEACHER, STUDENT, and PARENT are controlled from "
+					+ "their profile modules and cannot be added or removed here. "
+					+ "422 INVALID_ROLE on unknown role names; "
 					+ "409 LAST_ADMIN_PROTECTION when the operation would "
 					+ "strand the tenant without an active TENANT_ADMIN."
 	)

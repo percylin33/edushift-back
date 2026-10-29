@@ -7,6 +7,14 @@ import com.edushift.modules.admissions.dto.CreateAdmissionApplicationRequest;
 import com.edushift.modules.admissions.dto.GradeVacancyResponse;
 import com.edushift.modules.admissions.dto.LinkAdmissionEnrollmentRequest;
 import com.edushift.modules.admissions.dto.TransitionAdmissionStatusRequest;
+import com.edushift.modules.admissions.dto.AdmissionReservationResponse;
+import com.edushift.modules.admissions.dto.AdmissionReservationEventResponse;
+import com.edushift.modules.admissions.dto.AdmissionReservationAdvanceResponse;
+import com.edushift.modules.admissions.dto.AdmissionReservationAdvanceEventResponse;
+import com.edushift.modules.admissions.dto.CreateAdmissionReservationRequest;
+import com.edushift.modules.admissions.dto.RecordAdmissionReservationAdvanceRequest;
+import com.edushift.modules.admissions.dto.RecordAdmissionReservationAdvanceRefundRequest;
+import com.edushift.modules.admissions.dto.UpdateAdmissionReservationRequest;
 import java.util.List;
 import java.util.UUID;
 
@@ -20,6 +28,24 @@ public interface AdmissionService {
 	List<AdmissionApplicationResponse> listApplications(UUID academicYearPublicUuid);
 
 	List<GradeVacancyResponse> listVacancies(UUID academicYearPublicUuid);
+
+	List<AdmissionReservationResponse> listReservations(UUID academicYearPublicUuid);
+
+	AdmissionReservationResponse reserve(UUID applicationPublicUuid, CreateAdmissionReservationRequest request);
+
+	AdmissionReservationResponse updateReservation(UUID reservationPublicUuid, UpdateAdmissionReservationRequest request);
+
+	AdmissionReservationAdvanceResponse recordReservationAdvance(UUID reservationPublicUuid,
+			RecordAdmissionReservationAdvanceRequest request);
+
+	List<AdmissionReservationAdvanceResponse> reservationAdvances(UUID reservationPublicUuid);
+
+	List<AdmissionReservationAdvanceEventResponse> reservationAdvanceEvents(UUID reservationPublicUuid);
+
+	AdmissionReservationAdvanceResponse refundReservationAdvance(UUID reservationPublicUuid, UUID advancePublicUuid,
+			RecordAdmissionReservationAdvanceRefundRequest request);
+
+	List<AdmissionReservationEventResponse> reservationHistory(UUID reservationPublicUuid);
 
 	AdmissionApplicationResponse create(UUID academicYearPublicUuid, CreateAdmissionApplicationRequest request);
 

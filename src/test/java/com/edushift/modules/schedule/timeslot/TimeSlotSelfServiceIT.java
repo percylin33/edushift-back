@@ -5,10 +5,19 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.edushift.IntegrationTest;
 import com.edushift.modules.academic.course.entity.Course;
 import com.edushift.modules.academic.course.repository.CourseRepository;
+import com.edushift.modules.academic.levelgrade.entity.AcademicLevel;
+import com.edushift.modules.academic.levelgrade.entity.Grade;
+import com.edushift.modules.academic.levelgrade.repository.AcademicLevelRepository;
+import com.edushift.modules.academic.levelgrade.repository.GradeRepository;
+import com.edushift.modules.academic.levelgrade.service.AcademicSeedService;
 import com.edushift.modules.academic.period.entity.AcademicPeriod;
+import com.edushift.modules.academic.period.entity.PeriodType;
 import com.edushift.modules.academic.period.repository.AcademicPeriodRepository;
 import com.edushift.modules.academic.section.entity.Section;
 import com.edushift.modules.academic.section.repository.SectionRepository;
+import com.edushift.modules.academic.year.entity.AcademicYear;
+import com.edushift.modules.academic.year.entity.AcademicYearStatus;
+import com.edushift.modules.academic.year.repository.AcademicYearRepository;
 import com.edushift.modules.auth.entity.User;
 import com.edushift.modules.auth.entity.UserStatus;
 import com.edushift.modules.auth.repository.UserRepository;
@@ -77,6 +86,10 @@ class TimeSlotSelfServiceIT extends IntegrationTest {
 	@Autowired private UserRepository userRepository;
 	@Autowired private TeacherRepository teacherRepository;
 	@Autowired private SectionRepository sectionRepository;
+	@Autowired private AcademicLevelRepository levelRepository;
+	@Autowired private GradeRepository gradeRepository;
+	@Autowired private AcademicYearRepository yearRepository;
+	@Autowired private AcademicSeedService academicSeedService;
 	@Autowired private CourseRepository courseRepository;
 	@Autowired private AcademicPeriodRepository periodRepository;
 	@Autowired private TeacherAssignmentRepository assignmentRepository;
@@ -90,7 +103,7 @@ class TimeSlotSelfServiceIT extends IntegrationTest {
 	@DisplayName("SPRINT5-CASCADE: TENANT_ADMIN sees any teacher in own tenant → 200")
 	void adminSeesAnyTeacher() throws Exception {
 		Seed seed = seedSingleTenantWithOneTeacher();
-		String jwt = login(seed.tenant, seed.tenant.getSlug() + "-admin",
+		String jwt = login(seed.tenant, "admin",
 				PASSWORD_ADMIN);
 
 		ResponseEntity<String> resp = rest.exchange(
@@ -113,7 +126,7 @@ class TimeSlotSelfServiceIT extends IntegrationTest {
 	@DisplayName("SPRINT5-CASCADE: TEACHER bearer A reads own schedule → 200")
 	void teacherReadsOwn() throws Exception {
 		Seed seed = seedSingleTenantWithOneTeacher();
-		String jwt = login(seed.tenant, seed.tenant.getSlug() + "-teacher-a",
+		String jwt = login(seed.tenant, "teacher-a",
 				PASSWORD_TEACHER_A);
 
 		ResponseEntity<String> resp = rest.exchange(
@@ -130,7 +143,7 @@ class TimeSlotSelfServiceIT extends IntegrationTest {
 			+ "(anti-enumeration)")
 	void teacherCannotReadAnotherTeacher() throws Exception {
 		Seed seed = seedSingleTenantWithTwoTeachers();
-		String jwt = login(seed.tenant, seed.tenant.getSlug() + "-teacher-a",
+		String jwt = login(seed.tenant, "teacher-a",
 				PASSWORD_TEACHER_A);
 
 		ResponseEntity<String> resp = rest.exchange(
@@ -181,16 +194,62 @@ class TimeSlotSelfServiceIT extends IntegrationTest {
 	}
 
 	private Tenant createTenant() {
-		Tenant t = new Tenant();
+		Tenant t = newTestTenant();
 		t.setSlug("it-self-" + UUID.randomUUID().toString().substring(0, 8));
 		t.setName("IT Tenant " + t.getSlug());
 		t.setStatus(TenantStatus.ACTIVE);
-		t.setPlan(TenantPlan.TRIAL);
+		t.setPlan(TenantPlan.BASIC);
 		t.setPlanId(jdbcTemplate.queryForObject(
 				"select id from edushift.platform_plans where code = ?",
-				UUID.class, "TRIAL"));
-		return new TransactionTemplate(txManager).execute(s ->
-				tenantRepository.saveAndFlush(t));
+				UUID.class, "BASIC"));
+		Tenant saved = new TransactionTemplate(txManager).execute(s ->
+			tenantRepository.saveAndFlush(t));
+		seedAcademicSkeleton(saved);
+		return saved;
+	}
+
+	private void seedAcademicSkeleton(Tenant tenant) {
+		TenantContext.runAs(tenant.getId(), () -> {
+			new TransactionTemplate(txManager).execute(status -> {
+				academicSeedService.seedDefaults(tenant.getId());
+				AcademicLevel level = levelRepository.findByCodeIgnoreCase("PRIMARIA")
+						.orElseThrow();
+				Grade grade = gradeRepository.findAllByLevelOrderByOrdinalAsc(level).get(0);
+				LocalDate start = LocalDate.now().minusDays(30);
+				LocalDate end = LocalDate.now().plusDays(330);
+				AcademicYear year = new AcademicYear();
+				year.setName("IT-" + UUID.randomUUID().toString().substring(0, 8));
+				year.setStartDate(start);
+				year.setEndDate(end);
+				year.setStatus(AcademicYearStatus.ACTIVE);
+				year = yearRepository.saveAndFlush(year);
+
+				Section section = new Section();
+				section.setAcademicYear(year);
+				section.setGrade(grade);
+				section.setName("A");
+				section.setDisplayOrder(1);
+				sectionRepository.saveAndFlush(section);
+
+				Course course = new Course();
+				course.setCode("ITX" + UUID.randomUUID().toString().replace("-", "")
+						.substring(0, 8).toUpperCase());
+				course.setName("IT Course");
+				course.setIsActive(true);
+				courseRepository.saveAndFlush(course);
+
+				AcademicPeriod period = new AcademicPeriod();
+				period.setAcademicYear(year);
+				period.setPeriodType(PeriodType.TRIMESTRE);
+				period.setOrdinal(1);
+				period.setName("IT Period");
+				period.setStartDate(start);
+				period.setEndDate(end);
+				periodRepository.saveAndFlush(period);
+				return null;
+			});
+			return null;
+		});
 	}
 
 	private void createUser(Tenant tenant, String localPart, String rawPassword,
@@ -274,10 +333,10 @@ class TimeSlotSelfServiceIT extends IntegrationTest {
 			HttpHeaders headers = new HttpHeaders();
 			headers.setContentType(MediaType.APPLICATION_JSON);
 			headers.set("X-Tenant-Slug", tenant.getSlug());
-			JsonNode root = objectMapper.readTree(rest.exchange(
+			var loginResponse = rest.exchange(
 					"/v1/auth/login", HttpMethod.POST,
-					new HttpEntity<>(body, headers), String.class).getBody());
-			return root.get("accessToken").asText();
+					new HttpEntity<>(body, headers), String.class);
+			return readSessionResponse(objectMapper, loginResponse).accessToken();
 		} catch (Exception e) {
 			throw new RuntimeException(e);
 		}

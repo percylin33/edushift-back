@@ -8,6 +8,11 @@ import com.edushift.modules.academic.levelgrade.entity.Grade;
 import com.edushift.modules.academic.levelgrade.repository.AcademicLevelRepository;
 import com.edushift.modules.academic.levelgrade.repository.GradeRepository;
 import com.edushift.modules.academic.levelgrade.service.AcademicSeedService;
+import com.edushift.modules.academic.course.entity.Course;
+import com.edushift.modules.academic.course.repository.CourseRepository;
+import com.edushift.modules.academic.period.entity.AcademicPeriod;
+import com.edushift.modules.academic.period.entity.PeriodType;
+import com.edushift.modules.academic.period.repository.AcademicPeriodRepository;
 import com.edushift.modules.academic.section.entity.Section;
 import com.edushift.modules.academic.section.repository.SectionRepository;
 import com.edushift.modules.academic.year.entity.AcademicYear;
@@ -18,6 +23,12 @@ import com.edushift.modules.auth.entity.User;
 import com.edushift.modules.auth.entity.UserRole;
 import com.edushift.modules.auth.entity.UserStatus;
 import com.edushift.modules.auth.repository.UserRepository;
+import com.edushift.modules.students.entity.DocumentType;
+import com.edushift.modules.teachers.assignments.entity.TeacherAssignment;
+import com.edushift.modules.teachers.assignments.repository.TeacherAssignmentRepository;
+import com.edushift.modules.teachers.entity.EmploymentStatus;
+import com.edushift.modules.teachers.entity.Teacher;
+import com.edushift.modules.teachers.repository.TeacherRepository;
 import com.edushift.modules.quizzes.entity.Quiz;
 import com.edushift.modules.quizzes.repository.QuizRepository;
 import com.edushift.modules.tenants.entity.Tenant;
@@ -81,6 +92,10 @@ class QuizTenantIsolationIT extends IntegrationTest {
 	@Autowired private GradeRepository gradeRepository;
 	@Autowired private SectionRepository sectionRepository;
 	@Autowired private QuizRepository quizRepository;
+	@Autowired private CourseRepository courseRepository;
+	@Autowired private AcademicPeriodRepository periodRepository;
+	@Autowired private TeacherRepository teacherRepository;
+	@Autowired private TeacherAssignmentRepository assignmentRepository;
 	@Autowired private AcademicSeedService seedService;
 	@Autowired private PasswordEncoder passwordEncoder;
 	@Autowired private PlatformTransactionManager txManager;
@@ -156,7 +171,9 @@ class QuizTenantIsolationIT extends IntegrationTest {
 			AuthResponse loginB = login(fixture.tenantB().getSlug(), SHARED_EMAIL, PASSWORD_B);
 			String body = String.format(
 					"{\"title\":\"hijacked\",\"description\":\"hijack\","
-							+ "\"maxScore\":20,\"maxAttempts\":1}");
+							+ "\"maxScore\":20,\"maxAttempts\":1,"
+							+ "\"teacherAssignmentPublicUuid\":\"%s\"}",
+					fixture.assignmentA().getPublicUuid());
 
 			ResponseEntity<String> response = doPost(
 					SECTIONS_QUIZZES_BASE.replace("{section}",
@@ -279,7 +296,10 @@ class QuizTenantIsolationIT extends IntegrationTest {
 			Fixture fixture = setupTenants();
 
 			AuthResponse loginA = login(fixture.tenantA().getSlug(), SHARED_EMAIL, PASSWORD_A);
-			String body = "{\"title\":\"sumative quiz\",\"maxScore\":20,\"maxAttempts\":1}";
+			String body = String.format(
+					"{\"title\":\"sumative quiz\",\"maxScore\":20,\"maxAttempts\":1,"
+							+ "\"teacherAssignmentPublicUuid\":\"%s\"}",
+					fixture.assignmentA().getPublicUuid());
 			ResponseEntity<String> createResponse = doPost(
 					SECTIONS_QUIZZES_BASE.replace("{section}",
 							fixture.sectionA().getPublicUuid().toString()),
@@ -320,7 +340,7 @@ class QuizTenantIsolationIT extends IntegrationTest {
 		assertThat(response.getStatusCode())
 				.as("seed login() requires HTTP 200; body=%s", response.getBody())
 				.isEqualTo(HttpStatus.OK);
-		return objectMapper.readValue(response.getBody(), AuthResponse.class);
+		return readSessionResponse(objectMapper, response);
 	}
 
 	private ResponseEntity<String> doGet(String path, String bearer) {
@@ -357,7 +377,8 @@ class QuizTenantIsolationIT extends IntegrationTest {
 	record Fixture(
 			Tenant tenantA, Tenant tenantB,
 			User adminA, User adminB,
-			Section sectionA, Section sectionB
+			Section sectionA, Section sectionB,
+			TeacherAssignment assignmentA, TeacherAssignment assignmentB
 	) {}
 
 	private Fixture setupTenants() {
@@ -376,12 +397,15 @@ class QuizTenantIsolationIT extends IntegrationTest {
 
 		Section sectionA = createSection(tenantA, yearA, firstA, "A");
 		Section sectionB = createSection(tenantB, yearB, firstB, "A");
+		TeacherAssignment assignmentA = createAssignment(tenantA, yearA, firstA, sectionA);
+		TeacherAssignment assignmentB = createAssignment(tenantB, yearB, firstB, sectionB);
 
-		return new Fixture(tenantA, tenantB, adminA, adminB, sectionA, sectionB);
+		return new Fixture(tenantA, tenantB, adminA, adminB,
+				sectionA, sectionB, assignmentA, assignmentB);
 	}
 
 	private Tenant createTenant(String slugPrefix) {
-		Tenant t = new Tenant();
+		Tenant t = newTestTenant();
 		t.setSlug(slugPrefix + UUID.randomUUID().toString().substring(0, 8));
 		t.setName("IT Tenant " + t.getSlug());
 		t.setStatus(TenantStatus.ACTIVE);
@@ -442,20 +466,56 @@ class QuizTenantIsolationIT extends IntegrationTest {
 		}));
 	}
 
+	private TeacherAssignment createAssignment(Tenant tenant, AcademicYear year,
+			Grade grade, Section section) {
+		return TenantContext.runAs(tenant.getId(), () -> tx().execute(s -> {
+			AcademicPeriod period = new AcademicPeriod();
+			period.setAcademicYear(year);
+			period.setPeriodType(PeriodType.ANUAL);
+			period.setOrdinal(1);
+			period.setName("Annual");
+			period.setStartDate(year.getStartDate());
+			period.setEndDate(year.getEndDate());
+			AcademicPeriod savedPeriod = periodRepository.saveAndFlush(period);
+
+			Course course = new Course();
+			course.setCode("QUIZ_" + tenant.getId().toString().substring(0, 8).toUpperCase());
+			course.setName("Quiz fixture course");
+			Course savedCourse = courseRepository.saveAndFlush(course);
+
+			Teacher teacher = new Teacher();
+			teacher.setDocumentType(DocumentType.DNI);
+			teacher.setDocumentNumber("QZ-" + UUID.randomUUID().toString().substring(0, 8));
+			teacher.setFirstName("Quiz");
+			teacher.setLastName("Fixture");
+			teacher.setEmploymentStatus(EmploymentStatus.ACTIVE);
+			Teacher savedTeacher = teacherRepository.saveAndFlush(teacher);
+
+			TeacherAssignment assignment = new TeacherAssignment();
+			assignment.setTeacher(savedTeacher);
+			assignment.setSection(section);
+			assignment.setCourse(savedCourse);
+			assignment.setAcademicPeriod(savedPeriod);
+			return assignmentRepository.saveAndFlush(assignment);
+		}));
+	}
+
 	private Quiz createQuizInA(Fixture fixture) {
-		return createQuiz(fixture.tenantA(), fixture.sectionA(), fixture.adminA(),
+		return createQuiz(fixture.tenantA(), fixture.sectionA(), fixture.adminA(), fixture.assignmentA(),
 				"quiz-A-" + UUID.randomUUID().toString().substring(0, 8));
 	}
 
 	private Quiz createQuizInB(Fixture fixture) {
-		return createQuiz(fixture.tenantB(), fixture.sectionB(), fixture.adminB(),
+		return createQuiz(fixture.tenantB(), fixture.sectionB(), fixture.adminB(), fixture.assignmentB(),
 				"quiz-B-" + UUID.randomUUID().toString().substring(0, 8));
 	}
 
-	private Quiz createQuiz(Tenant tenant, Section section, User owner, String title) {
+	private Quiz createQuiz(Tenant tenant, Section section, User owner,
+			TeacherAssignment assignment, String title) {
 		return TenantContext.runAs(tenant.getId(), () -> tx().execute(s -> {
 			Quiz q = new Quiz();
 			q.setSection(section);
+			q.setTeacherAssignment(assignment);
 			q.setTitle(title);
 			q.setDescription("description for " + title);
 			q.setDueAt(Instant.now().plus(7, ChronoUnit.DAYS));

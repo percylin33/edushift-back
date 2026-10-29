@@ -59,7 +59,7 @@ class MfaLoginFlowIT extends IntegrationTest {
 
 	@BeforeEach
 	void setUp() throws Exception {
-		tenant = new Tenant();
+		tenant = newTestTenant();
 		tenant.setName("MFA Flow Test");
 		tenant.setSlug(tenantSlug);
 		tenant.setStatus(TenantStatus.ACTIVE);
@@ -94,7 +94,7 @@ class MfaLoginFlowIT extends IntegrationTest {
 		int code = totp.getTotpPassword(secret);
 
 		http.exchange(AUTH_BASE + "/mfa/enroll/verify", HttpMethod.POST,
-				new HttpEntity<>(new MfaEnrollVerifyRequest(secret, String.valueOf(code)), h),
+				new HttpEntity<>(new MfaEnrollVerifyRequest(secret, String.format("%06d", code)), h),
 				String.class);
 	}
 
@@ -108,7 +108,7 @@ class MfaLoginFlowIT extends IntegrationTest {
 				new HttpEntity<>(body, headers), String.class);
 		assertThat(resp.getStatusCode()).isEqualTo(HttpStatus.OK);
 		JsonNode json = objectMapper.readTree(resp.getBody());
-		return json.has("accessToken") ? json.get("accessToken").asText() : null;
+		return readSessionResponse(objectMapper, resp).accessToken();
 	}
 
 	@Nested

@@ -308,7 +308,7 @@ class LevelGradeTenantIsolationIT extends IntegrationTest {
 		assertThat(response.getStatusCode())
 				.as("seed login() requires HTTP 200; body=%s", response.getBody())
 				.isEqualTo(HttpStatus.OK);
-		return objectMapper.readValue(response.getBody(), AuthResponse.class);
+		return readSessionResponse(objectMapper, response);
 	}
 
 	private ResponseEntity<String> doGet(String path, String bearer) {
@@ -353,7 +353,7 @@ class LevelGradeTenantIsolationIT extends IntegrationTest {
 	}
 
 	private Tenant createTenant(String slugPrefix, TenantStatus status) {
-		Tenant t = new Tenant();
+		Tenant t = newTestTenant();
 		t.setSlug(slugPrefix + UUID.randomUUID().toString().substring(0, 8));
 		t.setName("IT Tenant " + t.getSlug());
 		t.setStatus(status);

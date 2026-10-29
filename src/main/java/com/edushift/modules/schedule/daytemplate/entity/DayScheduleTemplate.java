@@ -95,6 +95,14 @@ public class DayScheduleTemplate extends TenantAwareEntity {
 	@Column(name = "period_minutes")
 	private Integer periodMinutes;
 
+	/** Last explicit tenant-admin review of the current day plan. */
+	@Column(name = "reviewed_at")
+	private Instant reviewedAt;
+
+	/** Public UUID of the tenant admin who last reviewed this day plan. */
+	@Column(name = "reviewed_by", columnDefinition = "uuid")
+	private UUID reviewedByUuid;
+
 	@Column(name = "deleted_at")
 	private Instant deletedAt;
 

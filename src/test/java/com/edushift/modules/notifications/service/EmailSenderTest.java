@@ -17,5 +17,5 @@ class EmailSenderTest {
     @Mock JavaMailSender mailSender; @Mock PiiSafetyFilter piiFilter; @Mock UnsubscribeTokenSigner unsubscribeSigner;
     @InjectMocks EmailSender emailSender;
     @Mock MimeMessage mimeMessage;
-    @Test void sendSimple() { when(mailSender.createMimeMessage()).thenReturn(mimeMessage); when(piiFilter.mask(any())).thenAnswer(i -> i.getArgument(0)); ReflectionTestUtils.setField(emailSender, "enabled", true); ReflectionTestUtils.setField(emailSender, "fromAddress", "noreply@edushift.local"); emailSender.send("a@t", "Subj", "Body"); verify(mailSender).send(any(MimeMessage.class)); }
+    @Test void sendSimple() { when(mailSender.createMimeMessage()).thenReturn(mimeMessage); when(piiFilter.mask(any())).thenAnswer(i -> i.getArgument(0)); ReflectionTestUtils.setField(emailSender, "enabled", true); ReflectionTestUtils.setField(emailSender, "fromAddress", "noreply@edushift.local"); ReflectionTestUtils.setField(emailSender, "replyToAddress", "support@edushift.local"); emailSender.send("a@t", "Subj", "Body"); verify(mailSender).send(any(MimeMessage.class)); }
 }

@@ -28,6 +28,9 @@ import com.edushift.modules.schedule.daytemplate.service.DayScheduleTemplateServ
 import com.edushift.shared.exception.BadRequestException;
 import com.edushift.shared.exception.ConflictException;
 import com.edushift.shared.exception.ResourceNotFoundException;
+import com.edushift.shared.exception.UnauthorizedException;
+import com.edushift.shared.security.CurrentUserProvider;
+import java.time.Instant;
 import java.time.LocalTime;
 import java.util.ArrayList;
 import java.util.EnumSet;
@@ -53,6 +56,7 @@ public class DayScheduleTemplateServiceImpl implements DayScheduleTemplateServic
 	private final GradeRepository gradeRepository;
 	private final DayScheduleTemplateMapper templateMapper;
 	private final DayScheduleBlockMapper blockMapper;
+	private final CurrentUserProvider currentUserProvider;
 
 	@Override
 	@Transactional(readOnly = true)
@@ -105,6 +109,7 @@ public class DayScheduleTemplateServiceImpl implements DayScheduleTemplateServic
 	public DayTemplateResponse update(UUID templateUuid, UpdateDayTemplateRequest request) {
 		DayScheduleTemplate template = loadTemplate(templateUuid);
 		templateMapper.applyUpdate(request, template);
+		clearReview(template);
 		DayScheduleTemplate saved = templateRepository.saveAndFlush(template);
 		return toResponseWithBlocks(saved);
 	}
@@ -126,6 +131,7 @@ public class DayScheduleTemplateServiceImpl implements DayScheduleTemplateServic
 	public DayBlockResponse addBlock(UUID templateUuid, CreateDayBlockRequest request) {
 		DayScheduleTemplate template = loadTemplate(templateUuid);
 		validateTimeRange(request.startTime(), request.endTime());
+		clearReview(template);
 		DayScheduleBlock block = blockMapper.fromCreate(request, template);
 		DayScheduleBlock saved = blockRepository.saveAndFlush(block);
 		return blockMapper.toResponse(saved);
@@ -135,6 +141,7 @@ public class DayScheduleTemplateServiceImpl implements DayScheduleTemplateServic
 	@Transactional
 	public DayBlockResponse updateBlock(UUID blockUuid, UpdateDayBlockRequest request) {
 		DayScheduleBlock block = loadBlock(blockUuid);
+		clearReview(block.getTemplate());
 		blockMapper.applyUpdate(request, block);
 		validateTimeRange(block.getStartTime(), block.getEndTime());
 		return blockMapper.toResponse(blockRepository.saveAndFlush(block));
@@ -144,6 +151,7 @@ public class DayScheduleTemplateServiceImpl implements DayScheduleTemplateServic
 	@Transactional
 	public void deleteBlock(UUID blockUuid) {
 		DayScheduleBlock block = loadBlock(blockUuid);
+		clearReview(block.getTemplate());
 		blockRepository.delete(block);
 	}
 
@@ -163,7 +171,12 @@ public class DayScheduleTemplateServiceImpl implements DayScheduleTemplateServic
 			Optional<DayScheduleTemplate> existing = templateRepository
 					.findLevelDefault(year, level, null);
 			if (existing.isPresent()) {
-				ensureDefaultBlocks(existing.get(), level.getCode());
+				DayScheduleTemplate template = existing.get();
+				int addedBlocks = ensureDefaultBlocks(template, level.getCode());
+				if (addedBlocks > 0) {
+					clearReview(template);
+					templateRepository.saveAndFlush(template);
+				}
 				continue;
 			}
 			DayScheduleTemplate template = new DayScheduleTemplate();
@@ -286,11 +299,33 @@ public class DayScheduleTemplateServiceImpl implements DayScheduleTemplateServic
 		template.setDayStart(request.dayStart());
 		template.setDayEnd(request.dayEnd());
 		template.setPeriodMinutes(request.periodMinutes());
+		clearReview(template);
 		DayScheduleTemplate saved = templateRepository.saveAndFlush(template);
 		log.info("[schedule.day-template] apply-day-plan -- uuid={} start={} end={} period={}",
 				saved.getPublicUuid(), saved.getDayStart(), saved.getDayEnd(),
 				saved.getPeriodMinutes());
 		return toResponseWithBlocks(saved);
+	}
+
+	@Override
+	@Transactional
+	public DayTemplateResponse markReviewed(UUID templateUuid) {
+		DayScheduleTemplate template = loadTemplate(templateUuid);
+		if (template.getDayStart() == null || template.getDayEnd() == null
+				|| template.getPeriodMinutes() == null) {
+			throw new BadRequestException("DAY_TEMPLATE_NOT_CONFIGURED",
+					"Complete the day window and period length before reviewing the template");
+		}
+		UUID reviewerUuid = currentUserProvider.currentUserId()
+				.orElseThrow(() -> new UnauthorizedException("A signed-in tenant admin is required"));
+		UUID currentTenantUuid = currentUserProvider.currentTenantId()
+				.orElseThrow(() -> new UnauthorizedException("A tenant context is required"));
+		if (!currentTenantUuid.equals(template.getTenantId())) {
+			throw new UnauthorizedException("Reviewer and day template must belong to the same tenant");
+		}
+		template.setReviewedAt(Instant.now());
+		template.setReviewedByUuid(reviewerUuid);
+		return toResponseWithBlocks(templateRepository.saveAndFlush(template));
 	}
 
 	private void validatePlanIntervals(ApplyDayPlanRequest request) {
@@ -424,12 +459,21 @@ public class DayScheduleTemplateServiceImpl implements DayScheduleTemplateServic
 			saveBlock(template, DayBlockType.LUNCH, "Lonchera", lunchStart, lunchEnd);
 			added++;
 		}
-		if (template.getDayStart() == null || template.getDayEnd() == null
-				|| template.getPeriodMinutes() == null) {
+		boolean missingDayWindow = template.getDayStart() == null || template.getDayEnd() == null
+				|| template.getPeriodMinutes() == null;
+		if (missingDayWindow) {
 			applySeedDayWindow(template, code, lunchEnd);
 			templateRepository.save(template);
 		}
+		if (added > 0 || missingDayWindow) {
+			clearReview(template);
+		}
 		return added;
+	}
+
+	private void clearReview(DayScheduleTemplate template) {
+		template.setReviewedAt(null);
+		template.setReviewedByUuid(null);
 	}
 
 	private void applySeedDayWindow(DayScheduleTemplate template, String code, LocalTime lunchEnd) {

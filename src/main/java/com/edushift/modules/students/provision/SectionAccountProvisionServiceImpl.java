@@ -299,6 +299,7 @@ public class SectionAccountProvisionServiceImpl implements SectionAccountProvisi
 		}
 		else if (allowSynthetic) {
 			email = SyntheticEmailFactory.generate(
+					firstName,
 					lastName,
 					documentNumber,
 					tenantSlug,
@@ -312,7 +313,7 @@ public class SectionAccountProvisionServiceImpl implements SectionAccountProvisi
 
 		if (userRepository.existsByEmail(email)) {
 			email = SyntheticEmailFactory.generate(
-					lastName, documentNumber, tenantSlug, userRepository::existsByEmail);
+					firstName, lastName, documentNumber, tenantSlug, userRepository::existsByEmail);
 			source = EmailSource.SYNTHETIC;
 		}
 

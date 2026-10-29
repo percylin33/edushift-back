@@ -24,8 +24,9 @@ import java.util.Set;
  *
  * <p>{@code metadata} is an optional free-form jsonb side-channel:
  * domain modules (e.g. teachers) attach ids to be reacted on at accept
- * time. The public {@code POST /v1/users/invitations} controller does
- * NOT bind this field — only internal callers may set it.</p>
+ * time. The public {@code POST /v1/users/invitations} controller discards
+ * this field — only internal callers may set it. Profile-backed roles
+ * require matching metadata and cannot be invited through the generic path.</p>
  *
  * <p>{@code documentType}/{@code documentNumber} are required so the
  * admin commits to a legal identity at invite time — the manual lists

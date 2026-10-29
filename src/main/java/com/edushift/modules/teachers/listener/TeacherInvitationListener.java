@@ -4,6 +4,9 @@ import com.edushift.modules.teachers.entity.Teacher;
 import com.edushift.modules.teachers.repository.TeacherRepository;
 import com.edushift.modules.teachers.service.impl.TeacherServiceImpl;
 import com.edushift.modules.users.events.InvitationAcceptedEvent;
+import com.edushift.shared.exception.BusinessException;
+import com.edushift.shared.exception.ConflictException;
+import com.edushift.shared.exception.ResourceNotFoundException;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -19,8 +22,8 @@ import org.springframework.stereotype.Component;
  * the event inside the same Hibernate session as the user creation
  * (see {@code UserInvitationServiceImpl.acceptInvitation}), so the
  * teacher mutation here participates in the same transaction. If the
- * teacher does not exist, the event is ignored (defensive against
- * stale invitations whose teacher was deleted before accept).</p>
+ * teacher was deleted or linked after the invitation was sent, acceptance
+ * fails and the account creation rolls back instead of leaving an unlinked user.</p>
  */
 @Slf4j
 @Component
@@ -36,29 +39,21 @@ public class TeacherInvitationListener {
 
 		UUID teacherInternalId = parseUuid(raw);
 		if (teacherInternalId == null) {
-			log.warn("[teachers.invitations] ignored event {}: bad teacherId metadata={}",
-					event.invitationPublicUuid(), raw);
-			return;
+			throw new BusinessException("PROFILE_INVITATION_INVALID",
+					"The teacher invitation contains invalid profile metadata");
 		}
 
 		Teacher teacher = teacherRepository.findById(teacherInternalId).orElse(null);
 		if (teacher == null) {
-			// The teacher might have been deleted between invite and accept;
-			// the new user still gets created (their account is valid) but
-			// we leave it unlinked. Logged at warn so admins notice.
-			log.warn("[teachers.invitations] event {} carried teacherId={} but no Teacher row found in current tenant",
-					event.invitationPublicUuid(), teacherInternalId);
-			return;
+			throw new ResourceNotFoundException("Teacher", teacherInternalId);
 		}
 
 		// Defensive: if some other flow already linked the teacher, do not
 		// overwrite. This shouldn't happen given the invariants but the
 		// failure mode of a silent overwrite would be hard to debug.
 		if (teacher.getUserId() != null) {
-			log.warn("[teachers.invitations] event {}: teacher {} already linked to user {}; not overwriting with {}",
-					event.invitationPublicUuid(), teacher.getPublicUuid(),
-					teacher.getUserId(), event.userPublicUuid());
-			return;
+			throw new ConflictException("TEACHER_ALREADY_HAS_USER",
+					"The teacher was linked to another account before this invitation was accepted");
 		}
 
 		// DEBT-FK-BUGS-3 / V77: teachers.user_id stores public_uuid now.

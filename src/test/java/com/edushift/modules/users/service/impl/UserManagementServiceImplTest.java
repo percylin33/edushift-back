@@ -275,6 +275,40 @@ class UserManagementServiceImplTest {
 		}
 
 		@Test
+		@DisplayName("adding TEACHER through generic role assignment is rejected")
+		void profileRoleCannotBeAddedGenerically() {
+			UUID publicUuid = UUID.randomUUID();
+			User user = newUser("teacher@acme.test", "T", "User", UserStatus.ACTIVE);
+			user.setPublicUuid(publicUuid);
+			user.addRole(UserRole.STAFF);
+			when(userRepository.findByPublicUuid(publicUuid)).thenReturn(Optional.of(user));
+
+			assertThatThrownBy(() -> service.assignRoles(publicUuid,
+					new AssignRolesRequest(Set.of("STAFF", "TEACHER"))))
+					.isInstanceOfSatisfying(BusinessException.class,
+							ex -> assertThat(ex.getCode()).isEqualTo("PROFILE_ROLE_REQUIRES_PROFILE"));
+
+			verify(userRepository, never()).save(any(User.class));
+		}
+
+		@Test
+		@DisplayName("removing an existing profile role through generic role assignment is rejected")
+		void profileRoleCannotBeRemovedGenerically() {
+			UUID publicUuid = UUID.randomUUID();
+			User user = newUser("teacher@acme.test", "T", "User", UserStatus.ACTIVE);
+			user.setPublicUuid(publicUuid);
+			user.addRole(UserRole.TEACHER);
+			when(userRepository.findByPublicUuid(publicUuid)).thenReturn(Optional.of(user));
+
+			assertThatThrownBy(() -> service.assignRoles(publicUuid,
+					new AssignRolesRequest(Set.of(UserRole.STAFF.name()))))
+					.isInstanceOfSatisfying(BusinessException.class,
+							ex -> assertThat(ex.getCode()).isEqualTo("PROFILE_ROLE_REQUIRES_PROFILE"));
+
+			verify(userRepository, never()).save(any(User.class));
+		}
+
+		@Test
 		@DisplayName("removing TENANT_ADMIN from the last admin → ConflictException(LAST_ADMIN_PROTECTION)")
 		void lastAdminCannotLoseRole() {
 			UUID publicUuid = UUID.randomUUID();
@@ -304,10 +338,10 @@ class UserManagementServiceImplTest {
 			when(userRepository.countActiveTenantAdmins(TENANT_ID)).thenReturn(2L);
 			when(userRepository.save(any(User.class))).thenAnswer(inv -> inv.getArgument(0));
 
-			AssignRolesRequest request = new AssignRolesRequest(Set.of("TEACHER"));
+			AssignRolesRequest request = new AssignRolesRequest(Set.of("STAFF"));
 			UserDetailResponse response = service.assignRoles(publicUuid, request);
 
-			assertThat(response.roles()).containsExactly("TEACHER");
+			assertThat(response.roles()).containsExactly("STAFF");
 		}
 	}
 

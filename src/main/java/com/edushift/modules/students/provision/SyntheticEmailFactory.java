@@ -8,11 +8,11 @@ import java.util.function.Predicate;
 
 /**
  * Builds hybrid login emails for CRED-7 mass provision.
- * Synthetic domain: {@code @{tenantSlug}.accounts.edushift.local}
+ * Synthetic domain: {@code @slud-del-colegio.com}
  */
 public final class SyntheticEmailFactory {
 
-	public static final String SYNTHETIC_DOMAIN_SUFFIX = ".accounts.edushift.local";
+	public static final String SYNTHETIC_DOMAIN = "slud-del-colegio.com";
 
 	private SyntheticEmailFactory() {}
 
@@ -21,7 +21,8 @@ public final class SyntheticEmailFactory {
 			return false;
 		}
 		String lower = email.trim().toLowerCase(Locale.ROOT);
-		return lower.endsWith(SYNTHETIC_DOMAIN_SUFFIX);
+		return lower.endsWith(".accounts.edushift.local")
+				|| lower.matches("[a-z0-9]+\\.[a-z0-9]+\\.[a-z0-9]+\\.[a-f0-9]{6,8}@[a-z0-9-]+\\.com");
 	}
 
 	public static boolean looksLikeRealEmail(String email) {
@@ -37,7 +38,7 @@ public final class SyntheticEmailFactory {
 	}
 
 	/**
-	 * {@code apellido.documentNumber.4hex@tenantSlug.accounts.edushift.local}
+	 * {@code nombre.apellido.documentNumber.sufijo@slud-del-colegio.com}
 	 */
 	public static String generate(
 			String lastName,
@@ -45,52 +46,36 @@ public final class SyntheticEmailFactory {
 			String tenantSlug,
 			Predicate<String> emailTaken
 	) {
-		String slug = normalizeSlug(tenantSlug);
-		String apellido = normalizeToken(lastName);
-		if (apellido.isBlank()) {
-			apellido = "user";
-		}
+		return generate("user", lastName, documentNumber, tenantSlug, emailTaken);
+	}
+
+	public static String generate(
+			String firstName,
+			String lastName,
+			String documentNumber,
+			String tenantSlug,
+			Predicate<String> emailTaken
+	) {
+		String name = normalizeToken(firstName);
+		if (name.isBlank()) name = "user";
+		String surname = normalizeToken(lastName);
+		if (surname.isBlank()) surname = "user";
 		String doc = normalizeToken(documentNumber);
-		if (doc.isBlank()) {
-			doc = "x";
-		}
-		String domain = slug + SYNTHETIC_DOMAIN_SUFFIX;
+		if (doc.isBlank()) doc = "x";
+		name = name.substring(0, Math.min(name.length(), 14));
+		surname = surname.substring(0, Math.min(surname.length(), 14));
+		doc = doc.substring(0, Math.min(doc.length(), 14));
 		for (int attempt = 0; attempt < 32; attempt++) {
-			String hex = Integer.toHexString(ThreadLocalRandom.current().nextInt(0x10000))
-					.toLowerCase(Locale.ROOT);
-			while (hex.length() < 4) {
-				hex = "0" + hex;
-			}
-			String candidate = apellido + "." + doc + "." + hex + "@" + domain;
-			if (candidate.length() > 254) {
-				candidate = truncateLocal(apellido, doc, hex) + "@" + domain;
-			}
-			if (!emailTaken.test(candidate)) {
-				return candidate;
-			}
+			String hex = String.format(Locale.ROOT, "%06x", ThreadLocalRandom.current().nextInt(0x1000000));
+			String candidate = name + "." + surname + "." + doc + "." + hex + "@" + SYNTHETIC_DOMAIN;
+			if (!emailTaken.test(candidate)) return candidate;
 		}
-		// Extremely unlikely collision storm — fall back to UUID fragment.
-		String fallback = apellido + "." + doc + "."
+		String fallback = name + "." + surname + "." + doc + "."
 				+ UUID.randomUUID().toString().replace("-", "").substring(0, 8)
-				+ "@" + domain;
+				+ "@" + SYNTHETIC_DOMAIN;
 		return fallback.length() <= 254 ? fallback : fallback.substring(0, 254);
 	}
 
-	private static String truncateLocal(String apellido, String doc, String hex) {
-		String local = apellido + "." + doc + "." + hex;
-		if (local.length() <= 64) {
-			return local;
-		}
-		return local.substring(0, 64);
-	}
-
-	private static String normalizeSlug(String tenantSlug) {
-		if (tenantSlug == null || tenantSlug.isBlank()) {
-			return "tenant";
-		}
-		String s = tenantSlug.trim().toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9-]", "");
-		return s.isBlank() ? "tenant" : s;
-	}
 
 	private static String normalizeToken(String raw) {
 		if (raw == null) {

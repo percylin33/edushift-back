@@ -1,6 +1,7 @@
 package com.edushift.modules.schedule.daytemplate.dto;
 
 import java.time.LocalTime;
+import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
@@ -17,6 +18,8 @@ public record DayTemplateResponse(
 		LocalTime dayStart,
 		LocalTime dayEnd,
 		Integer periodMinutes,
+		Instant reviewedAt,
+		UUID reviewedByUuid,
 		List<DayBlockResponse> blocks
 ) {
 }

@@ -116,9 +116,10 @@ public class StudentGuardianController {
 	@SecurityRequirement(name = "bearerAuth")
 	@PreAuthorize("hasRole('TENANT_ADMIN') or hasAuthority('USERS:PROVISION_GUARDIAN')")
 	@Operation(
-			summary = "Link a guardian to an existing PARENT user (TENANT_ADMIN)",
-			description = "Rescue path after inviting from Usuarios. Errors: "
-					+ "409 GUARDIAN_ALREADY_HAS_USER, 409 USER_NOT_PARENT_ROLE, "
+			summary = "Link a guardian to an existing user (TENANT_ADMIN)",
+			description = "User must be in the same tenant. PARENT is granted "
+					+ "and the profile is linked in one transaction. Errors: "
+					+ "409 GUARDIAN_ALREADY_HAS_USER, "
 					+ "409 USER_ALREADY_LINKED_TO_GUARDIAN, 404 RESOURCE_NOT_FOUND."
 	)
 	public ResponseEntity<ApiResponse<GuardianResponse>> linkUser(

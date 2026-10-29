@@ -176,8 +176,9 @@ public class StudentController {
 	@PreAuthorize("hasRole('TENANT_ADMIN') or hasAuthority('USERS:PROVISION_STUDENT')")
 	@Operation(
 			summary = "Link a student to an existing user (TENANT_ADMIN)",
-			description = "User must be in the same tenant and have the STUDENT role. "
-					+ "Errors: 409 STUDENT_ALREADY_HAS_USER, 409 USER_NOT_STUDENT_ROLE, "
+			description = "User must be in the same tenant. STUDENT is granted "
+					+ "and the profile is linked in one transaction. "
+					+ "Errors: 409 STUDENT_ALREADY_HAS_USER, "
 					+ "409 USER_ALREADY_LINKED_TO_STUDENT, 404 RESOURCE_NOT_FOUND."
 	)
 	public ResponseEntity<ApiResponse<StudentResponse>> linkUser(

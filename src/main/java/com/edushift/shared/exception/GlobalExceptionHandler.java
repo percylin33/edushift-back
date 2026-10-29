@@ -34,6 +34,7 @@ import org.springframework.web.method.annotation.MethodArgumentTypeMismatchExcep
 import org.springframework.web.multipart.MaxUploadSizeExceededException;
 import org.springframework.web.server.NotAcceptableStatusException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
+import org.springframework.web.servlet.HandlerMapping;
 
 /**
  * Centralized exception handler: maps exceptions to {@link ApiErrorResponse}
@@ -263,7 +264,9 @@ public class GlobalExceptionHandler {
 
 		String path = req.getRequestURI();
 		String traceId = currentTraceId();
-		logException(status, message, path, req.getMethod(), ex, serverError);
+		Object route = req.getAttribute(HandlerMapping.BEST_MATCHING_PATTERN_ATTRIBUTE);
+		String logPath = route instanceof String pattern ? pattern : "<unmatched>";
+		logException(status, message, logPath, req.getMethod(), ex, serverError);
 		ApiErrorResponse body = ApiErrorResponse.of(message, errors, path, traceId);
 		return ResponseEntity.status(status).body(body);
 	}
@@ -281,8 +284,10 @@ public class GlobalExceptionHandler {
 					status.value(), method, path, message, ex.getClass().getSimpleName(), ex);
 		}
 		else {
-			log.warn("api_warn status={} method={} path={} message=\"{}\" exception={} detail=\"{}\"",
-					status.value(), method, path, message, ex.getClass().getSimpleName(), ex.getMessage());
+			// Binding exceptions can embed rejected values, including passwords.
+			// Only the safe response message and route template belong in logs.
+			log.warn("api_warn status={} method={} route={} message=\"{}\" exception={}",
+					status.value(), method, path, message, ex.getClass().getSimpleName());
 		}
 	}
 

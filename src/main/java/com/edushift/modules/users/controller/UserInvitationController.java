@@ -79,7 +79,9 @@ public class UserInvitationController {
 	@Operation(
 			summary = "Create an invitation (TENANT_ADMIN)",
 			description = "Persists a new pending invitation in the current tenant "
-					+ "and returns the projection including the token, so the "
+					+ "for general access roles. Teacher, student, and guardian "
+					+ "invitations must be created from their profile modules. Returns "
+					+ "the projection including the token, so the "
 					+ "admin can copy the resulting invitation link to the "
 					+ "clipboard. Sprint 9 will replace the manual copy with "
 					+ "automatic email delivery."
@@ -90,7 +92,7 @@ public class UserInvitationController {
 		// Strip `metadata` here on purpose: the public API surface MUST NOT
 		// let admins inject arbitrary side-channel keys (e.g. teacherId) —
 		// only internal callers (TeacherServiceImpl.invite, ...) populate
-		// metadata via the no-metadata constructor.
+		// metadata via the metadata-bearing constructor.
 		InvitationResponse response = service.createInvitation(
 				new CreateInvitationRequest(
 						request.email(),

@@ -80,7 +80,7 @@ class FileObjectServiceIT extends IntegrationTest {
 		storageProperties.getLocalFs().setRoot(this.storageRoot);
 
 		tenantA = tx.execute(s -> {
-			Tenant t = new Tenant();
+			Tenant t = newTestTenant();
 			t.setPublicUuid(UUID.randomUUID());
 			t.setSlug("tenant-a-files-" + UUID.randomUUID().toString().substring(0, 8));
 			t.setName("Tenant A Files");
@@ -88,7 +88,7 @@ class FileObjectServiceIT extends IntegrationTest {
 			return tenantRepository.save(t);
 		});
 		tenantB = tx.execute(s -> {
-			Tenant t = new Tenant();
+			Tenant t = newTestTenant();
 			t.setPublicUuid(UUID.randomUUID());
 			t.setSlug("tenant-b-files-" + UUID.randomUUID().toString().substring(0, 8));
 			t.setName("Tenant B Files");
@@ -155,7 +155,7 @@ class FileObjectServiceIT extends IntegrationTest {
 			com.edushift.shared.multitenancy.TenantContext.set(tenantA.getId());
 			FileObject owned = fileObjectService.store(tenantA.getId(), "materials",
 					new MockMultipartFile("file", "a.txt", "text/plain",
-							new ByteArrayInputStream("a".getBytes())));
+							new ByteArrayInputStream("file data".getBytes())));
 
 			// Switch context to tenant B
 			com.edushift.shared.multitenancy.TenantContext.set(tenantB.getId());
@@ -170,7 +170,7 @@ class FileObjectServiceIT extends IntegrationTest {
 			com.edushift.shared.multitenancy.TenantContext.set(tenantA.getId());
 			FileObject owned = fileObjectService.store(tenantA.getId(), "materials",
 					new MockMultipartFile("file", "a.txt", "text/plain",
-							new ByteArrayInputStream("a".getBytes())));
+							new ByteArrayInputStream("file data".getBytes())));
 
 			com.edushift.shared.multitenancy.TenantContext.set(tenantB.getId());
 			UUID ownedUuid = owned.getPublicUuid();
@@ -194,7 +194,7 @@ class FileObjectServiceIT extends IntegrationTest {
 			com.edushift.shared.multitenancy.TenantContext.set(tenantA.getId());
 			FileObject stored = fileObjectService.store(tenantA.getId(), "materials",
 					new MockMultipartFile("file", "doc.pdf", "application/pdf",
-							new ByteArrayInputStream("pdf-bytes".getBytes())));
+							new ByteArrayInputStream("%PDF-1.7\nfixture".getBytes())));
 
 			// Layout: ${root}/envs/{env}/tenants/{slug}-{tid}/{module}/{yyyy}/{MM}/{publicUuid}.
 			Path expected = storageRoot

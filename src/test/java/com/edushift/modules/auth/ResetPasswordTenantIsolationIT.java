@@ -64,7 +64,7 @@ class ResetPasswordTenantIsolationIT extends IntegrationTest {
 	}
 
 	private Tenant createTenant(String name, String slug) {
-		Tenant t = new Tenant();
+		Tenant t = newTestTenant();
 		t.setName(name);
 		t.setSlug(slug);
 		t.setStatus(TenantStatus.ACTIVE);

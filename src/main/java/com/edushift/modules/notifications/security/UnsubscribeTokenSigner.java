@@ -21,7 +21,7 @@ import org.springframework.stereotype.Component;
  * a signed token. The link looks like:</p>
  *
  * <pre>
- *   https://app.edushift.com/unsubscribe?token={token}
+ *   https://app.edushift.pe/unsubscribe?token={token}
  * </pre>
  *
  * <p>The token is an HMAC-SHA256 of {@code userId|channel|category|expiry}
@@ -58,7 +58,7 @@ public class UnsubscribeTokenSigner {
 
     public UnsubscribeTokenSigner(
             @Value("${app.notifications.email.unsubscribe-secret:}") String secret,
-            @Value("${app.notifications.email.frontend-url:https://app.edushift.com}") String frontendUrl,
+            @Value("${app.notifications.email.frontend-url:https://app.edushift.pe}") String frontendUrl,
             @Value("${app.notifications.email.unsubscribe-ttl-hours:24}") long tokenTtlHours) {
         // Dev fallback: a deterministic test secret. Real deployments
         // MUST set app.notifications.email.unsubscribe-secret.

@@ -181,7 +181,7 @@ class AttendanceQrFlowIT extends IntegrationTest {
         ResponseEntity<String> r = rest.exchange(AUTH_BASE + "/login", HttpMethod.POST,
                 new HttpEntity<>(body, h), String.class);
         assertThat(r.getStatusCode()).as("login body=%s", r.getBody()).isEqualTo(HttpStatus.OK);
-        return objectMapper.readValue(r.getBody(), AuthResponse.class);
+        return readSessionResponse(objectMapper, r);
     }
 
     private ResponseEntity<String> doPost(String path, String bearer, String body) {
@@ -212,7 +212,7 @@ class AttendanceQrFlowIT extends IntegrationTest {
         PlatformPlan basicPlan = planRepository.findAll().stream()
                 .filter(p -> "BASIC".equals(p.getCode()))
                 .findFirst().orElseGet(() -> planRepository.findAll().get(0));
-        Tenant t = new Tenant();
+        Tenant t = newTestTenant();
         t.setSlug("qrflow-" + UUID.randomUUID().toString().substring(0, 8));
         t.setName("QR Flow IT " + t.getSlug());
         t.setStatus(TenantStatus.ACTIVE);

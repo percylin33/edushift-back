@@ -241,7 +241,7 @@ class SubmissionTenantIsolationIT extends IntegrationTest {
 					adminA.accessToken());
 			assertThat(list.getStatusCode()).isEqualTo(HttpStatus.OK);
 			JsonNode body = objectMapper.readTree(list.getBody());
-			JsonNode content = body.isObject() ? body.get("content") : body;
+			JsonNode content = body.isObject() ? body.get("data") : body;
 			assertThat(content).isNotEmpty();
 		}
 	}
@@ -265,7 +265,7 @@ class SubmissionTenantIsolationIT extends IntegrationTest {
 		assertThat(response.getStatusCode())
 				.as("seed login() requires HTTP 200; body=%s", response.getBody())
 				.isEqualTo(HttpStatus.OK);
-		return objectMapper.readValue(response.getBody(), AuthResponse.class);
+		return readSessionResponse(objectMapper, response);
 	}
 
 	private AuthResponse loginAsStudent(Tenant tenant, User student) throws Exception {
@@ -325,7 +325,7 @@ class SubmissionTenantIsolationIT extends IntegrationTest {
 	}
 
 	private Tenant createTenant(String slugPrefix) {
-		Tenant t = new Tenant();
+		Tenant t = newTestTenant();
 		t.setSlug(slugPrefix + UUID.randomUUID().toString().substring(0, 8));
 		t.setName("IT Tenant " + t.getSlug());
 		t.setStatus(TenantStatus.ACTIVE);
@@ -419,6 +419,8 @@ class SubmissionTenantIsolationIT extends IntegrationTest {
 			t.setDueAt(Instant.now().plus(7, ChronoUnit.DAYS));
 			t.setOwnerUserId(owner.getPublicUuid());
 			t.setAllowResubmission(true);
+			t.setStatus(com.edushift.modules.tasks.entity.TaskStatus.PUBLISHED);
+			t.setPublishedAt(Instant.now());
 			return taskRepository.saveAndFlush(t);
 		}));
 	}

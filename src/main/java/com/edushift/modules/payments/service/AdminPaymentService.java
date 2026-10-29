@@ -1,9 +1,12 @@
 package com.edushift.modules.payments.service;
 
+import com.edushift.modules.admissions.service.AdmissionReservationService;
+import com.edushift.modules.admissions.service.AppliedAdmissionAdvance;
 import com.edushift.modules.academic.section.entity.Section;
 import com.edushift.modules.academic.section.repository.SectionRepository;
 import com.edushift.modules.auth.repository.UserRepository;
 import com.edushift.modules.files.service.FileObjectService;
+import com.edushift.modules.files.entity.FileUploadStatus;
 import com.edushift.modules.notifications.entity.Notification;
 import com.edushift.modules.notifications.event.NotificationEvent;
 import com.edushift.modules.payments.dto.AdminPaymentFilter;
@@ -15,6 +18,7 @@ import com.edushift.modules.payments.dto.InvoiceResponse;
 import com.edushift.modules.payments.dto.InvoiceReviewQueueItemResponse;
 import com.edushift.modules.payments.dto.PaymentResponse;
 import com.edushift.modules.payments.dto.RejectPaymentEvidenceRequest;
+import com.edushift.modules.payments.dto.SubmitPaymentEvidenceRequest;
 import com.edushift.modules.payments.entity.Invoice;
 import com.edushift.modules.payments.entity.InvoiceItem;
 import com.edushift.modules.payments.entity.Payment;
@@ -27,9 +31,11 @@ import com.edushift.modules.payments.repository.PaymentConceptRepository;
 import com.edushift.modules.payments.repository.PaymentRepository;
 import com.edushift.modules.students.entity.EnrollmentStatus;
 import com.edushift.modules.students.entity.Student;
+import com.edushift.modules.students.entity.Guardian;
 import com.edushift.modules.students.entity.StudentGuardian;
 import com.edushift.modules.students.enrollments.repository.StudentEnrollmentRepository;
 import com.edushift.modules.students.repository.StudentGuardianRepository;
+import com.edushift.modules.students.repository.GuardianRepository;
 import com.edushift.modules.students.repository.StudentRepository;
 import com.edushift.shared.exception.BusinessException;
 import com.edushift.shared.multitenancy.TenantContext;
@@ -72,9 +78,11 @@ public class AdminPaymentService {
 	private final UserRepository userRepository;
 	private final StudentRepository studentRepository;
 	private final StudentGuardianRepository studentGuardianRepository;
+	private final GuardianRepository guardianRepository;
 	private final StudentEnrollmentRepository enrollmentRepository;
 	private final SectionRepository sectionRepository;
 	private final ApplicationEventPublisher eventPublisher;
+	private final AdmissionReservationService admissionReservationService;
 
 	@Autowired(required = false)
 	private MercadoPagoClient mercadoPagoClient;
@@ -152,7 +160,7 @@ public class AdminPaymentService {
 							student.fullName(), student.getDocumentType(), student.getDocumentNumber());
 			return new InvoiceReviewQueueItemResponse(
 					invoice.getPublicUuid(), invoice.getStudentId(), invoice.getPeriodLabel(),
-					invoice.getCurrency(), invoice.getTotalCents(), invoice.getStatus(),
+					invoice.getCurrency(), invoice.getBalanceCents(), invoice.getStatus(),
 					invoice.getDueAt(), invoice.getEvidenceFilePublicUuid(),
 					invoice.getEvidenceSubmittedAt(), invoice.getEvidenceNotes(), identity);
 		});
@@ -176,10 +184,11 @@ public class AdminPaymentService {
 		if (amount <= 0) {
 			throw new BusinessException("INVALID_AMOUNT", "amountCents must be > 0 (or set a concept default)");
 		}
-		UUID guardianUserId = resolveGuardianUserId(student);
+		Guardian payer = resolvePayer(student);
+		UUID guardianUserId = payer == null ? null : payer.getUserId();
 		String period = request.periodLabel().trim();
 		String conceptKey = concept != null ? concept.getCode() : "MANUAL";
-		String idemKey = "emit:" + student.getPublicUuid() + ":" + conceptKey + ":" + period;
+		String idemKey = emitIdempotencyKey(student.getPublicUuid(), conceptKey, period);
 		if (invoiceRepo.findByIdempotencyKey(idemKey).isPresent()) {
 			throw new BusinessException(
 					"INVOICE_ALREADY_EXISTS",
@@ -189,6 +198,8 @@ public class AdminPaymentService {
 		Invoice inv = persistInvoice(
 				student,
 				guardianUserId,
+				payer == null ? null : payer.getPublicUuid(),
+				null,
 				idemKey,
 				period,
 				concept != null ? concept.getCurrency() : "PEN",
@@ -197,10 +208,48 @@ public class AdminPaymentService {
 				request.dueAt(),
 				request.notes(),
 				concept != null ? concept.getName() : ("Cuota " + period));
-		publishPaymentDue(inv, concept != null ? concept.getName() : ("Cuota " + period));
+		if (portalRecipient(inv) != null) {
+			publishPaymentDue(inv, concept != null ? concept.getName() : ("Cuota " + period));
+		}
 		List<InvoiceItemResponse> items = itemRepo.findByInvoiceIdOrderByCreatedAtAsc(inv.getId())
 				.stream().map(InvoiceItemResponse::from).toList();
 		return InvoiceResponse.from(inv, items);
+	}
+
+	/** Emits the configured one-off enrollment charge once per student and school year. */
+	@Transactional
+	public InvoiceResponse emitEnrollmentInvoice(UUID applicationPublicUuid, UUID studentPublicUuid,
+			UUID academicYearPublicUuid, String academicYearName) {
+		TenantContext.currentRequired();
+		PaymentConcept concept = conceptRepo
+				.findByCategoryAndActiveTrueAndDeletedFalseOrderBySortOrderAscNameAsc(PaymentConcept.Category.ENROLLMENT)
+				.stream().filter(item -> item.getDefaultAmountCents() > 0).findFirst().orElse(null);
+		if (concept == null) return null;
+		Student student = studentRepository.findByPublicUuidForUpdate(studentPublicUuid)
+				.orElseThrow(() -> new BusinessException("STUDENT_NOT_FOUND", "Student not found"));
+		String yearLabel = academicYearName == null ? "" : academicYearName.trim();
+		if (yearLabel.length() > 28) yearLabel = yearLabel.substring(0, 28);
+		String period = "MATRICULA-" + yearLabel;
+		String idemKey = emitIdempotencyKey(studentPublicUuid, "ENROLLMENT", period);
+		String legacyIdempotencyKey = emitIdempotencyKey(studentPublicUuid, concept.getCode(), period);
+		Invoice existing = invoiceRepo.findByIdempotencyKey(idemKey).orElseGet(() ->
+				legacyIdempotencyKey.equals(idemKey) ? null : invoiceRepo.findByIdempotencyKey(legacyIdempotencyKey).orElse(null));
+		if (existing != null) {
+			existing = invoiceRepo.findByPublicUuidForUpdate(existing.getPublicUuid()).orElse(existing);
+			applyReservationAdvances(existing, applicationPublicUuid);
+			return InvoiceResponse.from(existing, itemRepo.findByInvoiceIdOrderByCreatedAtAsc(existing.getId())
+					.stream().map(InvoiceItemResponse::from).toList());
+		}
+		Guardian payer = resolvePayer(student);
+		Invoice invoice = persistInvoice(student, payer == null ? null : payer.getUserId(),
+				payer == null ? null : payer.getPublicUuid(), academicYearPublicUuid, idemKey, period,
+				concept.getCurrency(), concept.getDefaultAmountCents(), 0, null,
+				"Matrícula " + academicYearName, concept.getName());
+		applyReservationAdvances(invoice, applicationPublicUuid);
+		if (invoice.getBalanceCents() > 0 && portalRecipient(invoice) != null) publishPaymentDue(invoice, concept.getName());
+		List<InvoiceItemResponse> items = itemRepo.findByInvoiceIdOrderByCreatedAtAsc(invoice.getId())
+				.stream().map(InvoiceItemResponse::from).toList();
+		return InvoiceResponse.from(invoice, items);
 	}
 
 	@Transactional
@@ -234,15 +283,13 @@ public class AdminPaymentService {
 		int skippedNoGuardian = 0;
 		List<UUID> created = new ArrayList<>();
 		for (Student student : students) {
-			String idemKey = "emit:" + student.getPublicUuid() + ":" + conceptKey + ":" + period;
+			String idemKey = emitIdempotencyKey(student.getPublicUuid(), conceptKey, period);
 			if (invoiceRepo.findByIdempotencyKey(idemKey).isPresent()) {
 				skippedDup++;
 				continue;
 			}
-			UUID guardianUserId;
-			try {
-				guardianUserId = resolveGuardianUserId(student);
-			} catch (BusinessException ex) {
+			Guardian payer = resolvePayer(student);
+			if (payer == null) {
 				skippedNoGuardian++;
 				continue;
 			}
@@ -251,9 +298,9 @@ public class AdminPaymentService {
 				continue;
 			}
 			Invoice inv = persistInvoice(
-					student, guardianUserId, idemKey, period, currency,
+					student, payer.getUserId(), payer.getPublicUuid(), null, idemKey, period, currency,
 					amount, discount, request.dueAt(), request.notes(), description);
-			publishPaymentDue(inv, description);
+			if (portalRecipient(inv) != null) publishPaymentDue(inv, description);
 			created.add(inv.getPublicUuid());
 		}
 		int createdCount = request.dryRun() ? 0 : created.size();
@@ -299,7 +346,9 @@ public class AdminPaymentService {
 		p.setProvider(Payment.Provider.CASH);
 		p.setExternalReference(invoice.getPublicUuid().toString());
 		p.setStatus(Payment.Status.APPROVED);
-		p.setAmountCents(invoice.getTotalCents());
+		long amountDue = invoice.getBalanceCents();
+		if (amountDue <= 0) throw new BusinessException("INVOICE_NO_BALANCE", "Invoice has no remaining balance");
+		p.setAmountCents(amountDue);
 		p.setCurrency(invoice.getCurrency());
 		p.setPaymentMethod("CASH");
 		Instant paidAt = Instant.now();
@@ -314,6 +363,42 @@ public class AdminPaymentService {
 		publishPaymentReceived(invoice);
 		log.info("[admin-payment] invoice {} marked PAID via CASH (payment {})",
 				invoicePublicUuid, p.getPublicUuid());
+	}
+
+	@Transactional
+	public InvoiceResponse submitEvidenceByStaff(UUID invoicePublicUuid, SubmitPaymentEvidenceRequest request) {
+		TenantContext.currentRequired();
+		Invoice invoice = invoiceRepo.findByPublicUuidForUpdate(invoicePublicUuid)
+				.orElseThrow(() -> new InvoiceNotFoundException("Invoice not found: " + invoicePublicUuid));
+		if (invoice.getStatus() != Invoice.Status.PENDING
+				&& invoice.getStatus() != Invoice.Status.OVERDUE
+				&& invoice.getStatus() != Invoice.Status.PENDING_REVIEW) {
+			throw new BusinessException("INVOICE_NOT_OPEN", "Solo se puede adjuntar un comprobante a un cargo pendiente o vencido.");
+		}
+		var file = fileObjectService.getByPublicUuid(request.filePublicUuid());
+		if (file.getStatus() != FileUploadStatus.READY) {
+			throw new com.edushift.shared.exception.BadRequestException("EVIDENCE_FILE_NOT_READY", "El comprobante todavía no está listo.");
+		}
+		String mime = file.getContentType() == null ? "" : file.getContentType().toLowerCase(Locale.ROOT);
+		if (!mime.startsWith("image/") && !"application/pdf".equals(mime)) {
+			throw new com.edushift.shared.exception.BadRequestException("EVIDENCE_FILE_TYPE", "El comprobante debe ser una imagen o PDF.");
+		}
+		UUID previous = invoice.getEvidenceFilePublicUuid();
+		if (previous != null && !previous.equals(request.filePublicUuid())) {
+			fileObjectService.releaseReference(previous);
+		}
+		if (previous == null || !previous.equals(request.filePublicUuid())) {
+			fileObjectService.acquireReference(request.filePublicUuid());
+		}
+		invoice.setEvidenceFilePublicUuid(request.filePublicUuid());
+		invoice.setEvidenceSubmittedAt(Instant.now());
+		invoice.setEvidenceNotes(blankToNull(request.notes()));
+		invoice.setEvidenceRejectionReason(null);
+		invoice.setStatus(Invoice.Status.PENDING_REVIEW);
+		invoiceRepo.save(invoice);
+		publishEvidenceSubmitted(invoice);
+		return InvoiceResponse.from(invoice, itemRepo.findByInvoiceIdOrderByCreatedAtAsc(invoice.getId())
+				.stream().map(InvoiceItemResponse::from).toList());
 	}
 
 	@Transactional
@@ -336,7 +421,9 @@ public class AdminPaymentService {
 		payment.setProvider(Payment.Provider.MANUAL);
 		payment.setExternalReference(invoice.getPublicUuid().toString());
 		payment.setStatus(Payment.Status.APPROVED);
-		payment.setAmountCents(invoice.getTotalCents());
+		long amountDue = invoice.getBalanceCents();
+		if (amountDue <= 0) throw new BusinessException("INVOICE_NO_BALANCE", "Invoice has no remaining balance");
+		payment.setAmountCents(amountDue);
 		payment.setCurrency(invoice.getCurrency());
 		payment.setPaymentMethod("VOUCHER");
 		payment.setPaidAt(paidAt);
@@ -430,7 +517,9 @@ public class AdminPaymentService {
 	}
 
 	private void publishPaymentReceived(Invoice inv) {
-		var guardian = userRepository.findByPublicUuid(inv.getGuardianUserId()).orElse(null);
+		UUID recipient = portalRecipient(inv);
+		if (recipient == null) return;
+		var guardian = userRepository.findByPublicUuid(recipient).orElse(null);
 		String parentName = guardian == null
 				? ""
 				: (guardian.getFirstName() + " " + guardian.getLastName()).trim();
@@ -454,14 +543,16 @@ public class AdminPaymentService {
 						.sourceId(inv.getPublicUuid())
 						.tenantId(inv.getTenantId() != null ? inv.getTenantId() : TenantContext.currentRequired())
 						.recipients(List.of(new NotificationEvent.Recipient(
-								inv.getGuardianUserId(),
+									recipient,
 								guardian == null ? null : guardian.getEmail())))
 						.payload(payload)
 						.build());
 	}
 
 	private void publishEvidenceRejected(Invoice inv, String reason) {
-		var guardian = userRepository.findByPublicUuid(inv.getGuardianUserId()).orElse(null);
+		UUID recipient = portalRecipient(inv);
+		if (recipient == null) return;
+		var guardian = userRepository.findByPublicUuid(recipient).orElse(null);
 		String parentName = guardian == null
 				? ""
 				: (guardian.getFirstName() + " " + guardian.getLastName()).trim();
@@ -477,15 +568,35 @@ public class AdminPaymentService {
 						.sourceId(inv.getPublicUuid())
 						.tenantId(inv.getTenantId() != null ? inv.getTenantId() : TenantContext.currentRequired())
 						.recipients(List.of(new NotificationEvent.Recipient(
-								inv.getGuardianUserId(),
+									recipient,
 								guardian == null ? null : guardian.getEmail())))
 						.payload(payload)
 						.build());
 	}
 
+	private void publishEvidenceSubmitted(Invoice invoice) {
+		UUID tenantId = invoice.getTenantId() != null ? invoice.getTenantId() : TenantContext.currentRequired();
+		List<NotificationEvent.Recipient> recipients = userRepository.findActivePaymentAdmins(tenantId).stream()
+				.map(user -> new NotificationEvent.Recipient(user.getPublicUuid(), user.getEmail())).toList();
+		if (recipients.isEmpty()) return;
+		String studentName = studentRepository.findByPublicUuid(invoice.getStudentId()).map(Student::fullName).orElse("");
+		Map<String, Object> payload = new HashMap<>();
+		payload.put("invoiceNumber", invoice.getPeriodLabel());
+		payload.put("concept", "Cuota " + invoice.getPeriodLabel());
+		payload.put("amount", String.format(Locale.US, "%s %.2f", invoice.getCurrency(), invoice.getBalanceCents() / 100.0));
+		payload.put("studentName", studentName);
+		payload.put("invoicePublicUuid", invoice.getPublicUuid().toString());
+		payload.put("notes", invoice.getEvidenceNotes() == null ? "" : invoice.getEvidenceNotes());
+		eventPublisher.publishEvent(NotificationEvent.builder().templateKey("PAYMENT_EVIDENCE_SUBMITTED")
+				.category(Notification.Category.PAYMENT).sourceId(invoice.getPublicUuid()).tenantId(tenantId)
+				.recipients(recipients).payload(payload).build());
+	}
+
 	private Invoice persistInvoice(
 			Student student,
 			UUID guardianUserId,
+			UUID guardianPublicUuid,
+			UUID academicYearPublicUuid,
 			String idemKey,
 			String period,
 			String currency,
@@ -499,6 +610,8 @@ public class AdminPaymentService {
 		inv.setTenantId(TenantContext.currentRequired());
 		inv.setStudentId(student.getPublicUuid());
 		inv.setGuardianUserId(guardianUserId);
+		inv.setGuardianPublicUuid(guardianPublicUuid);
+		inv.setAcademicYearPublicUuid(academicYearPublicUuid);
 		inv.setIdempotencyKey(idemKey);
 		inv.setPeriodLabel(period);
 		inv.setCurrency(currency == null || currency.isBlank() ? "PEN" : currency);
@@ -523,6 +636,41 @@ public class AdminPaymentService {
 		return inv;
 	}
 
+	private void applyReservationAdvances(Invoice invoice, UUID applicationPublicUuid) {
+		List<AppliedAdmissionAdvance> advances = admissionReservationService
+				.applyAvailableAdvances(applicationPublicUuid, invoice);
+		if (advances.isEmpty()) return;
+		long appliedTotal = 0;
+		Instant lastReceivedAt = invoice.getPaidAt();
+		for (AppliedAdmissionAdvance advance : advances) {
+			Payment payment = new Payment();
+			payment.setTenantId(TenantContext.currentRequired());
+			payment.setInvoiceId(invoice.getId());
+			payment.setGuardianUserId(invoice.getGuardianUserId());
+			payment.setProvider(advance.method() == com.edushift.modules.admissions.entity.AdmissionReservationAdvanceMethod.CASH
+					? Payment.Provider.CASH : Payment.Provider.MANUAL);
+			payment.setExternalReference("reservation-advance:" + advance.publicUuid());
+			payment.setStatus(Payment.Status.APPROVED);
+			payment.setAmountCents(advance.amountCents());
+			payment.setCurrency(advance.currency());
+			payment.setPaymentMethod("RESERVATION_ADVANCE_" + advance.method().name());
+			payment.setPaidAt(advance.receivedAt());
+			payment.setRawResponse("{\"source\":\"ADMISSION_RESERVATION_ADVANCE\",\"advancePublicUuid\":\""
+					+ advance.publicUuid() + "\"}");
+			paymentRepo.save(payment);
+			appliedTotal += advance.amountCents();
+			if (lastReceivedAt == null || advance.receivedAt().isAfter(lastReceivedAt)) {
+				lastReceivedAt = advance.receivedAt();
+			}
+		}
+		invoice.setAdvanceAppliedCents(invoice.getAdvanceAppliedCents() + appliedTotal);
+		if (invoice.getBalanceCents() == 0) {
+			invoice.setStatus(Invoice.Status.PAID);
+			invoice.setPaidAt(lastReceivedAt == null ? Instant.now() : lastReceivedAt);
+		}
+		invoiceRepo.save(invoice);
+	}
+
 	private PaymentConcept resolveConcept(UUID conceptPublicUuid) {
 		if (conceptPublicUuid == null) {
 			return null;
@@ -532,22 +680,38 @@ public class AdminPaymentService {
 						"Payment concept not found: " + conceptPublicUuid));
 	}
 
-	private UUID resolveGuardianUserId(Student student) {
+	private Guardian resolvePayer(Student student) {
 		List<StudentGuardian> links = studentGuardianRepository.findActiveByStudentId(student.getId());
 		StudentGuardian primary = links.stream()
 				.filter(StudentGuardian::isPrimaryContact)
-				.filter(sg -> sg.getGuardian() != null && sg.getGuardian().getUserId() != null)
+				.filter(sg -> sg.getGuardian() != null)
 				.findFirst()
 				.orElseGet(() -> links.stream()
-						.filter(sg -> sg.getGuardian() != null && sg.getGuardian().getUserId() != null)
+						.filter(sg -> sg.getGuardian() != null)
 						.findFirst()
 						.orElse(null));
-		if (primary == null || primary.getGuardian().getUserId() == null) {
-			throw new BusinessException(
-					"GUARDIAN_NOT_LINKED",
-					"Student has no guardian with a portal user account");
+		return primary == null ? null : primary.getGuardian();
+	}
+
+	private UUID portalRecipient(Invoice invoice) {
+		if (invoice.getGuardianUserId() != null) return invoice.getGuardianUserId();
+		if (invoice.getGuardianPublicUuid() == null) return null;
+		return guardianRepository.findByPublicUuid(invoice.getGuardianPublicUuid())
+				.map(Guardian::getUserId).orElse(null);
+	}
+
+	private String emitIdempotencyKey(UUID studentPublicUuid, String conceptCode, String period) {
+		String key = "emit:" + studentPublicUuid + ":" + conceptCode + ":" + period;
+		if (key.length() <= 120) return key;
+		try {
+			byte[] digest = java.security.MessageDigest.getInstance("SHA-256")
+					.digest((conceptCode + ":" + period).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+			return "emit:" + studentPublicUuid + ":"
+					+ java.util.HexFormat.of().formatHex(digest, 0, 12);
 		}
-		return primary.getGuardian().getUserId();
+		catch (java.security.NoSuchAlgorithmException exception) {
+			throw new IllegalStateException("SHA-256 is unavailable", exception);
+		}
 	}
 
 	private List<Student> resolveBulkStudents(BulkEmitInvoicesRequest request) {
@@ -568,7 +732,9 @@ public class AdminPaymentService {
 	}
 
 	private void publishPaymentDue(Invoice inv, String conceptName) {
-		var guardian = userRepository.findByPublicUuid(inv.getGuardianUserId()).orElse(null);
+		UUID recipient = portalRecipient(inv);
+		if (recipient == null) return;
+		var guardian = userRepository.findByPublicUuid(recipient).orElse(null);
 		String parentName = guardian == null
 				? ""
 				: (guardian.getFirstName() + " " + guardian.getLastName()).trim();
@@ -577,7 +743,7 @@ public class AdminPaymentService {
 				.orElse("");
 		String amount = String.format(Locale.US, "%s %.2f",
 				inv.getCurrency() == null ? "PEN" : inv.getCurrency(),
-				inv.getTotalCents() / 100.0);
+				inv.getBalanceCents() / 100.0);
 		Map<String, Object> payload = new HashMap<>();
 		payload.put("invoiceNumber", inv.getPeriodLabel());
 		payload.put("parentName", parentName);
@@ -594,7 +760,7 @@ public class AdminPaymentService {
 						.sourceId(inv.getPublicUuid())
 						.tenantId(inv.getTenantId() != null ? inv.getTenantId() : TenantContext.currentRequired())
 						.recipients(List.of(new NotificationEvent.Recipient(
-								inv.getGuardianUserId(),
+									recipient,
 								guardian == null ? null : guardian.getEmail())))
 						.payload(payload)
 						.build());
@@ -603,5 +769,9 @@ public class AdminPaymentService {
 	private static String sanitize(String s) {
 		if (s == null) return "";
 		return s.replace("\\", "\\\\").replace("\"", "'").replace("\n", " ").replace("\r", " ");
+	}
+
+	private static String blankToNull(String value) {
+		return value == null || value.isBlank() ? null : value.trim();
 	}
 }

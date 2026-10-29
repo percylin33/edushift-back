@@ -48,8 +48,15 @@ import static org.mockito.Mockito.mock;
  * {@code @WebMvcSlice} meta-annotation, once present).</p>
  */
 @TestConfiguration
-@Import({RateLimitConfiguration.class, WebConfiguration.class})
+@Import({RateLimitConfiguration.class, WebConfiguration.class,
+		com.edushift.modules.auth.controller.CookieHelper.class})
 public class EdushiftWebMvcTestConfig {
+
+	@Bean
+	com.edushift.infrastructure.multitenancy.TenantHostResolver tenantHostResolver() {
+		return new com.edushift.infrastructure.multitenancy.TenantHostResolver(
+				mock(com.edushift.modules.tenants.repository.TenantRepository.class), "edushift.pe");
+	}
 
 	/**
 	 * Test-scope {@link CurrentUserProvider}. See class javadoc.

@@ -40,20 +40,18 @@ public class AnnouncementAudienceResolver {
         List<String> rawIds = a.getAudienceIds() == null ? List.of() : a.getAudienceIds();
         return switch (a.getAudienceType()) {
             case SCHOOL -> bucketByRole(jdbc, """
-                    SELECT DISTINCT u.public_uuid, r.name
+                    SELECT DISTINCT u.public_uuid, user_role.name
                     FROM edushift.users u
-                    LEFT JOIN edushift.user_roles ur ON ur.user_id = u.id
-                    LEFT JOIN edushift.roles r ON r.id = ur.role_id AND r.deleted = false
+                    LEFT JOIN LATERAL unnest(u.roles) AS user_role(name) ON true
                     WHERE u.tenant_id = ? AND u.deleted = false
                     """, tenantId);
             case USER -> {
                 List<UUID> ids = parseUuids(rawIds);
                 if (ids.isEmpty()) yield AudienceBreakdown.empty();
                 yield bucketByRole(jdbc, """
-                        SELECT DISTINCT u.public_uuid, r.name
+                        SELECT DISTINCT u.public_uuid, user_role.name
                         FROM edushift.users u
-                        LEFT JOIN edushift.user_roles ur ON ur.user_id = u.id
-                        LEFT JOIN edushift.roles r ON r.id = ur.role_id AND r.deleted = false
+                        LEFT JOIN LATERAL unnest(u.roles) AS user_role(name) ON true
                         WHERE u.tenant_id = ? AND u.deleted = false
                           AND u.public_uuid = ANY(?)
                         """, tenantId, ids.toArray(UUID[]::new));
@@ -61,12 +59,11 @@ public class AnnouncementAudienceResolver {
             case ROLE -> {
                 if (rawIds.isEmpty()) yield AudienceBreakdown.empty();
                 yield bucketByRole(jdbc, """
-                        SELECT DISTINCT u.public_uuid, r.name
+                        SELECT DISTINCT u.public_uuid, user_role.name
                         FROM edushift.users u
-                        JOIN edushift.user_roles ur ON ur.user_id = u.id
-                        JOIN edushift.roles r ON r.id = ur.role_id
-                        WHERE u.tenant_id = ? AND r.name = ANY(?)
-                          AND u.deleted = false AND r.deleted = false
+                        JOIN LATERAL unnest(u.roles) AS user_role(name) ON true
+                        WHERE u.tenant_id = ? AND user_role.name = ANY(?)
+                          AND u.deleted = false
                         """, tenantId, rawIds.toArray(String[]::new));
             }
             case GRADE -> resolveGrade(jdbc, tenantId, parseUuids(rawIds), a.isIncludeGuardians());

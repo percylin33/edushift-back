@@ -56,17 +56,13 @@ public class UserStatusChangeListener {
 	@TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
 	@Transactional(propagation = Propagation.REQUIRES_NEW)
 	public void onUserStatusChange(UserStatusChangeEvent event) {
+		if (event.oldStatus() == event.newStatus()) {
+			return;
+		}
 		User user = userRepository.findByPublicUuid(event.userPublicUuid()).orElse(null);
 		if (user == null) {
 			log.warn("[auth] UserStatusChangeEvent ignored — user not found: {}",
 					event.userPublicUuid());
-			return;
-		}
-
-		// No-op transitions: ACTIVE→ACTIVE, or any transition that doesn't
-		// actually break authentication (e.g. ACTIVE→LOCKED when LOCKED is
-		// already block — but we still revoke because LOCKED is terminal).
-		if (event.oldStatus() == event.newStatus()) {
 			return;
 		}
 

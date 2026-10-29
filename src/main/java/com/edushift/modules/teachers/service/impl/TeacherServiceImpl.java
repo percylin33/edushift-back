@@ -188,12 +188,6 @@ public class TeacherServiceImpl implements TeacherService {
 		User user = userRepository.findByPublicUuid(request.userPublicUuid())
 				.orElseThrow(() -> new ResourceNotFoundException("User", request.userPublicUuid()));
 
-		if (!user.hasRole(UserRole.TEACHER)) {
-			throw new ConflictException("USER_NOT_TEACHER_ROLE",
-					"Cannot link user '" + user.getEmail()
-							+ "': missing TEACHER role");
-		}
-
 		teacherRepository.findByUserId(user.getPublicUuid()).ifPresent(other -> {
 			throw new ConflictException("USER_ALREADY_LINKED_TO_TEACHER",
 					"User '" + user.getEmail() + "' is already linked to another teacher");
@@ -202,6 +196,8 @@ public class TeacherServiceImpl implements TeacherService {
 		// DEBT-FK-BUGS-3 / V77: teachers.user_id FK now points at
 		// users.public_uuid (not users.id). The repo lookup above and
 		// the write below both use publicUuid.
+		user.addRole(UserRole.TEACHER);
+		userRepository.save(user);
 		teacher.setUserId(user.getPublicUuid());
 		try {
 			Teacher saved = teacherRepository.saveAndFlush(teacher);

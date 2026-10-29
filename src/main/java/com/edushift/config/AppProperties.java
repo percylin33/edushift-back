@@ -14,7 +14,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 @ConfigurationProperties(prefix = "app")
 public class AppProperties {
 
-	/** Public base URL of this backend (e.g. https://api.edushift.com). */
+	/** Public base URL of this backend (e.g. https://api.edushift.pe). */
 	private String baseUrl;
 
 	private final Frontend frontend = new Frontend();

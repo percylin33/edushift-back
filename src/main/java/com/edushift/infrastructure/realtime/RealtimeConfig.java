@@ -1,5 +1,6 @@
 package com.edushift.infrastructure.realtime;
 
+import com.edushift.config.AppProperties;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.messaging.simp.config.MessageBrokerRegistry;
 import org.springframework.web.socket.config.annotation.EnableWebSocketMessageBroker;
@@ -25,6 +26,12 @@ import org.springframework.web.socket.config.annotation.WebSocketMessageBrokerCo
 @EnableWebSocketMessageBroker
 public class RealtimeConfig implements WebSocketMessageBrokerConfigurer {
 
+    private final AppProperties appProperties;
+
+    public RealtimeConfig(AppProperties appProperties) {
+        this.appProperties = appProperties;
+    }
+
     @Override
     public void configureMessageBroker(MessageBrokerRegistry config) {
         // Simple in-memory broker. For multi-instance prod, switch
@@ -36,11 +43,14 @@ public class RealtimeConfig implements WebSocketMessageBrokerConfigurer {
 
     @Override
     public void registerStompEndpoints(StompEndpointRegistry registry) {
+        var cors = appProperties.getCors();
         registry.addEndpoint("/ws/notify")
-                .setAllowedOriginPatterns("*") // in prod, restrict to the FE origin
+                .setAllowedOrigins(cors.getAllowedOrigins().toArray(String[]::new))
+                .setAllowedOriginPatterns(cors.getAllowedOriginPatterns().toArray(String[]::new))
                 .withSockJS(); // graceful fallback for old browsers / corporate proxies
         // Native WS (no SockJS) for clients that prefer it.
         registry.addEndpoint("/ws/notify")
-                .setAllowedOriginPatterns("*");
+                .setAllowedOrigins(cors.getAllowedOrigins().toArray(String[]::new))
+                .setAllowedOriginPatterns(cors.getAllowedOriginPatterns().toArray(String[]::new));
     }
 }

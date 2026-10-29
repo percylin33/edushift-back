@@ -108,9 +108,9 @@ class SubmissionDtoTest {
         }
 
         @Test
-        @DisplayName("grade=101 — Max violation")
+        @DisplayName("grade=1001 — exceeds every supported task scale")
         void gradeAboveHundred() {
-            var r = new GradeSubmissionRequest(101, "fb");
+            var r = new GradeSubmissionRequest(1001, "fb");
             assertThat(validator.validate(r)).isNotEmpty();
         }
 

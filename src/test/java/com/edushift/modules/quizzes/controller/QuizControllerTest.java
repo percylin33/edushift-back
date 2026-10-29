@@ -56,7 +56,7 @@ class QuizControllerTest {
         mockMvc.perform(post("/v1/sections/{u}/quizzes", UUID.randomUUID())
                         .with(csrf()).with(authentication(teacher()))
                         .contentType("application/json")
-                        .content("{\"title\":\"Quiz 1\",\"maxAttempts\":1,\"maxScore\":100}"))
+                        .content("{\"title\":\"Quiz 1\",\"maxAttempts\":1,\"maxScore\":100,\"teacherAssignmentPublicUuid\":\"" + UUID.randomUUID() + "\"}"))
                 .andExpect(status().isCreated());
     }
 

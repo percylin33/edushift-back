@@ -154,7 +154,11 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 		}
 
 		boolean impersonationToken = claims.type() == TokenType.IMPERSONATION;
-		if (claims.type() != TokenType.ACCESS && !impersonationToken) {
+		String servletPath = request.getRequestURI().substring(request.getContextPath().length());
+		boolean mfaChallenge = claims.type() == TokenType.MFA
+				&& "POST".equals(request.getMethod())
+				&& "/v1/auth/mfa/challenge".equals(servletPath);
+		if (claims.type() != TokenType.ACCESS && !impersonationToken && !mfaChallenge) {
 			log.debug("[auth] reject bearer ({}): not an access token (type={})",
 					request.getRequestURI(), claims.type());
 			return;
@@ -196,6 +200,17 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 					publicUuid, request.getRequestURI());
 			return;
 		}
+		UUID userTenantId = user.getTenantId();
+		UUID superAdminTenant = com.edushift.infrastructure.multitenancy.TenantIdResolver.SUPER_ADMIN_SENTINEL;
+		boolean superAdminOnSystemTenant = claims.roles() != null
+				&& claims.roles().contains("SUPER_ADMIN")
+				&& superAdminTenant.equals(userTenantId)
+				&& (claims.tenantId() == null || superAdminTenant.equals(claims.tenantId()));
+		if (!superAdminOnSystemTenant && !java.util.Objects.equals(claims.tenantId(), userTenantId)) {
+			log.warn("[auth] rejecting bearer with tenant membership mismatch: publicUuid={}, path={}",
+					publicUuid, request.getRequestURI());
+			return;
+		}
 		if (impersonationToken && !claims.tenantId().equals(user.getTenantId())) {
 			log.warn("[auth] rejecting impersonation bearer with tenant mismatch: publicUuid={}, path={}",
 					publicUuid, request.getRequestURI());
@@ -207,7 +222,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 			return;
 		}
 
-		List<GrantedAuthority> authorities = mapAuthorities(
+		List<GrantedAuthority> authorities = mfaChallenge ? List.of() : mapAuthorities(
 				claims.tenantId(),
 				claims.roles(),
 				user.getId());
@@ -238,6 +253,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
 		// SECURITY FIX: Do not store the raw token as credentials
 		JwtAuthenticationToken auth = new JwtAuthenticationToken(principal, null, authorities);
+		if (mfaChallenge) auth.setDetails(claims);
 		SecurityContextHolder.getContext().setAuthentication(auth);
 
 		log.debug("[auth] authenticated publicUuid={} tenantSlug={} path={}",

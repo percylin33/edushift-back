@@ -272,7 +272,7 @@ class TeacherDashboardIT extends IntegrationTest {
 	}
 
 	private Tenant createTenant(String prefix) {
-		Tenant t = new Tenant();
+		Tenant t = newTestTenant();
 		t.setSlug(prefix + UUID.randomUUID().toString().substring(0, 8));
 		t.setName("IT Tenant " + t.getSlug());
 		t.setStatus(TenantStatus.ACTIVE);
@@ -458,10 +458,10 @@ class TeacherDashboardIT extends IntegrationTest {
 			HttpHeaders headers = new HttpHeaders();
 			headers.setContentType(MediaType.APPLICATION_JSON);
 			headers.set("X-Tenant-Slug", tenant.getSlug());
-			JsonNode root = objectMapper.readTree(rest.exchange(
+			var loginResponse = rest.exchange(
 					"/v1/auth/login", HttpMethod.POST,
-					new HttpEntity<>(body, headers), String.class).getBody());
-			return root.get("accessToken").asText();
+					new HttpEntity<>(body, headers), String.class);
+			return readSessionResponse(objectMapper, loginResponse).accessToken();
 		} catch (Exception e) {
 			throw new RuntimeException(e);
 		}

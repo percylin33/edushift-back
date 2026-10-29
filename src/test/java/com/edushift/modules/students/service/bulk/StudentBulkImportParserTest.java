@@ -250,6 +250,27 @@ class StudentBulkImportParserTest {
 	}
 
 	@Test
+	void explicitMappingFindsHeaderBelowTitleEvenWhenDataContainsKnownAliases() throws Exception {
+		byte[] payload = build(workbook -> {
+			Sheet sheet = workbook.createSheet("Custom");
+			sheet.createRow(0).createCell(0).setCellValue("Nómina escolar");
+			Row header = sheet.createRow(2);
+			String[] names = {"DOC", "NRO", "NOM", "APE"};
+			for (int i = 0; i < names.length; i++) header.createCell(i).setCellValue(names[i]);
+			Row student = sheet.createRow(3);
+			String[] values = {"DNI", "99999999", "Bob", "Smith"};
+			for (int i = 0; i < values.length; i++) student.createCell(i).setCellValue(values[i]);
+		});
+		var mapping = java.util.Map.of("documentType", "DOC", "documentNumber", "NRO",
+				"firstName", "NOM", "lastName", "APE");
+		List<StudentRowDraft> drafts = parser.parse(new ByteArrayInputStream(payload), mapping);
+		assertThat(drafts).singleElement().satisfies(student -> {
+			assertThat(student.firstName()).isEqualTo("Bob");
+			assertThat(student.lastName()).isEqualTo("Smith");
+		});
+	}
+
+	@Test
 	@DisplayName("preview returns suggestedMapping for Spanish headers")
 	void previewSuggestsSpanish() throws Exception {
 		byte[] payload = build(workbook -> {

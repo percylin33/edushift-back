@@ -54,7 +54,7 @@ class TaskControllerTest {
     void createHappyPath() throws Exception {
         mockMvc.perform(post("/v1/sections/{sid}/tasks", UUID.randomUUID())
                         .with(csrf()).with(authentication(teacher()))
-                        .content("{\"title\":\"Homework 1\"}")
+                        .content("{\"title\":\"Homework 1\",\"teacherAssignmentPublicUuid\":\"" + UUID.randomUUID() + "\",\"maxScore\":100}")
                         .contentType(org.springframework.http.MediaType.APPLICATION_JSON))
                 .andExpect(status().isCreated());
     }
@@ -97,7 +97,7 @@ class TaskControllerTest {
                                 new JwtAuthenticatedPrincipal(
                                         UUID.randomUUID(), UUID.randomUUID(), "a", "a@t"),
                                 "t", List.<SimpleGrantedAuthority>of())))
-                        .content("{\"title\":\"Homework 1\"}")
+                        .content("{\"title\":\"Homework 1\",\"teacherAssignmentPublicUuid\":\"" + UUID.randomUUID() + "\",\"maxScore\":100}")
                         .contentType(org.springframework.http.MediaType.APPLICATION_JSON))
                 .andExpect(status().isForbidden());
     }

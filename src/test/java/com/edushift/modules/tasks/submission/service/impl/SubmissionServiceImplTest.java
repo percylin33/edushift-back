@@ -55,6 +55,7 @@ class SubmissionServiceImplTest {
     @Mock private SubmissionRevisionRepository revisionRepository;
     @Mock private FileObjectService fileObjectService;
     @Mock private SubmissionMapper submissionMapper;
+    @Mock private com.edushift.modules.auth.repository.UserRepository userRepository;
     @Mock private org.springframework.context.ApplicationEventPublisher eventPublisher;
 
     @InjectMocks private SubmissionServiceImpl service;
@@ -63,13 +64,26 @@ class SubmissionServiceImplTest {
 
     @BeforeEach
     void setUp() {
+        com.edushift.shared.multitenancy.TenantContext.set(UUID.randomUUID());
         task = new Task();
         setField(task, "publicUuid", UUID.randomUUID());
         setField(task, "id", UUID.randomUUID());
         task.setTitle("Tarea 1");
+        task.setStatus(com.edushift.modules.tasks.entity.TaskStatus.PUBLISHED);
+        org.mockito.Mockito.lenient().when(userRepository.findByPublicUuid(any()))
+                .thenAnswer(inv -> {
+                    var user = new com.edushift.modules.auth.entity.User();
+                    user.setPublicUuid(inv.getArgument(0));
+                    return Optional.of(user);
+                });
         task.setAllowResubmission(true);
         task.setMaxScore((short) 100);
         task.setDueAt(Instant.now().plus(2, ChronoUnit.DAYS));
+    }
+
+    @org.junit.jupiter.api.AfterEach
+    void clearTenant() {
+        com.edushift.shared.multitenancy.TenantContext.clear();
     }
 
     // =====================================================================

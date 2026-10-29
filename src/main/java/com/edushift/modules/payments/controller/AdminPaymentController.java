@@ -17,6 +17,7 @@ import com.edushift.modules.payments.dto.PaymentAccessCandidateDto;
 import com.edushift.modules.payments.dto.PaymentAccessOverrideDto;
 import com.edushift.modules.payments.dto.PaymentResponse;
 import com.edushift.modules.payments.dto.RejectPaymentEvidenceRequest;
+import com.edushift.modules.payments.dto.SubmitPaymentEvidenceRequest;
 import com.edushift.modules.payments.entity.Invoice;
 import com.edushift.modules.payments.entity.Payment;
 import com.edushift.modules.payments.entity.PaymentAccessOverride;
@@ -157,6 +158,15 @@ public class AdminPaymentController {
 	public ApiResponse<Void> approveEvidence(@PathVariable UUID publicUuid) {
 		adminPaymentService.approveEvidence(publicUuid);
 		return ApiResponse.ok(null);
+	}
+
+	@PostMapping("/invoices/{publicUuid}/evidence")
+	@PreAuthorize(PaymentAccessExpressions.RECEIVE)
+	@Operation(summary = "Adjuntar un comprobante recibido en ventanilla para revisión")
+	public ApiResponse<InvoiceResponse> submitEvidenceByStaff(
+			@PathVariable UUID publicUuid,
+			@Valid @RequestBody SubmitPaymentEvidenceRequest request) {
+		return ApiResponse.ok(adminPaymentService.submitEvidenceByStaff(publicUuid, request));
 	}
 
 	@GetMapping("/invoices")

@@ -70,7 +70,9 @@ public interface UserManagementService {
 	 * Replaces the user's roles with the set in {@code request}. Throws
 	 * {@code 400 INVALID_ROLE} when the request contains an unknown role
 	 * name; throws {@code 409 LAST_ADMIN_PROTECTION} when the operation
-	 * would strand the tenant without an admin.
+	 * would strand the tenant without an admin. Profile-backed roles
+	 * ({@code TEACHER}, {@code STUDENT}, {@code PARENT}) can only be changed
+	 * through their corresponding domain profile operations.
 	 */
 	UserDetailResponse assignRoles(UUID publicUuid, AssignRolesRequest request);
 

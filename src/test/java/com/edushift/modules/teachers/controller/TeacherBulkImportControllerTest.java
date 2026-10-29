@@ -16,6 +16,7 @@ import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors;
 
 @WebMvcTest(TeacherBulkImportController.class)
 @Import({com.edushift.test.EdushiftWebMvcTestConfig.class, com.edushift.test.TestSecurityConfig.class})
@@ -29,7 +30,7 @@ class TeacherBulkImportControllerTest extends AbstractControllerTest {
         given(service.getJob(any())).willReturn(Mockito.mock(BulkImportJobResponse.class));
 
         mockMvc.perform(get("/v1/teachers/bulk-import/{id}", UUID.randomUUID())
-                        .with(auth(tenantAdmin())))
+                        .with(SecurityMockMvcRequestPostProcessors.user("tenant-admin").roles("TENANT_ADMIN")))
                 .andExpect(status().isOk());
     }
 

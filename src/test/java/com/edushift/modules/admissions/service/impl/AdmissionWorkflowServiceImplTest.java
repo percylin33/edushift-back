@@ -54,6 +54,7 @@ class AdmissionWorkflowServiceImplTest {
     @Mock StudentEnrollmentService enrollmentService;
     @Mock TenantRepository tenantRepository;
     @Mock NotificationService notificationService;
+    @Mock com.edushift.modules.admissions.service.AdmissionReservationService reservationService;
     @Mock CurrentUserProvider currentUserProvider;
     @Mock FrontendLinks frontendLinks;
     @org.mockito.Spy com.edushift.modules.admissions.mapper.AdmissionApplicantMapper applicantMapper = new com.edushift.modules.admissions.mapper.AdmissionApplicantMapper();

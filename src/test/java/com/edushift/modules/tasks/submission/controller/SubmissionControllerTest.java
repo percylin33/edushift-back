@@ -72,6 +72,8 @@ class SubmissionControllerTest {
 
     @Test
     void listByTask() throws Exception {
+        given(submissionService.listByTask(any(), any()))
+                .willReturn(org.springframework.data.domain.Page.empty());
         mockMvc.perform(get("/v1/tasks/{tid}/submissions", UUID.randomUUID())
                         .with(authentication(grader())))
                 .andExpect(status().isOk());

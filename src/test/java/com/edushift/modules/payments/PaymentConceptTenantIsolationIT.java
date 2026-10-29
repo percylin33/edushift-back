@@ -90,8 +90,10 @@ class PaymentConceptTenantIsolationIT extends IntegrationTest {
 		TenantContext.runAs(tenantBId,
 				() -> conceptService.create(req("TUITION", "Tuition")));
 
-		Long totalRows = repository.count();
-		assertThat(totalRows).isEqualTo(2L);
+		assertThat(TenantContext.runAs(tenantAId,
+				() -> repository.findByCodeAndDeletedFalse("TUITION"))).isPresent();
+		assertThat(TenantContext.runAs(tenantBId,
+				() -> repository.findByCodeAndDeletedFalse("TUITION"))).isPresent();
 	}
 
 	@Test
@@ -113,8 +115,10 @@ class PaymentConceptTenantIsolationIT extends IntegrationTest {
 				() -> conceptService.create(req("EXAM", "Examen recovery"))).publicUuid())
 				.isNotNull();
 
-		Long totalRows = repository.count();
-		assertThat(totalRows).isEqualTo(2L);
+		assertThat(TenantContext.runAs(tenantAId,
+				() -> repository.findByCodeAndDeletedFalse("EXAM"))).isEmpty();
+		assertThat(TenantContext.runAs(tenantBId,
+				() -> repository.findByCodeAndDeletedFalse("EXAM"))).isPresent();
 	}
 
 	@Test
@@ -148,7 +152,7 @@ class PaymentConceptTenantIsolationIT extends IntegrationTest {
 	// -----------------------------------------------------------------
 
 	private UUID createTenant(String slug) {
-		Tenant t = new Tenant();
+		Tenant t = newTestTenant();
 		t.setPublicUuid(UUID.randomUUID());
 		t.setSlug(slug);
 		t.setName("Test " + slug);

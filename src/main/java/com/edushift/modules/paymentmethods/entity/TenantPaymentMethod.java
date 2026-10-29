@@ -7,10 +7,12 @@ import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.Table;
+import java.time.Instant;
 import java.util.UUID;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
+import org.hibernate.annotations.SQLDelete;
 
 /**
  * Método de pago configurado por el tenant para que los apoderados
@@ -21,6 +23,7 @@ import lombok.Setter;
  * El QR de billetera se almacena como URL pública (Firebase Storage).</p>
  */
 @Entity
+@SQLDelete(sql = "UPDATE edushift.tenant_payment_methods SET deleted = true, deleted_at = NOW(), updated_at = NOW() WHERE id = ?")
 @Table(name = "tenant_payment_methods", schema = "edushift")
 @Getter
 @Setter
@@ -66,6 +69,21 @@ public class TenantPaymentMethod extends TenantAwareEntity {
 
 	@Column(name = "is_default", nullable = false)
 	private boolean defaultMethod = false;
+
+	@Column(name = "deleted_at")
+	private Instant deletedAt;
+
+	@Override
+	public void markDeleted() {
+		super.markDeleted();
+		this.deletedAt = Instant.now();
+	}
+
+	@Override
+	public void restore() {
+		super.restore();
+		this.deletedAt = null;
+	}
 
 	@PrePersist
 	private void onCreate() {

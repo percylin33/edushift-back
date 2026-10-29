@@ -15,6 +15,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import static org.assertj.core.api.Assertions.assertThat;
+
 import com.edushift.infrastructure.multitenancy.MultiTenancyConfiguration;
 import com.edushift.infrastructure.multitenancy.TenantInterceptor;
 import com.edushift.modules.auth.controller.CookieHelper;
@@ -38,11 +40,13 @@ import com.edushift.shared.exception.ResourceNotFoundException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.context.annotation.ComponentScan;
@@ -132,8 +136,8 @@ private static final String BASE = "/v1/users/invitations";
 					.willReturn(stubInvitation(InvitationStatus.PENDING, "secret-token-1"));
 
 			CreateInvitationRequest body = new CreateInvitationRequest(
-					"teach@acme.test", "Teach", "Doe", Set.of("TEACHER"),
-					DocumentType.DNI, "87654321");
+					"staff@acme.test", "Staff", "User", Set.of("STAFF"),
+					DocumentType.DNI, "87654321", Map.of("teacherId", UUID.randomUUID().toString()));
 
 			mockMvc.perform(post(BASE)
 							.with(csrf())
@@ -144,6 +148,12 @@ private static final String BASE = "/v1/users/invitations";
 					.andExpect(jsonPath("$.success").value(true))
 					.andExpect(jsonPath("$.data.token").value("secret-token-1"))
 					.andExpect(jsonPath("$.data.status").value("PENDING"));
+
+			ArgumentCaptor<CreateInvitationRequest> requestCaptor =
+					ArgumentCaptor.forClass(CreateInvitationRequest.class);
+			then(service).should().createInvitation(requestCaptor.capture());
+			assertThat(requestCaptor.getValue().metadata()).isNull();
+			assertThat(requestCaptor.getValue().roles()).containsExactly("STAFF");
 		}
 
 		@Test
@@ -154,7 +164,7 @@ private static final String BASE = "/v1/users/invitations";
 							"already pending"));
 
 			CreateInvitationRequest body = new CreateInvitationRequest(
-					"dup@acme.test", "Dup", "User", Set.of("TEACHER"),
+					"dup@acme.test", "Dup", "User", Set.of("STAFF"),
 					DocumentType.DNI, "87654321");
 
 			mockMvc.perform(post(BASE)
@@ -170,7 +180,7 @@ private static final String BASE = "/v1/users/invitations";
 		@DisplayName("invalid email â†’ 400 (validation, never reaches service)")
 		void invalidEmailRejected() throws Exception {
 			CreateInvitationRequest body = new CreateInvitationRequest(
-					"not-an-email", "Teach", "Doe", Set.of("TEACHER"),
+					"not-an-email", "Teach", "Doe", Set.of("STAFF"),
 					DocumentType.DNI, "87654321");
 
 			mockMvc.perform(post(BASE)
@@ -187,7 +197,7 @@ private static final String BASE = "/v1/users/invitations";
 		@DisplayName("missing role â†’ 403 FORBIDDEN")
 		void forbiddenWithoutRole() throws Exception {
 			CreateInvitationRequest body = new CreateInvitationRequest(
-					"teach@acme.test", "Teach", "Doe", Set.of("TEACHER"),
+					"staff@acme.test", "Staff", "User", Set.of("STAFF"),
 					DocumentType.DNI, "87654321");
 
 			mockMvc.perform(post(BASE)

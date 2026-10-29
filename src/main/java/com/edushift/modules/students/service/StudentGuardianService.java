@@ -3,6 +3,7 @@ package com.edushift.modules.students.service;
 import com.edushift.modules.students.dto.AddGuardianRequest;
 import com.edushift.modules.students.dto.GuardianProfileResponse;
 import com.edushift.modules.students.dto.GuardianResponse;
+import com.edushift.modules.students.dto.GuardianPortalAccessResponse;
 import com.edushift.modules.students.dto.InviteGuardianResponse;
 import com.edushift.modules.students.dto.LinkGuardianUserRequest;
 import com.edushift.modules.students.dto.UpdateGuardianLinkRequest;
@@ -60,5 +61,8 @@ public interface StudentGuardianService {
 
 	/** Invite the guardian to claim a PARENT portal (metadata.guardianId). */
 	InviteGuardianResponse invite(UUID studentPublicUuid, UUID guardianPublicUuid);
+
+	/** Reuses a linked parent account or sends an invitation after enrollment; failures remain retryable. */
+	GuardianPortalAccessResponse ensurePortalAccess(UUID studentPublicUuid);
 
 }

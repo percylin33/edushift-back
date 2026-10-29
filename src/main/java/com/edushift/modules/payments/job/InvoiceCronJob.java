@@ -10,6 +10,8 @@ import com.edushift.modules.payments.repository.SubscriptionRepository;
 import com.edushift.modules.payments.service.BillingSchedule;
 import com.edushift.modules.payments.service.SiblingDiscountService;
 import com.edushift.modules.students.repository.StudentRepository;
+import com.edushift.modules.students.repository.GuardianRepository;
+import com.edushift.modules.students.entity.Guardian;
 import com.edushift.shared.multitenancy.TenantContext;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -47,6 +49,7 @@ public class InvoiceCronJob {
 	private final ApplicationEventPublisher eventPublisher;
 	private final UserRepository userRepository;
 	private final StudentRepository studentRepository;
+	private final GuardianRepository guardianRepository;
 	private final SiblingDiscountService siblingDiscountService;
 
 	@Value("${app.payments.cron.batch-size:200}")
@@ -122,7 +125,9 @@ public class InvoiceCronJob {
 	}
 
 	private void publishPaymentDue(Invoice inv) {
-		var guardian = userRepository.findByPublicUuid(inv.getGuardianUserId()).orElse(null);
+		java.util.UUID recipient = portalRecipient(inv);
+		if (recipient == null) return;
+		var guardian = userRepository.findByPublicUuid(recipient).orElse(null);
 		String parentName = guardian == null
 				? ""
 				: (guardian.getFirstName() + " " + guardian.getLastName()).trim();
@@ -148,7 +153,7 @@ public class InvoiceCronJob {
 						.sourceId(inv.getPublicUuid())
 						.tenantId(inv.getTenantId())
 						.recipients(List.of(new NotificationEvent.Recipient(
-								inv.getGuardianUserId(),
+									recipient,
 								guardian == null ? null : guardian.getEmail())))
 						.payload(payload)
 						.build());
@@ -182,7 +187,9 @@ public class InvoiceCronJob {
 	}
 
 	private void publishPaymentOverdue(Invoice inv) {
-		var guardian = userRepository.findByPublicUuid(inv.getGuardianUserId()).orElse(null);
+		java.util.UUID recipient = portalRecipient(inv);
+		if (recipient == null) return;
+		var guardian = userRepository.findByPublicUuid(recipient).orElse(null);
 		String parentName = guardian == null
 				? ""
 				: (guardian.getFirstName() + " " + guardian.getLastName()).trim();
@@ -206,9 +213,16 @@ public class InvoiceCronJob {
 						.sourceId(inv.getPublicUuid())
 						.tenantId(inv.getTenantId())
 						.recipients(List.of(new NotificationEvent.Recipient(
-								inv.getGuardianUserId(),
+									recipient,
 								guardian == null ? null : guardian.getEmail())))
 						.payload(payload)
 						.build());
+	}
+
+	private java.util.UUID portalRecipient(Invoice invoice) {
+		if (invoice.getGuardianUserId() != null) return invoice.getGuardianUserId();
+		if (invoice.getGuardianPublicUuid() == null) return null;
+		return guardianRepository.findByPublicUuid(invoice.getGuardianPublicUuid())
+				.map(Guardian::getUserId).orElse(null);
 	}
 }

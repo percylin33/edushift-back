@@ -109,8 +109,7 @@ public class TenantPaymentMethodServiceImpl implements TenantPaymentMethodServic
 	public void delete(UUID tenantId, UUID publicUuid) {
 		TenantPaymentMethod method = repository.findActiveByPublicUuid(tenantId, publicUuid)
 			.orElseThrow(() -> new PaymentMethodNotFoundException(publicUuid));
-		method.setDeleted(true);
-//method.setDeletedAt(java.time.Instant.now());
+		method.markDeleted();
 		repository.save(method);
 	}
 

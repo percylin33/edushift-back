@@ -373,23 +373,14 @@ public class NotificationService {
     private void ensureSystemTemplates() {
         UUID tenantId = TenantContext.currentRequired();
         for (NotificationTemplate seed : com.edushift.modules.notifications.seed.NotificationTemplateSeed.all("es-PE")) {
-            boolean exists = templateRepo
-                    .findByKeyAndLocale(seed.getTemplateKey(), seed.getLocale())
-                    .isPresent();
-            if (exists) {
-                continue;
+            int inserted = templateRepo.insertSystemTemplateIfMissing(
+                    UUID.randomUUID(), tenantId, UUID.randomUUID(),
+                    seed.getTemplateKey(), seed.getLocale(),
+                    seed.getSubject(), seed.getBodyHtml());
+            if (inserted == 1) {
+                log.info("[Notify] seeded missing template key={} tenant={}",
+                        seed.getTemplateKey(), tenantId);
             }
-            NotificationTemplate row = new NotificationTemplate();
-            row.setTenantId(tenantId);
-            row.setTemplateKey(seed.getTemplateKey());
-            row.setLocale(seed.getLocale());
-            row.setSubject(seed.getSubject());
-            row.setBodyHtml(seed.getBodyHtml());
-            row.setSystem(true);
-            row.setVersion(1);
-            templateRepo.save(row);
-            log.info("[Notify] seeded missing template key={} tenant={}",
-                    seed.getTemplateKey(), tenantId);
         }
     }
 

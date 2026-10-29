@@ -1,5 +1,6 @@
 package com.edushift.modules.students.service.impl;
 
+import com.edushift.modules.students.provision.PortalEmailResolver;
 import com.edushift.modules.auth.entity.User;
 import com.edushift.modules.auth.entity.UserRole;
 import com.edushift.modules.auth.repository.UserRepository;
@@ -67,6 +68,7 @@ public class StudentServiceImpl implements StudentService {
 	private final StudentMapper mapper;
 	private final UserRepository userRepository;
 	private final UserInvitationService invitationService;
+	private final PortalEmailResolver portalEmailResolver;
 	private final UserInvitationRepository invitationRepository;
 	private final AuditLogger auditLogger;
 
@@ -214,17 +216,13 @@ public class StudentServiceImpl implements StudentService {
 		User user = userRepository.findByPublicUuid(request.userPublicUuid())
 				.orElseThrow(() -> new ResourceNotFoundException("User", request.userPublicUuid()));
 
-		if (!user.hasRole(UserRole.STUDENT)) {
-			throw new ConflictException("USER_NOT_STUDENT_ROLE",
-					"Cannot link user '" + user.getEmail() + "': missing STUDENT role");
-		}
-
 		studentRepository.findByUserId(user.getPublicUuid()).ifPresent(other -> {
 			throw new ConflictException("USER_ALREADY_LINKED_TO_STUDENT",
 					"User '" + user.getEmail() + "' is already linked to another student");
 		});
 
 		String oldFullName = user.fullName();
+		user.addRole(UserRole.STUDENT);
 		user.setFirstName(student.getFirstName());
 		user.setLastName(student.getLastName());
 		user.setSecondLastName(student.getSecondLastName());
@@ -251,9 +249,10 @@ public class StudentServiceImpl implements StudentService {
 					"Student '" + student.fullName() + "' already has a linked user");
 		}
 		if (student.getEmail() == null || student.getEmail().isBlank()) {
-			throw new BusinessException("STUDENT_EMAIL_REQUIRED",
-					"Student '" + student.fullName() + "' needs an email to be invited");
-		}
+            student.setEmail(portalEmailResolver.resolve(student.getEmail(),
+                    student.getFirstName(), student.getLastName(), student.getDocumentNumber()));
+            studentRepository.save(student);
+        }
 
 		Map<String, Object> metadata = new HashMap<>();
 		metadata.put(METADATA_STUDENT_ID_KEY, student.getId().toString());
@@ -269,8 +268,8 @@ public class StudentServiceImpl implements StudentService {
 						student.getDocumentNumber(),
 						metadata));
 
-		log.info("[students] invited -- student={} email='{}' invitationId={}",
-				student.getPublicUuid(), student.getEmail(), response.publicUuid());
+		log.info("[students] invited -- student={} invitationId={}",
+				student.getPublicUuid(), response.publicUuid());
 
 		return new InviteStudentResponse(
 				response.publicUuid(),

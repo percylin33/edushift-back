@@ -158,7 +158,9 @@ class MaterialTenantIsolationIT extends IntegrationTest {
 			String body = String.format(
 					"{\"title\":\"hacked\",\"description\":\"hijack\","
 							+ "\"kind\":\"VIDEO_LINK\","
-							+ "\"externalUrl\":\"https://example.com/hacked\"}");
+							+ "\"externalUrl\":\"https://example.com/hacked\","
+							+ "\"teacherAssignmentPublicUuid\":\"%s\"}",
+					UUID.randomUUID());
 
 			ResponseEntity<String> response = doPost(
 					SECTIONS_MATERIALS_BASE.replace("{section}",
@@ -260,7 +262,7 @@ class MaterialTenantIsolationIT extends IntegrationTest {
 		assertThat(response.getStatusCode())
 				.as("seed login() requires HTTP 200; body=%s", response.getBody())
 				.isEqualTo(HttpStatus.OK);
-		return objectMapper.readValue(response.getBody(), AuthResponse.class);
+		return readSessionResponse(objectMapper, response);
 	}
 
 	private ResponseEntity<String> doGet(String path, String bearer) {
@@ -321,7 +323,7 @@ class MaterialTenantIsolationIT extends IntegrationTest {
 	}
 
 	private Tenant createTenant(String slugPrefix) {
-		Tenant t = new Tenant();
+		Tenant t = newTestTenant();
 		t.setSlug(slugPrefix + UUID.randomUUID().toString().substring(0, 8));
 		t.setName("IT Tenant " + t.getSlug());
 		t.setStatus(TenantStatus.ACTIVE);

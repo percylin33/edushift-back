@@ -7,7 +7,13 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.edushift.modules.students.provision.PortalEmailResolver;
+import com.edushift.modules.auth.entity.User;
+import com.edushift.modules.auth.entity.UserRole;
+import com.edushift.modules.auth.repository.UserRepository;
+import com.edushift.modules.audit.service.AuditLogger;
 import com.edushift.modules.students.dto.CreateStudentRequest;
+import com.edushift.modules.students.dto.LinkStudentUserRequest;
 import com.edushift.modules.students.dto.StudentListFilters;
 import com.edushift.modules.students.dto.StudentListItem;
 import com.edushift.modules.students.dto.StudentResponse;
@@ -18,6 +24,7 @@ import com.edushift.modules.students.entity.Student;
 import com.edushift.modules.students.mapper.StudentMapper;
 import com.edushift.modules.students.repository.StudentRepository;
 import com.edushift.modules.users.repository.UserInvitationRepository;
+import com.edushift.modules.users.service.UserInvitationService;
 import com.edushift.shared.exception.ConflictException;
 import com.edushift.shared.exception.ResourceNotFoundException;
 import java.lang.reflect.Field;
@@ -42,7 +49,11 @@ import org.springframework.data.jpa.domain.Specification;
 class StudentServiceImplTest {
 
 	@Mock private StudentRepository studentRepository;
+	@Mock private UserRepository userRepository;
 	@Mock private UserInvitationRepository invitationRepository;
+	@Mock private UserInvitationService invitationService;
+	@Mock private PortalEmailResolver portalEmailResolver;
+	@Mock private AuditLogger auditLogger;
 	@Spy private StudentMapper mapper = new StudentMapper();
 
 	@InjectMocks private StudentServiceImpl service;
@@ -308,6 +319,41 @@ class StudentServiceImplTest {
 	}
 
 	// ===========================================================================
+	// linkUser
+	// ===========================================================================
+
+	@Nested
+	@DisplayName("linkUser")
+	class LinkUser {
+
+		@Test
+		@DisplayName("linking an existing account adds STUDENT and preserves its other roles")
+		void grantsStudentRoleWhenLinking() {
+			Student student = newStudent("12345678");
+			UUID userPublicUuid = UUID.randomUUID();
+			User user = new User();
+			user.setPublicUuid(userPublicUuid);
+			user.setEmail("student@acme.test");
+			user.setFirstName("Existing");
+			user.setLastName("Account");
+			user.addRole(UserRole.STAFF);
+
+			when(studentRepository.findByPublicUuid(student.getPublicUuid()))
+					.thenReturn(Optional.of(student));
+			when(userRepository.findByPublicUuid(userPublicUuid)).thenReturn(Optional.of(user));
+			when(studentRepository.findByUserId(userPublicUuid)).thenReturn(Optional.empty());
+			when(studentRepository.saveAndFlush(any(Student.class)))
+					.thenAnswer(inv -> inv.getArgument(0));
+
+			service.linkUser(student.getPublicUuid(), new LinkStudentUserRequest(userPublicUuid));
+
+			assertThat(user.getRoleSet()).containsExactlyInAnyOrder(UserRole.STAFF, UserRole.STUDENT);
+			assertThat(student.getUserId()).isEqualTo(userPublicUuid);
+			verify(userRepository).save(user);
+		}
+	}
+
+	// ===========================================================================
 	// deleteStudent
 	// ===========================================================================
 
@@ -377,4 +423,18 @@ class StudentServiceImplTest {
 			throw new IllegalStateException(e);
 		}
 	}
+ @Test void invitesStudentWithoutPersonalEmail() {
+  Student student = newStudent("12345678");
+  String email = "ada.lovelace.12345678.abcdef@school.com";
+  when(studentRepository.findByPublicUuid(student.getPublicUuid())).thenReturn(Optional.of(student));
+  when(portalEmailResolver.resolve(null, student.getFirstName(), student.getLastName(), student.getDocumentNumber())).thenReturn(email);
+  when(invitationService.createInvitation(any())).thenReturn(org.mockito.Mockito.mock(com.edushift.modules.users.dto.InvitationResponse.class));
+  assertThat(service.invite(student.getPublicUuid()).email()).isEqualTo(email);
+  verify(studentRepository).save(student);
+  var request = org.mockito.ArgumentCaptor.forClass(com.edushift.modules.users.dto.CreateInvitationRequest.class);
+  verify(invitationService).createInvitation(request.capture());
+  assertThat(request.getValue().email()).isEqualTo(email);
+  assertThat(request.getValue().metadata()).containsKey("studentId");
+ }
+
 }

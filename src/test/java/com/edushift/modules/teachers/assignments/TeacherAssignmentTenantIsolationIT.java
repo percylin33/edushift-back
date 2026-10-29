@@ -245,7 +245,7 @@ class TeacherAssignmentTenantIsolationIT extends IntegrationTest {
 		assertThat(response.getStatusCode())
 				.as("seed login() requires HTTP 200; body=%s", response.getBody())
 				.isEqualTo(HttpStatus.OK);
-		return objectMapper.readValue(response.getBody(), AuthResponse.class);
+		return readSessionResponse(objectMapper, response);
 	}
 
 	private ResponseEntity<String> doGet(String path, String bearer) {
@@ -303,11 +303,11 @@ class TeacherAssignmentTenantIsolationIT extends IntegrationTest {
 	}
 
 	private Tenant createTenant(String slugPrefix) {
-		Tenant t = new Tenant();
+		Tenant t = newTestTenant();
 		t.setSlug(slugPrefix + UUID.randomUUID().toString().substring(0, 8));
 		t.setName("IT Tenant " + t.getSlug());
 		t.setStatus(TenantStatus.ACTIVE);
-		t.setPlan(TenantPlan.TRIAL);
+		t.setPlan(TenantPlan.BASIC);
 		t.setPlanId(resolveDefaultPlanId());
 		return tx().execute(s -> tenantRepository.saveAndFlush(t));
 	}
@@ -315,7 +315,7 @@ class TeacherAssignmentTenantIsolationIT extends IntegrationTest {
 	private java.util.UUID resolveDefaultPlanId() {
 		return jdbcTemplate.queryForObject(
 				"select id from edushift.platform_plans where code = ?",
-				java.util.UUID.class, "TRIAL");
+				java.util.UUID.class, "BASIC");
 	}
 
 	private void createAdmin(Tenant tenant, String email, String rawPassword) {

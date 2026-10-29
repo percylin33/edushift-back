@@ -3,6 +3,7 @@ package com.edushift.modules.admissions.service.impl;
 import com.edushift.modules.academic.levelgrade.entity.Grade;
 import com.edushift.modules.academic.section.repository.SectionRepository;
 import com.edushift.modules.admissions.dto.CreatePresentialAdmissionRequest;
+import com.edushift.modules.admissions.dto.CreatePresentialInquiryRequest;
 import com.edushift.modules.academic.levelgrade.repository.GradeRepository;
 import com.edushift.modules.academic.year.entity.AcademicYear;
 import com.edushift.modules.academic.year.entity.AcademicYearStatus;
@@ -22,6 +23,8 @@ import com.edushift.modules.admissions.entity.AdmissionApplication;
 import com.edushift.modules.admissions.entity.AdmissionApplicationStatus;
 import com.edushift.modules.admissions.entity.AdmissionContactType;
 import com.edushift.modules.admissions.entity.AdmissionInquiry;
+import com.edushift.modules.admissions.entity.AdmissionInquirySource;
+import com.edushift.modules.admissions.entity.AdmissionInquiryChannel;
 import com.edushift.modules.admissions.entity.AdmissionInquiryEvent;
 import com.edushift.modules.admissions.entity.AdmissionInquiryStatus;
 import com.edushift.modules.admissions.entity.AdmissionOfferStatus;
@@ -31,6 +34,7 @@ import com.edushift.modules.admissions.repository.AdmissionInquiryRepository;
 import com.edushift.modules.admissions.repository.AdmissionInquiryEventRepository;
 import com.edushift.modules.admissions.repository.AdmissionStatusEventRepository;
 import com.edushift.modules.admissions.service.AdmissionWorkflowService;
+import com.edushift.modules.admissions.service.AdmissionReservationService;
 import com.edushift.modules.students.dto.AddGuardianRequest;
 import com.edushift.modules.students.enrollments.dto.CreateEnrollmentRequest;
 import com.edushift.modules.students.enrollments.service.StudentEnrollmentService;
@@ -69,6 +73,7 @@ public class AdmissionWorkflowServiceImpl implements AdmissionWorkflowService {
 	private final StudentGuardianService guardianService;
 	private final StudentEnrollmentService enrollmentService;
 	private final CurrentUserProvider currentUserProvider;
+	private final AdmissionReservationService reservationService;
 
 	@Override
 	@Transactional(readOnly = true)
@@ -114,9 +119,51 @@ public class AdmissionWorkflowServiceImpl implements AdmissionWorkflowService {
 		inquiry.setContactType(request.contactType());
 		inquiry.setContactValue(phone);
 		inquiry.setPrivacyAcceptedAt(Instant.now());
+		inquiry.setPrivacyNoticeGivenAt(Instant.now());
+		inquiry.setSource(AdmissionInquirySource.WEBSITE);
+		inquiry.setInitialChannel(AdmissionInquiryChannel.WEBSITE);
 		AdmissionInquiry saved = inquiryRepository.saveAndFlush(inquiry);
 		appendInquiryEvent(saved, null, AdmissionInquiryStatus.RECEIVED, "Consulta recibida desde el formulario público.", AdmissionInquiryEvent.ActorType.SYSTEM);
 		return new PublicInquiryReceipt(saved.getPublicUuid(), saved.getStatus().name());
+	}
+
+	@Override
+	@Transactional
+	public AdmissionInquiryResponse createPresentialInquiry(UUID academicYearPublicUuid,
+			CreatePresentialInquiryRequest request) {
+		AcademicYear year = yearRepository.findByPublicUuid(academicYearPublicUuid)
+				.orElseThrow(() -> new ResourceNotFoundException("AcademicYear", academicYearPublicUuid));
+		if (year.getStatus() == AcademicYearStatus.CLOSED) {
+			throw new ConflictException("ADMISSION_YEAR_CLOSED", "El año académico está cerrado.");
+		}
+		Grade grade = gradeRepository.findByPublicUuid(request.gradePublicUuid())
+				.orElseThrow(() -> new ResourceNotFoundException("Grade", request.gradePublicUuid()));
+		String contactValue = request.contactValue().trim();
+		if (request.contactType() == AdmissionContactType.PHONE) {
+			contactValue = validatedPhone(contactValue);
+		}
+		else if (!contactValue.matches("^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$")) {
+			throw new BadRequestException("ADMISSION_EMAIL_INVALID", "Ingresa un correo válido.");
+		}
+		AdmissionInquiry inquiry = new AdmissionInquiry();
+		inquiry.setAcademicYear(year);
+		inquiry.setGrade(grade);
+		inquiry.setContactName(request.contactName().trim());
+		inquiry.setContactType(request.contactType());
+		inquiry.setContactValue(contactValue);
+		inquiry.setSource(AdmissionInquirySource.PRESENTIAL);
+		inquiry.setInitialChannel(request.initialChannel());
+		inquiry.setPrivacyNoticeGivenAt(request.privacyNoticeGiven() ? Instant.now() : null);
+		inquiry.setPrivacyAcceptedAt(null);
+		inquiry.setNote(blankToNull(request.note()));
+		inquiry.setResponsibleName(blankToNull(request.responsibleName()));
+		inquiry.setNextAttentionDate(request.nextAttentionDate());
+		inquiry.setNextAction(blankToNull(request.nextAction()));
+		AdmissionInquiry saved = inquiryRepository.saveAndFlush(inquiry);
+		appendInquiryEvent(saved, null, AdmissionInquiryStatus.RECEIVED,
+				"Consulta registrada por atención " + request.initialChannel().name().toLowerCase() + ".",
+				AdmissionInquiryEvent.ActorType.STAFF);
+		return toInquiryResponse(saved);
 	}
 
 	@Override
@@ -308,6 +355,18 @@ public class AdmissionWorkflowServiceImpl implements AdmissionWorkflowService {
 		applicationRepository.save(application);
 		appendStatusEvent(application, AdmissionApplicationStatus.ADMITTED, AdmissionApplicationStatus.ENROLLED,
 				blankToNull(request.notes()));
+		reservationService.consumeOnEnrollment(application);
+		return toApplicationResponse(application);
+	}
+
+	@Override
+	@Transactional(readOnly = true)
+	public AdmissionApplicationResponse enrolledApplicationForRetry(UUID applicationPublicUuid) {
+		AdmissionApplication application = findApplication(applicationPublicUuid);
+		if (application.getStatus() != AdmissionApplicationStatus.ENROLLED
+				|| application.getStudent() == null || application.getEnrollmentPublicUuid() == null) {
+			throw new ConflictException("ADMISSION_NOT_ENROLLED", "La postulación no tiene una matrícula completada para reintentar sus tareas pendientes.");
+		}
 		return toApplicationResponse(application);
 	}
 
@@ -354,7 +413,8 @@ public class AdmissionWorkflowServiceImpl implements AdmissionWorkflowService {
 				inquiry.getAcademicYear().getName(), inquiry.getGrade().getPublicUuid(), inquiry.getGrade().getName(),
 				inquiry.getContactName(), inquiry.getContactType(), inquiry.getContactValue(), inquiry.getStatus(),
 				inquiry.getNote(), convertedPublicUuid, inquiry.getCreatedAt(), converted == null ? null : converted.getStatus(),
-				converted == null ? null : converted.getAcademicYear().getPublicUuid(), inquiry.getResponsibleName(), inquiry.getNextAttentionDate(), inquiry.getNextAction());
+				converted == null ? null : converted.getAcademicYear().getPublicUuid(), inquiry.getResponsibleName(), inquiry.getNextAttentionDate(), inquiry.getNextAction(),
+				inquiry.getSource(), inquiry.getInitialChannel(), inquiry.getPrivacyNoticeGivenAt());
 	}
 
 	private AdmissionApplicationResponse toApplicationResponse(AdmissionApplication application) {

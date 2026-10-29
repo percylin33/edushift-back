@@ -15,23 +15,32 @@ import org.springframework.stereotype.Component;
  * Resolution order:
  * <ol>
  *   <li>Authenticated principal (JWT claim) via {@link CurrentUserProvider}</li>
- *   <li>{@value TenantResolver#TENANT_HEADER} HTTP header (admin / system tools)</li>
+ *   <li>Tenant subdomain resolved through the global tenant catalog</li>
+ *   <li>{@value TenantResolver#TENANT_HEADER} for internal tooling on non-tenant hosts</li>
  * </ol>
- * The JWT-derived tenant always wins to prevent header spoofing by regular users.
- * The header is used only when no authenticated tenant is available (e.g., for
- * unauthenticated public flows or super-admin tools after a separate access check).
+ * The principal always wins. A subdomain selects the tenant context for public
+ * tenant-scoped flows, while {@link TenantInterceptor} verifies it against the
+ * authenticated principal before protected handlers run.
  */
 @Component
 @RequiredArgsConstructor
 public class HttpTenantResolver implements TenantResolver {
 
 	private final CurrentUserProvider currentUserProvider;
+	private final TenantHostResolver tenantHostResolver;
 
 	@Override
 	public Optional<UUID> resolve(HttpServletRequest request) {
 		Optional<UUID> fromPrincipal = currentUserProvider.currentTenantId();
 		if (fromPrincipal.isPresent()) {
 			return fromPrincipal;
+		}
+		Optional<TenantHostResolver.Resolution> fromHost = tenantHostResolver.resolve(request);
+		if (fromHost.isPresent()) {
+			// A recognized but unknown school host must not fall back to a
+			// caller-supplied tenant id. TenantInterceptor returns a 404 for it.
+			return fromHost.filter(TenantHostResolver.Resolution::exists)
+					.map(TenantHostResolver.Resolution::tenantId);
 		}
 		String headerValue = request.getHeader(TENANT_HEADER);
 		if (headerValue == null || headerValue.isBlank()) {

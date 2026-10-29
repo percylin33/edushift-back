@@ -45,7 +45,7 @@ public class SchoolInvitationMailer {
 	public boolean send(String to, String setupUrl, Instant expiresAt) {
 		EmailSender sender = emailSender.getIfAvailable();
 		if (sender == null) {
-			log.info("[school-invites] SMTP disabled — copy link for {} → {}", to, setupUrl);
+			log.info("[school-invites] SMTP disabled; invitation link returned to authorized caller");
 			return false;
 		}
 		try {
@@ -53,7 +53,8 @@ public class SchoolInvitationMailer {
 					html(setupUrl, expiresAt));
 			return true;
 		} catch (RuntimeException ex) {
-			log.warn("[school-invites] email failed to={} — admin can copy the link", to, ex);
+			log.warn("[school-invites] email delivery failed; invitation link returned to authorized caller (cause={})",
+					ex.getClass().getSimpleName());
 			return false;
 		}
 	}

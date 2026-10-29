@@ -60,7 +60,10 @@ public class RecoveryCodeService {
 		for (int i = 0; i < count; i++) {
 			String code = randomCode();
 			plaintext.add(code);
-			hashed.add(passwordEncoder.encode(code));
+			// Verification accepts either the displayed XXXXX-XXXXX form or
+			// the same code without its separator. Hash the normalized value
+			// so formatting never changes whether a valid code can be used.
+			hashed.add(passwordEncoder.encode(code.replace("-", "")));
 		}
 		return new GeneratedCodes(plaintext, hashed);
 	}

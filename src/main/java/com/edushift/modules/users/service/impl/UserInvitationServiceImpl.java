@@ -1,6 +1,8 @@
 package com.edushift.modules.users.service.impl;
 
 import com.edushift.modules.auth.dto.AuthResponse;
+import com.edushift.modules.auth.entity.EmailSource;
+import com.edushift.modules.students.provision.SyntheticEmailFactory;
 import com.edushift.modules.auth.entity.User;
 import com.edushift.modules.auth.entity.UserRole;
 import com.edushift.modules.auth.entity.UserStatus;
@@ -17,6 +19,7 @@ import com.edushift.modules.users.entity.UserInvitation;
 import com.edushift.modules.users.mapper.UserInvitationMapper;
 import com.edushift.modules.users.repository.UserInvitationRepository;
 import com.edushift.modules.users.service.UserInvitationService;
+import com.edushift.modules.users.service.ProfileRolePolicy;
 import com.edushift.shared.exception.BusinessException;
 import com.edushift.shared.exception.ConflictException;
 import com.edushift.shared.exception.ForbiddenException;
@@ -124,6 +127,7 @@ public class UserInvitationServiceImpl implements UserInvitationService {
 		// Validate roles up-front so we never persist a row that references
 		// an unknown role enum.
 		Set<UserRole> roles = parseRoles(request.roles());
+		ProfileRolePolicy.requireInvitationMetadata(roles, request.metadata());
 
 		// Pre-check: a single email can have at most one active pending
 		// invitation per tenant. The DB partial unique index is the
@@ -154,9 +158,9 @@ public class UserInvitationServiceImpl implements UserInvitationService {
 		}
 
 		UserInvitation saved = invitationRepository.save(invitation);
-		String acceptUrl = dispatchInviteEmail(saved);
-		log.info("[invitations] created -- publicUuid={} email='{}' expires={} acceptUrl={}",
-				saved.getPublicUuid(), saved.getEmail(), saved.getExpiresAt(), acceptUrl);
+		dispatchInviteEmail(saved);
+		log.info("[invitations] created -- publicUuid={} expires={}",
+				saved.getPublicUuid(), saved.getExpiresAt());
 		return invitationMapper.toResponseWithToken(saved, now);
 	}
 
@@ -268,8 +272,10 @@ public class UserInvitationServiceImpl implements UserInvitationService {
 		// the user + issue the session inside its scope.
 		final UUID tenantId = tenant.getId();
 		final String email = invitation.getEmail();
-		final String passwordHash = passwordEncoder.encode(request.password());
 		final UUID invitationId = invitation.getId();
+		Set<UserRole> invitedRoles = parseRoles(invitation.getRoleNames());
+		ProfileRolePolicy.requireInvitationMetadata(invitedRoles, invitation.getMetadata());
+		final String passwordHash = passwordEncoder.encode(request.password());
 
 		return TenantContext.runAs(tenantId, () -> txTemplate.execute(status -> {
 			User newUser = new User();
@@ -279,14 +285,11 @@ public class UserInvitationServiceImpl implements UserInvitationService {
 			newUser.setSecondLastName(invitation.getSecondLastName());
 			newUser.setPasswordHash(passwordHash);
 			newUser.setStatus(UserStatus.ACTIVE);
-			newUser.setEmailVerified(true);   // accepting via the token IS the verification step
+			boolean synthetic = SyntheticEmailFactory.isSyntheticAddress(email);
+			newUser.setEmailSource(synthetic ? EmailSource.SYNTHETIC : EmailSource.REAL);
+			newUser.setEmailVerified(!synthetic);
 			newUser.setMfaEnabled(false);
-			for (String roleName : invitation.getRoleNames()) {
-				UserRole role = UserRole.fromName(roleName);
-				if (role != null) {
-					newUser.addRole(role);
-				}
-			}
+			invitedRoles.forEach(newUser::addRole);
 			User savedUser = userRepository.saveAndFlush(newUser);
 
 			// Re-load the invitation inside the transactional context and

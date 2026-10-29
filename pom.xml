@@ -5,7 +5,7 @@
 	<parent>
 		<groupId>org.springframework.boot</groupId>
 		<artifactId>spring-boot-starter-parent</artifactId>
-		<version>3.5.14</version>
+		<version>3.5.16</version>
 		<relativePath/>
 	</parent>
 	<groupId>com.edushift</groupId>
@@ -16,6 +16,12 @@
 
 	<properties>
 		<java.version>21</java.version>
+		<!-- Security release 2026-10-26: compatible patch lines, keep Spring 6 / Boot 3. -->
+		<tomcat.version>10.1.61</tomcat.version>
+		<netty.version>4.1.139.Final</netty.version>
+		<jackson-bom.version>2.21.8</jackson-bom.version>
+		<httpcore5.version>5.4.4</httpcore5.version>
+		<postgresql.version>42.7.14</postgresql.version>
 		<project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
 		<project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
 		<!--
@@ -67,7 +73,7 @@
 		<dependency>
 			<groupId>org.jsoup</groupId>
 			<artifactId>jsoup</artifactId>
-			<version>1.18.1</version>
+			<version>1.23.2</version>
 		</dependency>
 		<!-- Sprint 9 / BE-9.1: JavaMailSender for the email outbox processor (ADR-9.1) -->
 		<dependency>
@@ -238,7 +244,13 @@
 		<dependency>
 			<groupId>com.google.cloud</groupId>
 			<artifactId>google-cloud-storage</artifactId>
-			<version>2.46.0</version>
+			<version>2.75.0</version>
+		</dependency>
+		<!-- Pin the transitive Guava version to the vendor-fixed release. -->
+		<dependency>
+			<groupId>com.google.guava</groupId>
+			<artifactId>guava</artifactId>
+			<version>33.7.2-jre</version>
 		</dependency>
 
 		<!--
@@ -257,7 +269,7 @@
 		<dependency>
 			<groupId>com.google.firebase</groupId>
 			<artifactId>firebase-admin</artifactId>
-			<version>9.4.1</version>
+			<version>9.11.0</version>
 		</dependency>
 
 		<!--

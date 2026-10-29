@@ -1,6 +1,7 @@
 package com.edushift.modules.teachers.listener;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -12,6 +13,9 @@ import com.edushift.modules.teachers.entity.Teacher;
 import com.edushift.modules.teachers.repository.TeacherRepository;
 import com.edushift.modules.teachers.service.impl.TeacherServiceImpl;
 import com.edushift.modules.users.events.InvitationAcceptedEvent;
+import com.edushift.shared.exception.BusinessException;
+import com.edushift.shared.exception.ConflictException;
+import com.edushift.shared.exception.ResourceNotFoundException;
 import java.lang.reflect.Field;
 import java.time.Instant;
 import java.util.HashMap;
@@ -38,6 +42,7 @@ class TeacherInvitationListenerTest {
 	void linksTeacher() {
 		UUID teacherInternalId = UUID.randomUUID();
 		UUID userId = UUID.randomUUID();
+		UUID userPublicUuid = UUID.randomUUID();
 		Teacher t = makeTeacher(teacherInternalId);
 
 		when(teacherRepository.findById(teacherInternalId)).thenReturn(Optional.of(t));
@@ -47,12 +52,12 @@ class TeacherInvitationListenerTest {
 
 		listener.onInvitationAccepted(new InvitationAcceptedEvent(
 				UUID.randomUUID(), UUID.randomUUID(),
-				userId, UUID.randomUUID(),
+				userId, userPublicUuid,
 				UUID.randomUUID(), metadata, Instant.now()));
 
 		ArgumentCaptor<Teacher> captor = ArgumentCaptor.forClass(Teacher.class);
 		verify(teacherRepository, times(1)).save(captor.capture());
-		assertThat(captor.getValue().getUserId()).isEqualTo(userId);
+		assertThat(captor.getValue().getUserId()).isEqualTo(userPublicUuid);
 	}
 
 	@Test
@@ -68,7 +73,7 @@ class TeacherInvitationListenerTest {
 	}
 
 	@Test
-	@DisplayName("teacher already linked to another user → no-op (no overwrite)")
+	@DisplayName("teacher already linked to another user → invitation acceptance fails")
 	void doesNotOverwrite() {
 		UUID teacherInternalId = UUID.randomUUID();
 		UUID existingUserId = UUID.randomUUID();
@@ -80,17 +85,18 @@ class TeacherInvitationListenerTest {
 		Map<String, Object> metadata = Map.of(
 				TeacherServiceImpl.METADATA_TEACHER_ID_KEY, teacherInternalId.toString());
 
-		listener.onInvitationAccepted(new InvitationAcceptedEvent(
+		assertThatThrownBy(() -> listener.onInvitationAccepted(new InvitationAcceptedEvent(
 				UUID.randomUUID(), UUID.randomUUID(),
 				UUID.randomUUID(), UUID.randomUUID(),
-				UUID.randomUUID(), metadata, Instant.now()));
+				UUID.randomUUID(), metadata, Instant.now())))
+				.isInstanceOf(ConflictException.class);
 
 		verify(teacherRepository, never()).save(any());
 		assertThat(t.getUserId()).isEqualTo(existingUserId);
 	}
 
 	@Test
-	@DisplayName("teacher not found → no-op (warn-logged)")
+	@DisplayName("teacher not found → invitation acceptance fails")
 	void teacherMissing() {
 		UUID teacherInternalId = UUID.randomUUID();
 		when(teacherRepository.findById(teacherInternalId)).thenReturn(Optional.empty());
@@ -98,24 +104,26 @@ class TeacherInvitationListenerTest {
 		Map<String, Object> metadata = Map.of(
 				TeacherServiceImpl.METADATA_TEACHER_ID_KEY, teacherInternalId.toString());
 
-		listener.onInvitationAccepted(new InvitationAcceptedEvent(
+		assertThatThrownBy(() -> listener.onInvitationAccepted(new InvitationAcceptedEvent(
 				UUID.randomUUID(), UUID.randomUUID(),
 				UUID.randomUUID(), UUID.randomUUID(),
-				UUID.randomUUID(), metadata, Instant.now()));
+				UUID.randomUUID(), metadata, Instant.now())))
+				.isInstanceOf(ResourceNotFoundException.class);
 
 		verify(teacherRepository, never()).save(any());
 	}
 
 	@Test
-	@DisplayName("metadata.teacherId is malformed → no-op")
+	@DisplayName("metadata.teacherId is malformed → invitation acceptance fails")
 	void malformedTeacherId() {
 		Map<String, Object> metadata = Map.of(
 				TeacherServiceImpl.METADATA_TEACHER_ID_KEY, "not-a-uuid");
 
-		listener.onInvitationAccepted(new InvitationAcceptedEvent(
+		assertThatThrownBy(() -> listener.onInvitationAccepted(new InvitationAcceptedEvent(
 				UUID.randomUUID(), UUID.randomUUID(),
 				UUID.randomUUID(), UUID.randomUUID(),
-				UUID.randomUUID(), metadata, Instant.now()));
+				UUID.randomUUID(), metadata, Instant.now())))
+				.isInstanceOf(BusinessException.class);
 
 		verify(teacherRepository, never()).findById(any());
 		verify(teacherRepository, never()).save(any());

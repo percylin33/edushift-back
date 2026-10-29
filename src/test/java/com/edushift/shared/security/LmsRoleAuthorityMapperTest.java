@@ -54,7 +54,10 @@ class LmsRoleAuthorityMapperTest {
 				LmsAuthorities.LMS_QUIZ_GRADE,
 				LmsAuthorities.LMS_AI_GENERATE,
 				LmsAuthorities.AI_TEACHER_USE,
-				LmsAuthorities.LMS_ANNOUNCEMENTS_CREATE_OWN);
+				LmsAuthorities.LMS_ANNOUNCEMENTS_CREATE_OWN,
+				LmsAuthorities.ATTENDANCE_READ,
+				LmsAuthorities.ATTENDANCE_REGISTER,
+				LmsAuthorities.ATTENDANCE_CORRECT);
 		assertThat(auths).doesNotContain(
 				LmsAuthorities.LMS_TASK_SUBMIT,
 				LmsAuthorities.LMS_QUIZ_SUBMIT,
@@ -96,18 +99,14 @@ class LmsRoleAuthorityMapperTest {
 	}
 
 	@Test
-	@DisplayName("staff can read, prepare and submit annual disclosures")
-	void staffCanPrepareAndSubmitAnnualDisclosures() {
+	@DisplayName("staff defaults are read-only until individual profiles grant further access")
+	void staffDefaultsAreReadOnly() {
 		Set<String> auths = mapper.grantFor(UserRole.STAFF);
 		assertThat(auths).containsExactlyInAnyOrder(
 				LmsAuthorities.LMS_TASK_READ,
 				LmsAuthorities.LMS_MATERIAL_READ,
 				LmsAuthorities.LMS_QUIZ_READ,
-				LmsAuthorities.LMS_PAYMENT_ADMIN,
-				LmsAuthorities.LMS_DISCLOSURE_READ,
-				LmsAuthorities.LMS_DISCLOSURE_MANAGE,
-				LmsAuthorities.LMS_DISCLOSURE_SUBMIT,
-				LmsAuthorities.USERS_PROVISION_SECTION);
+				LmsAuthorities.LMS_DISCLOSURE_READ);
 	}
 
 	@Test

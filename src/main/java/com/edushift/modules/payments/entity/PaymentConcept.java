@@ -68,6 +68,21 @@ public class PaymentConcept extends TenantAwareEntity {
 	@Column(name = "sort_order", nullable = false)
 	private int sortOrder = 0;
 
+	@Column(name = "deleted_at")
+	private java.time.Instant deletedAt;
+
+	@Override
+	public void markDeleted() {
+		super.markDeleted();
+		deletedAt = java.time.Instant.now();
+	}
+
+	@Override
+	public void restore() {
+		super.restore();
+		deletedAt = null;
+	}
+
 	@PrePersist
 	private void onCreate() {
 		if (publicUuid == null) publicUuid = UUID.randomUUID();

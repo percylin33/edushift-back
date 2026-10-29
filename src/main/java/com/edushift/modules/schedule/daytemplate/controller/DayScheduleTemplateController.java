@@ -130,4 +130,11 @@ public class DayScheduleTemplateController {
 			@Valid @RequestBody ApplyDayPlanRequest request) {
 		return ResponseEntity.ok(ApiResponse.ok(service.applyDayPlan(uuid, request)));
 	}
+
+	@PostMapping("/schedule/day-templates/{uuid}/review")
+	@PreAuthorize("hasRole('TENANT_ADMIN')")
+	@Operation(summary = "Mark a complete day schedule template as reviewed")
+	public ResponseEntity<ApiResponse<DayTemplateResponse>> markReviewed(@PathVariable UUID uuid) {
+		return ResponseEntity.ok(ApiResponse.ok(service.markReviewed(uuid)));
+	}
 }

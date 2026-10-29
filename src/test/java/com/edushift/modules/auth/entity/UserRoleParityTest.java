@@ -40,7 +40,7 @@ class UserRoleParityTest {
 		assertThat(roleNames)
 				.as("Canonical enum names (DB / JWT)")
 				.containsExactlyInAnyOrder(
-						"TENANT_ADMIN", "TEACHER", "STUDENT", "PARENT", "STAFF");
+						"SUPER_ADMIN", "TENANT_ADMIN", "TEACHER", "STUDENT", "PARENT", "STAFF");
 		assertThat(roleNames)
 				.as("Deprecated GUARDIAN value must NOT exist at the BE layer")
 				.doesNotContain("GUARDIAN");
@@ -49,7 +49,7 @@ class UserRoleParityTest {
 	@Test
 	@DisplayName("DEBT-USR-1: fromName() parses all canonical roles")
 	void fromNameAcceptsAllCanonical() {
-		for (String name : new String[]{"TENANT_ADMIN", "TEACHER", "STUDENT", "PARENT", "STAFF"}) {
+		for (String name : new String[]{"SUPER_ADMIN", "TENANT_ADMIN", "TEACHER", "STUDENT", "PARENT", "STAFF"}) {
 			assertThat(UserRole.fromName(name)).isNotNull();
 		}
 		assertThat(UserRole.fromName("GUARDIAN"))

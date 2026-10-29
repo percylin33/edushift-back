@@ -5,6 +5,8 @@ import static org.mockito.Mockito.*;
 
 import com.edushift.modules.admissions.service.AdmissionService;
 import com.edushift.modules.admissions.service.AdmissionWorkflowService;
+import com.edushift.modules.payments.service.AdminPaymentService;
+import com.edushift.modules.students.service.StudentGuardianService;
 import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.AfterEach;
@@ -23,8 +25,11 @@ class AdmissionPermissionsTest {
     static class Config {
         @Bean AdmissionService admissions() { return mock(AdmissionService.class); }
         @Bean AdmissionWorkflowService workflow() { return mock(AdmissionWorkflowService.class); }
-        @Bean AdmissionController controller(AdmissionService admissions, AdmissionWorkflowService workflow) {
-            return new AdmissionController(admissions, workflow);
+        @Bean AdminPaymentService adminPayments() { return mock(AdminPaymentService.class); }
+        @Bean StudentGuardianService guardians() { return mock(StudentGuardianService.class); }
+        @Bean AdmissionController controller(AdmissionService admissions, AdmissionWorkflowService workflow,
+                AdminPaymentService adminPayments, StudentGuardianService guardians) {
+            return new AdmissionController(admissions, workflow, adminPayments, guardians);
         }
     }
     @AfterEach void clear() { SecurityContextHolder.clearContext(); }

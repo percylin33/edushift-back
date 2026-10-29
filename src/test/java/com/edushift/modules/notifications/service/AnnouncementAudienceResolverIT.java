@@ -321,13 +321,13 @@ class AnnouncementAudienceResolverIT extends IntegrationTest {
 
     private Bundle seedAcademicBundle() {
         String suffix = UUID.randomUUID().toString().substring(0, 8);
-        return tx.execute(s -> {
-            Tenant tenant = new Tenant();
-            tenant.setPublicUuid(UUID.randomUUID());
-            tenant.setSlug("phase3-resolver-" + suffix);
-            tenant.setName("Phase3 Resolver " + suffix);
-            tenant.setStatus(TenantStatus.ACTIVE);
-            tenant = tenantRepo.save(tenant);
+        Tenant tenant = newTestTenant();
+        tenant.setPublicUuid(UUID.randomUUID());
+        tenant.setSlug("phase3-resolver-" + suffix);
+        tenant.setName("Phase3 Resolver " + suffix);
+        tenant.setStatus(TenantStatus.ACTIVE);
+        tenantRepo.saveAndFlush(tenant);
+        return TenantContext.runAs(tenant.getId(), () -> tx.execute(s -> {
 
             User admin = createUser(tenant, "admin-r-" + suffix,
                     "admin-r-" + suffix + "@resolver.test", UserRole.TENANT_ADMIN);
@@ -441,7 +441,7 @@ class AnnouncementAudienceResolverIT extends IntegrationTest {
 
             return new Bundle(tenant, admin, year, period, grade, section, course,
                     studentUser, teacherUser);
-        });
+        }));
     }
 
     private com.edushift.modules.academic.levelgrade.entity.AcademicLevel ensurePrimaria(Tenant t) {
@@ -481,7 +481,7 @@ class AnnouncementAudienceResolverIT extends IntegrationTest {
     private Fixture seedTenant(String slugPrefix, int extraUsers) {
         String suffix = UUID.randomUUID().toString().substring(0, 8);
         return tx.execute(status -> {
-            Tenant t = new Tenant();
+            Tenant t = newTestTenant();
             t.setPublicUuid(UUID.randomUUID());
             t.setSlug(slugPrefix + suffix);
             t.setName("ResolverIT " + suffix);
@@ -506,12 +506,13 @@ class AnnouncementAudienceResolverIT extends IntegrationTest {
                     student.setTenantId(t.getId());
                     student.setPublicUuid(UUID.randomUUID());
                     student.setDocumentType(DocumentType.DNI);
-                    student.setDocumentNumber("DNI-" + u.getId().toString().substring(0, 8));
+                    student.setDocumentNumber("DNI" + UUID.randomUUID().toString()
+							.replace("-", "").substring(0, 17));
                     student.setFirstName(u.getFirstName());
                     student.setLastName(u.getLastName());
                     student.setGender(Gender.NOT_SPECIFIED);
                     student.setEnrollmentStatus(EnrollmentStatus.ENROLLED);
-                    student.setUserId(u.getId());
+                    student.setUserId(u.getPublicUuid());
                     studentRepo.save(student);
                 }
             }

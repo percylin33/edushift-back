@@ -263,7 +263,7 @@ class TeacherServiceImplTest {
 		void happyPath() {
 			Teacher t = teacher("A", "B", "1", "a@x.test", null);
 			withId(t, TEACHER_INTERNAL);
-			User u = makeUser(USER_INTERNAL, USER_PUBLIC, "a@x.test", Set.of(UserRole.TEACHER));
+			User u = makeUser(USER_INTERNAL, USER_PUBLIC, "a@x.test", Set.of(UserRole.STAFF));
 
 			when(teacherRepository.findByPublicUuid(TEACHER_PUBLIC)).thenReturn(Optional.of(t));
 			when(userRepository.findByPublicUuid(USER_PUBLIC)).thenReturn(Optional.of(u));
@@ -277,6 +277,8 @@ class TeacherServiceImplTest {
 			ArgumentCaptor<Teacher> captor = ArgumentCaptor.forClass(Teacher.class);
 			verify(teacherRepository).saveAndFlush(captor.capture());
 			assertThat(captor.getValue().getUserId()).isEqualTo(USER_PUBLIC);
+			assertThat(u.getRoleSet()).containsExactlyInAnyOrder(UserRole.STAFF, UserRole.TEACHER);
+			verify(userRepository).save(u);
 		}
 
 		@Test
@@ -305,17 +307,19 @@ class TeacherServiceImplTest {
 		}
 
 		@Test
-		@DisplayName("user lacks TEACHER role → 409 USER_NOT_TEACHER_ROLE")
-		void userNotTeacherRole() {
+		@DisplayName("linking a staff account also grants TEACHER")
+		void grantsTeacherRoleWhenLinking() {
 			Teacher t = teacher("A", "B", "1", null, null);
-			User u = makeUser(USER_INTERNAL, USER_PUBLIC, "a@x.test", Set.of(UserRole.STUDENT));
+			User u = makeUser(USER_INTERNAL, USER_PUBLIC, "a@x.test", Set.of(UserRole.STAFF));
 			when(teacherRepository.findByPublicUuid(TEACHER_PUBLIC)).thenReturn(Optional.of(t));
 			when(userRepository.findByPublicUuid(USER_PUBLIC)).thenReturn(Optional.of(u));
+			when(teacherRepository.findByUserId(USER_PUBLIC)).thenReturn(Optional.empty());
+			when(teacherRepository.saveAndFlush(any(Teacher.class))).thenAnswer(inv -> inv.getArgument(0));
 
-			assertThatThrownBy(() ->
-					service.linkUser(TEACHER_PUBLIC, new LinkTeacherUserRequest(USER_PUBLIC)))
-					.isInstanceOfSatisfying(ConflictException.class,
-							ex -> assertThat(ex.getCode()).isEqualTo("USER_NOT_TEACHER_ROLE"));
+			service.linkUser(TEACHER_PUBLIC, new LinkTeacherUserRequest(USER_PUBLIC));
+
+			assertThat(u.getRoleSet()).containsExactlyInAnyOrder(UserRole.STAFF, UserRole.TEACHER);
+			verify(userRepository).save(u);
 		}
 
 		@Test

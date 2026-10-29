@@ -266,12 +266,11 @@ class TenantsTenantIsolationIT extends IntegrationTest {
 			assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CREATED);
 
 			JsonNode body = objectMapper.readTree(response.getBody());
-			assertThat(body.get("accessToken").asText()).isNotBlank();
-			assertThat(body.get("refreshToken").asText()).isNotBlank();
+			AuthResponse session = readSessionResponse(objectMapper, response);
 			assertThat(body.get("user").get("email").asText()).isEqualTo(adminEmail);
 
 			// Decode the JWT and verify the role claim made it through.
-			JsonNode claims = decodeJwtPayload(body.get("accessToken").asText());
+			JsonNode claims = decodeJwtPayload(session.accessToken());
 			assertThat(claims.get("tenant_slug").asText()).isEqualTo(newSlug);
 			JsonNode rolesClaim = claims.get("roles");
 			assertThat(rolesClaim.isArray()).isTrue();
@@ -341,7 +340,7 @@ class TenantsTenantIsolationIT extends IntegrationTest {
 		assertThat(response.getStatusCode())
 				.as("login() helper requires HTTP 200; body=%s", response.getBody())
 				.isEqualTo(HttpStatus.OK);
-		return objectMapper.readValue(response.getBody(), AuthResponse.class);
+		return readSessionResponse(objectMapper, response);
 	}
 
 	private ResponseEntity<String> doGetWithBearer(String path, String bearer) {
@@ -406,7 +405,7 @@ class TenantsTenantIsolationIT extends IntegrationTest {
 	}
 
 	private Tenant createTenant(String slugPrefix, TenantStatus status) {
-		Tenant t = new Tenant();
+		Tenant t = newTestTenant();
 		t.setSlug(slugPrefix + UUID.randomUUID().toString().substring(0, 8));
 		t.setName("IT Tenant " + t.getSlug());
 		t.setStatus(status);

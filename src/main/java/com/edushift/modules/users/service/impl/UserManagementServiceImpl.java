@@ -25,6 +25,7 @@ import com.edushift.modules.users.dto.UserListFilters;
 import com.edushift.modules.users.dto.UserListItem;
 import com.edushift.modules.users.mapper.UserManagementMapper;
 import com.edushift.modules.users.service.UserManagementService;
+import com.edushift.modules.users.service.ProfileRolePolicy;
 import com.edushift.shared.exception.BadRequestException;
 import com.edushift.shared.exception.BusinessException;
 import com.edushift.shared.exception.ConflictException;
@@ -201,6 +202,7 @@ public class UserManagementServiceImpl implements UserManagementService {
 		if (isLosingAdmin) {
 			ensureNotLastAdmin(user, "remove TENANT_ADMIN role from");
 		}
+		ProfileRolePolicy.requireRoleChangesAllowed(existing, requested);
 
 		user.setRoleSet(requested);
 		User saved = userRepository.save(user);

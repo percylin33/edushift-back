@@ -16,6 +16,10 @@ import com.edushift.modules.admissions.repository.AdmissionInquiryEventRepositor
 import com.edushift.modules.students.service.StudentGuardianService;
 import com.edushift.modules.admissions.dto.AdmissionInquiryResponse;
 import com.edushift.modules.admissions.dto.AdmissionStatusEventResponse;
+import com.edushift.modules.admissions.dto.AdmissionReservationResponse;
+import com.edushift.modules.admissions.dto.AdmissionReservationEventResponse;
+import com.edushift.modules.admissions.dto.CreateAdmissionReservationRequest;
+import com.edushift.modules.admissions.dto.UpdateAdmissionReservationRequest;
 import com.edushift.modules.admissions.dto.CreateAdmissionApplicationRequest;
 import com.edushift.modules.admissions.dto.GradeVacancyResponse;
 import com.edushift.modules.admissions.dto.LinkAdmissionEnrollmentRequest;
@@ -29,11 +33,16 @@ import com.edushift.modules.admissions.entity.AdmissionApplicationStatus;
 import com.edushift.modules.admissions.entity.AdmissionStatusEvent;
 import com.edushift.modules.admissions.repository.AdmissionApplicationRepository;
 import com.edushift.modules.admissions.repository.AdmissionStatusEventRepository;
+import com.edushift.modules.admissions.repository.AdmissionVacancyReservationRepository;
+import com.edushift.modules.admissions.repository.AdmissionVacancyReservationEventRepository;
+import com.edushift.modules.admissions.service.AdmissionReservationService;
+import com.edushift.modules.admissions.entity.AdmissionVacancyReservation;
 import com.edushift.modules.admissions.service.AdmissionService;
 import com.edushift.modules.admissions.service.AdmissionWorkflowService;
 import com.edushift.modules.students.enrollments.entity.StudentEnrollmentStatus;
 import com.edushift.modules.students.enrollments.repository.StudentEnrollmentRepository;
 import com.edushift.modules.students.entity.Student;
+import com.edushift.modules.students.entity.EnrollmentStatus;
 import com.edushift.modules.students.repository.StudentRepository;
 import com.edushift.shared.exception.BadRequestException;
 import com.edushift.shared.exception.ConflictException;
@@ -66,6 +75,9 @@ public class AdmissionServiceImpl implements AdmissionService {
 	private final AdmissionWorkflowService workflowService;
 	private final AdmissionInquiryEventRepository inquiryEventRepository;
 	private final StudentGuardianService guardianService;
+	private final AdmissionReservationService reservationService;
+	private final AdmissionVacancyReservationRepository reservationRepository;
+	private final AdmissionVacancyReservationEventRepository reservationEventRepository;
 
 	@Override
 	@Transactional(readOnly = true)
@@ -174,6 +186,66 @@ public class AdmissionServiceImpl implements AdmissionService {
 
 	@Override
 	@Transactional
+	public List<AdmissionReservationResponse> listReservations(UUID academicYearPublicUuid) {
+		return reservationService.list(findYear(academicYearPublicUuid));
+	}
+
+	@Override
+	@Transactional
+	public AdmissionReservationResponse reserve(UUID applicationPublicUuid, CreateAdmissionReservationRequest request) {
+		return reservationService.reserve(applicationPublicUuid, request);
+	}
+
+	@Override
+	@Transactional
+	public AdmissionReservationResponse updateReservation(UUID reservationPublicUuid,
+			UpdateAdmissionReservationRequest request) {
+		return reservationService.update(reservationPublicUuid, request);
+	}
+
+	@Override
+	@Transactional
+	public com.edushift.modules.admissions.dto.AdmissionReservationAdvanceResponse recordReservationAdvance(
+			UUID reservationPublicUuid,
+			com.edushift.modules.admissions.dto.RecordAdmissionReservationAdvanceRequest request) {
+		return reservationService.recordAdvance(reservationPublicUuid, request);
+	}
+
+	@Override
+	@Transactional(readOnly = true)
+	public List<com.edushift.modules.admissions.dto.AdmissionReservationAdvanceResponse> reservationAdvances(
+			UUID reservationPublicUuid) {
+		return reservationService.listAdvances(reservationPublicUuid);
+	}
+
+	@Override
+	@Transactional(readOnly = true)
+	public List<com.edushift.modules.admissions.dto.AdmissionReservationAdvanceEventResponse> reservationAdvanceEvents(
+			UUID reservationPublicUuid) {
+		return reservationService.listAdvanceEvents(reservationPublicUuid);
+	}
+
+	@Override
+	@Transactional
+	public com.edushift.modules.admissions.dto.AdmissionReservationAdvanceResponse refundReservationAdvance(
+			UUID reservationPublicUuid, UUID advancePublicUuid,
+			com.edushift.modules.admissions.dto.RecordAdmissionReservationAdvanceRefundRequest request) {
+		return reservationService.recordAdvanceRefund(reservationPublicUuid, advancePublicUuid, request);
+	}
+
+	@Override
+	@Transactional(readOnly = true)
+	public List<AdmissionReservationEventResponse> reservationHistory(UUID reservationPublicUuid) {
+		AdmissionVacancyReservation reservation = reservationRepository.findByPublicUuid(reservationPublicUuid)
+				.orElseThrow(() -> new ResourceNotFoundException("AdmissionVacancyReservation", reservationPublicUuid));
+		return reservationEventRepository.findAllByReservationOrderByCreatedAtAsc(reservation).stream()
+				.map(event -> new AdmissionReservationEventResponse(event.getFromStatus(), event.getToStatus(),
+						event.getNote(), event.getActorUserId(), event.getCreatedAt()))
+				.toList();
+	}
+
+	@Override
+	@Transactional
 	public AdmissionApplicationResponse create(UUID academicYearPublicUuid, CreateAdmissionApplicationRequest request) {
 		AcademicYear year = lockYear(academicYearPublicUuid);
         requireOpenYear(year);
@@ -228,19 +300,7 @@ public class AdmissionServiceImpl implements AdmissionService {
 			throw new BadRequestException("ADMISSION_REASON_REQUIRED",
 					"Registra el motivo para devolver, poner en lista de espera o rechazar la postulación.");
 		}
-		if (target == AdmissionApplicationStatus.ADMITTED) {
-			GradeVacancyResponse vacancy = vacancyFor(application.getAcademicYear(), application.getGrade(),
-					sectionRepository.findAllByAcademicYearAndGradeOrderByDisplayOrderAscNameAsc(
-							application.getAcademicYear(), application.getGrade()));
-			if (!vacancy.capacityConfigured()) {
-				throw new ConflictException("ADMISSION_CAPACITY_NOT_CONFIGURED",
-						"Configura el aforo de las secciones de este grado antes de admitir postulantes.");
-			}
-			if (vacancy.availableSeats() < 1) {
-				throw new ConflictException("ADMISSION_NO_VACANCY",
-						"No hay vacantes disponibles para este grado; puedes registrar a la persona en lista de espera.");
-			}
-		}
+		if (target == AdmissionApplicationStatus.ADMITTED) reservationService.commitOnAdmission(application);
 
 		application.setStatus(target);
 		application.setLastStatusNote(note);
@@ -251,6 +311,7 @@ public class AdmissionServiceImpl implements AdmissionService {
 		}
 		applicationRepository.save(application);
 		appendEvent(application, current, target, note);
+		if (target == AdmissionApplicationStatus.WITHDRAWN) reservationService.releaseOnWithdrawal(application, note);
 		return toResponse(application);
 	}
 
@@ -281,10 +342,16 @@ public class AdmissionServiceImpl implements AdmissionService {
 
 		application.setEnrollmentPublicUuid(enrollment.getPublicUuid());
 		application.setStatus(AdmissionApplicationStatus.ENROLLED);
+		application.getStudent().setEnrollmentStatus(EnrollmentStatus.ENROLLED);
+		if (application.getStudent().getEnrollmentDate() == null) {
+			application.getStudent().setEnrollmentDate(enrollment.getEnrolledAt());
+		}
+		studentRepository.save(application.getStudent());
 		String note = blankToNull(request.note());
 		application.setLastStatusNote(note);
 		applicationRepository.save(application);
 		appendEvent(application, AdmissionApplicationStatus.ADMITTED, AdmissionApplicationStatus.ENROLLED, note);
+		reservationService.consumeOnEnrollment(application);
 		return toResponse(application);
 	}
 
@@ -302,11 +369,11 @@ public class AdmissionServiceImpl implements AdmissionService {
 		boolean configured = !sections.isEmpty() && sections.stream().allMatch(section -> section.getCapacity() != null);
 		int capacity = sections.stream().mapToInt(section -> section.getCapacity() == null ? 0 : section.getCapacity()).sum();
 		long occupied = enrollmentRepository.countActiveByYearAndGrade(year, grade);
-		long admitted = applicationRepository.countByAcademicYearAndGradeAndStatusAndEnrollmentPublicUuidIsNull(
-				year, grade, AdmissionApplicationStatus.ADMITTED);
-		int available = configured ? (int) Math.max(0, capacity - occupied - admitted) : 0;
+		long admitted = reservationService.committedCount(year, grade);
+		long temporary = reservationService.temporaryCount(year, grade);
+		int available = configured ? (int) Math.max(0, capacity - occupied - admitted - temporary) : 0;
 		return new GradeVacancyResponse(grade.getPublicUuid(), grade.getName(), sections.size(), capacity,
-				occupied, admitted, available, configured);
+				occupied, admitted, temporary, available, configured);
 	}
 
 	private void appendEvent(AdmissionApplication application, AdmissionApplicationStatus from,

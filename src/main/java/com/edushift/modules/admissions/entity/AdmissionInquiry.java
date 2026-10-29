@@ -59,11 +59,22 @@ public class AdmissionInquiry extends TenantAwareEntity {
 	private String contactValue;
 
 	@Enumerated(EnumType.STRING)
+	@Column(name = "source", nullable = false, length = 20)
+	private AdmissionInquirySource source = AdmissionInquirySource.WEBSITE;
+
+	@Enumerated(EnumType.STRING)
+	@Column(name = "initial_channel", nullable = false, length = 20)
+	private AdmissionInquiryChannel initialChannel = AdmissionInquiryChannel.WEBSITE;
+
+	@Enumerated(EnumType.STRING)
 	@Column(name = "status", nullable = false, length = 20)
 	private AdmissionInquiryStatus status = AdmissionInquiryStatus.RECEIVED;
 
 	@Column(name = "privacy_accepted_at", nullable = false)
 	private Instant privacyAcceptedAt;
+
+	@Column(name = "privacy_notice_given_at")
+	private Instant privacyNoticeGivenAt;
 
 	@Column(name = "note", length = 2000)
 	private String note;
@@ -84,6 +95,7 @@ public class AdmissionInquiry extends TenantAwareEntity {
 	private void onPrePersist() {
 		if (publicUuid == null) publicUuid = UUID.randomUUID();
 		if (status == null) status = AdmissionInquiryStatus.RECEIVED;
-		if (privacyAcceptedAt == null) privacyAcceptedAt = Instant.now();
+		if (source == null) source = AdmissionInquirySource.WEBSITE;
+		if (initialChannel == null) initialChannel = AdmissionInquiryChannel.WEBSITE;
 	}
 }

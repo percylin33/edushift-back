@@ -9,6 +9,8 @@ import com.edushift.modules.payments.entity.InvoiceItem;
 import com.edushift.modules.payments.repository.InvoiceItemRepository;
 import com.edushift.modules.payments.repository.InvoiceRepository;
 import com.edushift.modules.students.repository.StudentRepository;
+import com.edushift.modules.students.repository.GuardianRepository;
+import com.edushift.modules.students.entity.Guardian;
 import com.edushift.modules.tenants.entity.Tenant;
 import com.edushift.modules.tenants.repository.TenantRepository;
 import com.edushift.shared.exception.BusinessException;
@@ -39,6 +41,7 @@ public class MoraService {
 	private final TenantRepository tenantRepository;
 	private final UserRepository userRepository;
 	private final StudentRepository studentRepository;
+	private final GuardianRepository guardianRepository;
 	private final ApplicationEventPublisher eventPublisher;
 
 	@Scheduled(cron = "${app.payments.cron.mora-cron:0 0 6 * * *}")
@@ -88,7 +91,7 @@ public class MoraService {
 			if (inv.getStatus() == Invoice.Status.PENDING) {
 				inv.setStatus(Invoice.Status.OVERDUE);
 			}
-			long fee = Math.round(inv.getTotalCents() * (policy.moraPercent() / 100.0));
+			long fee = Math.round(inv.getBalanceCents() * (policy.moraPercent() / 100.0));
 			if (fee <= 0) {
 				continue;
 			}
@@ -158,7 +161,9 @@ public class MoraService {
 	}
 
 	private void publishReminder(Invoice inv) {
-		var guardian = userRepository.findByPublicUuid(inv.getGuardianUserId()).orElse(null);
+		UUID recipient = portalRecipient(inv);
+		if (recipient == null) return;
+		var guardian = userRepository.findByPublicUuid(recipient).orElse(null);
 		String parentName = guardian == null
 				? ""
 				: (guardian.getFirstName() + " " + guardian.getLastName()).trim();
@@ -182,9 +187,16 @@ public class MoraService {
 						.sourceId(inv.getPublicUuid())
 						.tenantId(inv.getTenantId())
 						.recipients(List.of(new NotificationEvent.Recipient(
-								inv.getGuardianUserId(),
+									recipient,
 								guardian == null ? null : guardian.getEmail())))
 						.payload(payload)
 						.build());
+	}
+
+	private UUID portalRecipient(Invoice invoice) {
+		if (invoice.getGuardianUserId() != null) return invoice.getGuardianUserId();
+		if (invoice.getGuardianPublicUuid() == null) return null;
+		return guardianRepository.findByPublicUuid(invoice.getGuardianPublicUuid())
+				.map(Guardian::getUserId).orElse(null);
 	}
 }

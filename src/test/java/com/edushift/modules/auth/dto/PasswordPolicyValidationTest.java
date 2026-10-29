@@ -153,9 +153,9 @@ class PasswordPolicyValidationTest {
 		v.initialize(strongAnno());
 
 		// Length boundary
-		assertThat(v.isValid("Aa1!567", null)).isFalse();    // 7 chars
-		assertThat(v.isValid("Aa1!5678", null)).isTrue();    // 8 chars (min)
-		assertThat(v.isValid("Aa1!56789", null)).isTrue();   // 9 chars
+		assertThat(v.isValid("Aa1!597", null)).isFalse();    // 7 chars
+		assertThat(v.isValid("Aa1!5973", null)).isTrue();    // 8 chars (min)
+		assertThat(v.isValid("Aa1!59738", null)).isTrue();   // 9 chars
 		assertThat(v.isValid("Aa1!" + "x".repeat(68), null)).isTrue();  // 72 chars (max)
 		assertThat(v.isValid("Aa1!" + "x".repeat(69), null)).isFalse(); // 73 chars
 
@@ -166,7 +166,7 @@ class PasswordPolicyValidationTest {
 		assertThat(v.isValid("Abcdefgh1", null)).isFalse();   // no special
 
 		// Happy path
-		assertThat(v.isValid("Abcdefgh1!", null)).isTrue();
+		assertThat(v.isValid("Azqdehgh1!", null)).isTrue();
 	}
 
 	private static com.edushift.shared.validation.annotations.StrongPassword strongAnno() {

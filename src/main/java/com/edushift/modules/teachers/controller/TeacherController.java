@@ -141,8 +141,9 @@ public class TeacherController {
 	@PreAuthorize("hasRole('TENANT_ADMIN')")
 	@Operation(
 			summary = "Link a teacher to an existing user (TENANT_ADMIN)",
-			description = "User must be in the same tenant and have the TEACHER role. "
-					+ "Errors: 409 TEACHER_ALREADY_HAS_USER, 409 USER_NOT_TEACHER_ROLE, "
+			description = "User must be in the same tenant. TEACHER is granted "
+					+ "and the profile is linked in one transaction. "
+					+ "Errors: 409 TEACHER_ALREADY_HAS_USER, "
 					+ "409 USER_ALREADY_LINKED_TO_TEACHER, 404 RESOURCE_NOT_FOUND."
 	)
 	public ResponseEntity<ApiResponse<TeacherResponse>> linkUser(

@@ -6,6 +6,7 @@ import com.edushift.modules.auth.entity.UserRole;
 import com.edushift.modules.auth.entity.UserStatus;
 import com.edushift.modules.auth.repository.UserRepository;
 import com.edushift.shared.multitenancy.TenantContext;
+import java.util.Locale;
 import java.util.Set;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -34,19 +35,22 @@ public class ProductionSuperAdminBootstrap implements CommandLineRunner {
 			PasswordEncoder passwordEncoder,
 			PlatformTransactionManager txManager,
 			@Value("${edushift.bootstrap.super-admin.enabled:false}") boolean enabled,
-			@Value("${edushift.bootstrap.super-admin.email:p3r.valderrama@gmail.com}") String email,
+			@Value("${edushift.bootstrap.super-admin.email:}") String email,
 			@Value("${edushift.bootstrap.super-admin.temporary-password:}") String temporaryPassword) {
 		this.userRepository = userRepository;
 		this.passwordEncoder = passwordEncoder;
 		this.txManager = txManager;
 		this.enabled = enabled;
-		this.email = email.trim().toLowerCase();
+		this.email = email == null ? "" : email.trim().toLowerCase(Locale.ROOT);
 		this.temporaryPassword = temporaryPassword;
 	}
 
 	@Override
 	public void run(String... args) {
 		if (!enabled) return;
+		if (email.isBlank() || !email.matches("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$")) {
+			throw new IllegalStateException("Bootstrap SUPER_ADMIN is enabled but its email is missing or invalid");
+		}
 		if (temporaryPassword == null || temporaryPassword.length() < 12) {
 			throw new IllegalStateException("Bootstrap SUPER_ADMIN is enabled but its temporary password is missing or too short");
 		}

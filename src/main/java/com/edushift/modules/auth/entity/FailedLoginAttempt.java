@@ -31,7 +31,7 @@ import org.hibernate.annotations.SQLDelete;
  * <pre>
  *   recordFailure()  →  INSERT or UPDATE row (status=ACTIVE, ++attempt_count)
  *   threshold (5)    →  UPDATE row  status=LOCKED, locked_until=now+15m
- *   recordSuccess()  →  UPDATE row  status=CLEARED, attempt_count=0
+ *   recordSuccess()  →  UPDATE row  status=CLEARED; preserve count for audit
  *   24h old          →  status=EXPIRED (set by cleanup job DEBT-AUTH-7-CLEANUP)
  * </pre>
  */
@@ -97,7 +97,6 @@ public class FailedLoginAttempt extends TenantAwareEntity {
 	/** Reset the counter (called on successful authentication). */
 	public void clear() {
 		this.status = Status.CLEARED;
-		this.attemptCount = 0;
 		this.lastAttemptAt = Instant.now();
 		this.lockedUntil = null;
 	}

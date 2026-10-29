@@ -11,6 +11,7 @@ import com.edushift.modules.admissions.dto.PublicAdmissionCatalogResponse;
 import com.edushift.modules.admissions.dto.PublicInquiryReceipt;
 import com.edushift.modules.admissions.dto.PublicOfferResponse;
 import com.edushift.modules.admissions.dto.UpdateAdmissionInquiryRequest;
+import com.edushift.modules.admissions.dto.CreatePresentialInquiryRequest;
 import com.edushift.modules.admissions.entity.AdmissionApplication;
 import java.util.List;
 import java.util.UUID;
@@ -22,6 +23,9 @@ public interface AdmissionWorkflowService {
 	PublicAdmissionCatalogResponse publicCatalog(String tenantName);
 
 	PublicInquiryReceipt submitPublicInquiry(PublicAdmissionInquiryRequest request);
+
+	AdmissionInquiryResponse createPresentialInquiry(UUID academicYearPublicUuid,
+			CreatePresentialInquiryRequest request);
 
 	List<AdmissionInquiryResponse> listInquiries(UUID academicYearPublicUuid);
 
@@ -43,4 +47,6 @@ public interface AdmissionWorkflowService {
 
 	AdmissionApplicationResponse completeEnrollment(UUID applicationPublicUuid,
 			com.edushift.modules.admissions.dto.CompleteAdmissionEnrollmentRequest request);
+
+	AdmissionApplicationResponse enrolledApplicationForRetry(UUID applicationPublicUuid);
 }

@@ -3,6 +3,7 @@ package com.edushift.modules.attendance.events;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.anySet;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -29,6 +30,8 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.SimpleTransactionStatus;
 
 @ExtendWith(MockitoExtension.class)
 class SessionClosedAbsencesListenerTest {
@@ -36,6 +39,7 @@ class SessionClosedAbsencesListenerTest {
 	@Mock StudentGuardianRepository studentGuardianRepository;
 	@Mock UserRepository userRepository;
 	@Mock ApplicationEventPublisher eventPublisher;
+	@Mock PlatformTransactionManager transactionManager;
 	@InjectMocks SessionClosedAbsencesListener listener;
 
 	@BeforeEach
@@ -56,6 +60,7 @@ class SessionClosedAbsencesListenerTest {
 		UUID recordPublic = UUID.randomUUID();
 		UUID guardianUserInternal = UUID.randomUUID();
 		UUID guardianUserPublic = UUID.fromString("00000000-0000-0000-0000-000000000201");
+		when(transactionManager.getTransaction(any())).thenReturn(new SimpleTransactionStatus());
 
 		Student student = new Student();
 		setField(student, "id", studentId);
@@ -65,7 +70,7 @@ class SessionClosedAbsencesListenerTest {
 
 		Guardian guardian = new Guardian();
 		setField(guardian, "id", UUID.randomUUID());
-		guardian.setUserId(guardianUserInternal);
+		guardian.setUserId(guardianUserPublic);
 		guardian.setEmail("madre@test.com");
 		guardian.setFirstName("Madre");
 		guardian.setLastName("Perez");
@@ -79,7 +84,7 @@ class SessionClosedAbsencesListenerTest {
 		User u = new User();
 		setField(u, "id", guardianUserInternal);
 		u.setPublicUuid(guardianUserPublic);
-		when(userRepository.findAllById(any())).thenReturn(List.of(u));
+		when(userRepository.findAllByPublicUuidIn(anySet())).thenReturn(List.of(u));
 
 		SessionClosedAbsencesEvent event = new SessionClosedAbsencesEvent(
 				tenantId,
@@ -97,6 +102,7 @@ class SessionClosedAbsencesListenerTest {
 		assertThat(ne.templateKey()).isEqualTo("STUDENT_ABSENT");
 		assertThat(ne.recipients()).hasSize(1);
 		assertThat(ne.recipients().get(0).userId()).isEqualTo(guardianUserPublic);
+		verify(transactionManager).commit(any());
 	}
 
 	@Test

@@ -306,7 +306,7 @@ public class SubmissionServiceImpl implements SubmissionService {
 					"STUDENT_HAS_NO_USER",
 					"Student has no linked user account for submissions");
 		}
-		return userRepository.findById(student.getUserId())
+		return userRepository.findByPublicUuid(student.getUserId())
 				.map(com.edushift.modules.auth.entity.User::getPublicUuid)
 				.orElseThrow(() -> new com.edushift.shared.exception.NotFoundException(
 						"STUDENT_NOT_FOUND",

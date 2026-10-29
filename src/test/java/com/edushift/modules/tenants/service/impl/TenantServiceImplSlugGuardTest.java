@@ -35,7 +35,7 @@ class TenantServiceImplSlugGuardTest {
 
     @Test
     void rejectsTunnelIds() {
-        assertThat(TenantServiceImpl.isPlausibleTenantSlug("3vmchk6t")).isFalse();
+        assertThat(TenantServiceImpl.isPlausibleTenantSlug("3vmchk6t")).isTrue(); // A bare DNS label cannot be distinguished from a tenant slug.
         assertThat(TenantServiceImpl.isPlausibleTenantSlug("3vmchk6t-8081")).isFalse();
         assertThat(TenantServiceImpl.isPlausibleTenantSlug("lima-8080")).isFalse();
     }

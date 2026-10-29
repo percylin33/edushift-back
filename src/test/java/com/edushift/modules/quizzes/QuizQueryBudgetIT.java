@@ -99,7 +99,7 @@ class QuizQueryBudgetIT extends IntegrationTest {
 		tx = new TransactionTemplate(txManager);
 		statistics().setStatisticsEnabled(true);
 
-		Tenant tenant = new Tenant();
+		Tenant tenant = newTestTenant();
 		tenant.setSlug("qb" + UUID.randomUUID().toString().substring(0, 8));
 		tenant.setName("Query budget " + tenant.getSlug());
 		tenant.setStatus(TenantStatus.ACTIVE);

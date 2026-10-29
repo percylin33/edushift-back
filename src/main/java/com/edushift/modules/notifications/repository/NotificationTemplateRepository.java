@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -16,6 +17,30 @@ import org.springframework.data.repository.query.Param;
  * Cross-tenant lookups return empty by construction.</p>
  */
 public interface NotificationTemplateRepository extends JpaRepository<NotificationTemplate, UUID> {
+
+    /**
+     * Atomically seeds a built-in template when concurrent notification
+     * workers initialize the same tenant at the same time.
+     */
+    @Modifying
+    @Query(value = """
+            INSERT INTO edushift.notification_templates (
+                id, tenant_id, public_uuid, created_at, updated_at, deleted,
+                template_key, locale, subject, body_html, version, is_system
+            ) VALUES (
+                :id, :tenantId, :publicUuid, NOW(), NOW(), false,
+                :templateKey, :locale, :subject, :bodyHtml, 1, true
+            )
+            ON CONFLICT DO NOTHING
+            """, nativeQuery = true)
+    int insertSystemTemplateIfMissing(
+            @Param("id") UUID id,
+            @Param("tenantId") UUID tenantId,
+            @Param("publicUuid") UUID publicUuid,
+            @Param("templateKey") String templateKey,
+            @Param("locale") String locale,
+            @Param("subject") String subject,
+            @Param("bodyHtml") String bodyHtml);
 
     /**
      * Find a template by its stable key + locale in the current tenant.

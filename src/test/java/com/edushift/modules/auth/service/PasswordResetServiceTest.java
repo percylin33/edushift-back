@@ -110,14 +110,14 @@ class PasswordResetServiceTest {
 			when(jwtService.resetTokenTtl()).thenReturn(Duration.ofHours(1));
 			when(passwordResetMailer.send(
 					eq("alice@acme.test"), eq(tenant.getName()),
-					eq("http://localhost:4201/auth/reset-password?tenant=acme&token=signed.jwt.token"),
+					eq("http://acme.localhost:4201/auth/reset-password?token=signed.jwt.token"),
 					eq(60L), anyString())).thenReturn(true);
 
 			service.requestReset("alice@acme.test", "acme", "127.0.0.1");
 
 			verify(passwordResetMailer).send(
 					eq("alice@acme.test"), eq(tenant.getName()),
-					eq("http://localhost:4201/auth/reset-password?tenant=acme&token=signed.jwt.token"),
+					eq("http://acme.localhost:4201/auth/reset-password?token=signed.jwt.token"),
 					eq(60L), anyString());
 
 			// Token persisted
@@ -138,7 +138,7 @@ class PasswordResetServiceTest {
 			assertThat(cmd.preferredChannel()).isEqualTo(Notification.Channel.IN_APP);
 			assertThat(cmd.payload())
 					.containsEntry("resetLink",
-							"http://localhost:4201/auth/reset-password?tenant=acme&token=signed.jwt.token")
+							"http://acme.localhost:4201/auth/reset-password?token=signed.jwt.token")
 					.containsEntry("tenantSlug", "acme");
 		}
 

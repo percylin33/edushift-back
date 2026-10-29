@@ -180,7 +180,7 @@ class AdmissionTenantIsolationIT extends IntegrationTest {
     private Fixture fixture() {
         var tx = new TransactionTemplate(transactions);
         Tenant tenant = tx.execute(status -> {
-            Tenant created = new Tenant(); created.setName("QA Admisiones");
+            Tenant created = newTestTenant(); created.setName("QA Admisiones");
             created.setSlug("qa-adm-" + UUID.randomUUID().toString().substring(0, 8));
             created.setStatus(TenantStatus.ACTIVE);
             created.setPlanId(plans.findAllByOrderBySortOrderAscCodeAsc().getFirst().getId());

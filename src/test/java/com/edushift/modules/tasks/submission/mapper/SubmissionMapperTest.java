@@ -36,8 +36,15 @@ class SubmissionMapperTest {
 
     @BeforeEach
     void stubLookupsEmpty() {
-        when(userRepository.findByPublicUuid(any())).thenReturn(Optional.empty());
-        when(studentRepository.findByUserId(any())).thenReturn(Optional.empty());
+        org.mockito.Mockito.lenient().when(userRepository.findByPublicUuid(any())).thenReturn(Optional.empty());
+        org.mockito.Mockito.lenient().when(studentRepository.findByUserId(any())).thenReturn(Optional.empty());
+        org.mockito.Mockito.lenient().when(fileObjectService.findByPublicUuid(any()))
+                .thenAnswer(inv -> {
+                    var file = new com.edushift.modules.files.entity.FileObject();
+                    file.setPublicUuid(inv.getArgument(0));
+                    file.setSizeBytes(10L);
+                    return Optional.of(file);
+                });
     }
 
     @Nested

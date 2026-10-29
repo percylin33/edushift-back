@@ -13,6 +13,7 @@ import java.util.UUID;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
+import org.hibernate.annotations.SQLDelete;
 import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
 
@@ -30,6 +31,7 @@ import org.hibernate.type.SqlTypes;
  * intact (see ADR-Cierre-C.12).</p>
  */
 @Entity
+@SQLDelete(sql = "UPDATE edushift.report_templates SET deleted = true, deleted_at = NOW(), updated_at = NOW() WHERE id = ?")
 @Table(name = "report_templates", schema = "edushift")
 @Getter
 @Setter
@@ -103,6 +105,21 @@ public class ReportTemplate extends TenantAwareEntity {
 	@JdbcTypeCode(SqlTypes.JSON)
 	@Column(name = "params", nullable = false, columnDefinition = "jsonb")
 	private String params = "{}";
+
+	@Column(name = "deleted_at")
+	private Instant deletedAt;
+
+	@Override
+	public void markDeleted() {
+		super.markDeleted();
+		this.deletedAt = Instant.now();
+	}
+
+	@Override
+	public void restore() {
+		super.restore();
+		this.deletedAt = null;
+	}
 
 	@PrePersist
 	private void onPrePersist() {
