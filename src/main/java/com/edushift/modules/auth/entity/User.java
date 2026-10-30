@@ -89,6 +89,9 @@ public class User extends TenantAwareEntity {
 	@Column(name = "last_name", nullable = false, length = 100)
 	private String lastName;
 
+	@Column(name = "second_last_name", length = 100)
+	private String secondLastName;
+
 	/**
 	 * Lowercased and trimmed before persistence. Uniqueness is enforced at the
 	 * database level by a partial unique index on {@code (tenant_id, lower(email))}
@@ -118,6 +121,21 @@ public class User extends TenantAwareEntity {
 
 	@Column(name = "email_verified", nullable = false)
 	private boolean emailVerified = false;
+
+	/**
+	 * Whether {@link #email} is a real mailbox or a mass-provision
+	 * synthetic address (CRED-7). Mailers must skip {@code SYNTHETIC}.
+	 */
+	@Enumerated(EnumType.STRING)
+	@Column(name = "email_source", nullable = false, length = 20)
+	private EmailSource emailSource = EmailSource.REAL;
+
+	/**
+	 * When true the user must set a new password before using the app
+	 * (temp-password mass provision path).
+	 */
+	@Column(name = "must_change_password", nullable = false)
+	private boolean mustChangePassword = false;
 
 	@Column(name = "mfa_enabled", nullable = false)
 	private boolean mfaEnabled = false;
@@ -245,7 +263,9 @@ public class User extends TenantAwareEntity {
 		if (lastName == null) {
 			return firstName;
 		}
-		return firstName + " " + lastName;
+		return java.util.stream.Stream.of(firstName, lastName, secondLastName)
+				.filter(value -> value != null && !value.isBlank())
+				.collect(java.util.stream.Collectors.joining(" "));
 	}
 
 	/** Records a successful authentication. */

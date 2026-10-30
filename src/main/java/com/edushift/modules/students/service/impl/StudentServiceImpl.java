@@ -1,8 +1,11 @@
 package com.edushift.modules.students.service.impl;
 
+import com.edushift.modules.students.provision.PortalEmailResolver;
 import com.edushift.modules.auth.entity.User;
 import com.edushift.modules.auth.entity.UserRole;
 import com.edushift.modules.auth.repository.UserRepository;
+import com.edushift.modules.audit.events.AuditAction;
+import com.edushift.modules.audit.service.AuditLogger;
 import com.edushift.modules.students.dto.CreateStudentRequest;
 import com.edushift.modules.students.dto.InviteStudentResponse;
 import com.edushift.modules.students.dto.LinkStudentUserRequest;
@@ -65,7 +68,9 @@ public class StudentServiceImpl implements StudentService {
 	private final StudentMapper mapper;
 	private final UserRepository userRepository;
 	private final UserInvitationService invitationService;
+	private final PortalEmailResolver portalEmailResolver;
 	private final UserInvitationRepository invitationRepository;
+	private final AuditLogger auditLogger;
 
 	/** Convention key carried in {@code user_invitations.metadata}. */
 	public static final String METADATA_STUDENT_ID_KEY = "studentId";
@@ -133,6 +138,7 @@ public class StudentServiceImpl implements StudentService {
 		if (request == null || request.isEmpty()) {
 			return mapper.toResponse(student);
 		}
+		String oldFullName = student.fullName();
 
 		// Re-validate uniqueness only when the offending columns are
 		// actually being changed. Excluding the entity itself avoids
@@ -159,6 +165,27 @@ public class StudentServiceImpl implements StudentService {
 
 		try {
 			Student saved = studentRepository.saveAndFlush(student);
+			if (saved.getUserId() != null) {
+				userRepository.findByPublicUuid(saved.getUserId()).ifPresent(linkedUser -> {
+					String oldLinkedFullName = linkedUser.fullName();
+					linkedUser.setFirstName(saved.getFirstName());
+					linkedUser.setLastName(saved.getLastName());
+					linkedUser.setSecondLastName(saved.getSecondLastName());
+					userRepository.save(linkedUser);
+					if (auditLogger != null && !oldLinkedFullName.equals(linkedUser.fullName())) {
+						auditLogger.log(AuditAction.UPDATE, "user", linkedUser.getPublicUuid(),
+								"Linked account identity synchronized from student",
+								Map.of("studentPublicUuid", saved.getPublicUuid().toString()),
+								"students");
+					}
+				});
+			}
+			if (auditLogger != null && !oldFullName.equals(saved.fullName())) {
+				auditLogger.log(AuditAction.UPDATE, "student", saved.getPublicUuid(),
+						"Student legal name updated",
+						Map.of("previousFullName", oldFullName, "currentFullName", saved.fullName()),
+						"students");
+			}
 			log.info("[students] updated -- publicUuid={} document={}/{}",
 					saved.getPublicUuid(), saved.getDocumentType(), saved.getDocumentNumber());
 			return mapper.toResponse(saved);
@@ -189,18 +216,24 @@ public class StudentServiceImpl implements StudentService {
 		User user = userRepository.findByPublicUuid(request.userPublicUuid())
 				.orElseThrow(() -> new ResourceNotFoundException("User", request.userPublicUuid()));
 
-		if (!user.hasRole(UserRole.STUDENT)) {
-			throw new ConflictException("USER_NOT_STUDENT_ROLE",
-					"Cannot link user '" + user.getEmail() + "': missing STUDENT role");
-		}
-
 		studentRepository.findByUserId(user.getPublicUuid()).ifPresent(other -> {
 			throw new ConflictException("USER_ALREADY_LINKED_TO_STUDENT",
 					"User '" + user.getEmail() + "' is already linked to another student");
 		});
 
+		String oldFullName = user.fullName();
+		user.addRole(UserRole.STUDENT);
+		user.setFirstName(student.getFirstName());
+		user.setLastName(student.getLastName());
+		user.setSecondLastName(student.getSecondLastName());
+		userRepository.save(user);
 		student.setUserId(user.getPublicUuid());
 		Student saved = studentRepository.saveAndFlush(student);
+		if (auditLogger != null && !oldFullName.equals(user.fullName())) {
+			auditLogger.log(AuditAction.UPDATE, "user", user.getPublicUuid(),
+					"User identity aligned when linking student",
+					Map.of("studentPublicUuid", student.getPublicUuid().toString()), "students");
+		}
 		log.info("[students] link-user -- student={} user={}",
 				saved.getPublicUuid(), user.getPublicUuid());
 		return mapper.toResponse(saved, null);
@@ -216,9 +249,10 @@ public class StudentServiceImpl implements StudentService {
 					"Student '" + student.fullName() + "' already has a linked user");
 		}
 		if (student.getEmail() == null || student.getEmail().isBlank()) {
-			throw new BusinessException("STUDENT_EMAIL_REQUIRED",
-					"Student '" + student.fullName() + "' needs an email to be invited");
-		}
+            student.setEmail(portalEmailResolver.resolve(student.getEmail(),
+                    student.getFirstName(), student.getLastName(), student.getDocumentNumber()));
+            studentRepository.save(student);
+        }
 
 		Map<String, Object> metadata = new HashMap<>();
 		metadata.put(METADATA_STUDENT_ID_KEY, student.getId().toString());
@@ -228,13 +262,14 @@ public class StudentServiceImpl implements StudentService {
 						student.getEmail(),
 						student.getFirstName(),
 						student.getLastName(),
+						student.getSecondLastName(),
 						Set.of(UserRole.STUDENT.name()),
 						student.getDocumentType(),
 						student.getDocumentNumber(),
 						metadata));
 
-		log.info("[students] invited -- student={} email='{}' invitationId={}",
-				student.getPublicUuid(), student.getEmail(), response.publicUuid());
+		log.info("[students] invited -- student={} invitationId={}",
+				student.getPublicUuid(), response.publicUuid());
 
 		return new InviteStudentResponse(
 				response.publicUuid(),

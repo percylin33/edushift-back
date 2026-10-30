@@ -32,7 +32,7 @@ class AiDtoTest {
         var r = new SuggestQuizQuestionsResponse(List.of(q), "minimax/MiniMax-M2",
                 "minimax", "v1", List.of(UUID.randomUUID().toString()));
         assertThat(r.questions()).hasSize(1);
-        assertThat(r.model()).isEqualTo("MiniMax/MiniMax-M2");
+        assertThat(r.model()).isEqualTo("minimax/MiniMax-M2");
         assertThat(r.generationUuids()).hasSize(1);
     }
 
@@ -59,7 +59,7 @@ class AiDtoTest {
     @Test
     @DisplayName("GenerateSessionRequest stores the canonical fields")
     void sessionRequest() {
-        var r = new GenerateSessionRequest("Topico", UUID.randomUUID(), UUID.randomUUID(), 60, List.of(), List.of());
+        var r = new GenerateSessionRequest("Topico", UUID.randomUUID(), UUID.randomUUID(), 60, List.of(), List.of(), null);
         assertThat(r.topic()).isEqualTo("Topico");
         assertThat(r.durationMinutes()).isEqualTo(60);
         assertThat(r.competencyIds()).isEmpty();

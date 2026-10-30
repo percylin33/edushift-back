@@ -25,16 +25,21 @@ import com.edushift.modules.quizzes.exception.SectionNotFoundException;
 import com.edushift.modules.quizzes.mapper.QuizMapper;
 import com.edushift.modules.quizzes.repository.QuizOptionRepository;
 import com.edushift.modules.quizzes.repository.QuizQuestionRepository;
+import com.edushift.modules.quizzes.repository.QuizQuestionTotals;
 import com.edushift.modules.quizzes.repository.QuizRepository;
 import com.edushift.modules.quizzes.service.QuizAttemptService;
 import com.edushift.modules.quizzes.service.QuizService;
 import com.edushift.modules.students.enrollments.entity.StudentEnrollment;
 import com.edushift.modules.students.enrollments.repository.StudentEnrollmentRepository;
+import com.edushift.modules.teachers.assignments.entity.TeacherAssignment;
+import com.edushift.modules.teachers.assignments.support.LmsAssignmentBinder;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
+import java.util.stream.Collectors;
 import com.edushift.shared.multitenancy.TenantContext;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -83,7 +88,8 @@ public class QuizServiceImpl implements QuizService {
 	private final QuizAttemptService attemptService;
 	private final ApplicationEventPublisher eventPublisher; // Sprint 9 / BE-9.3
 	private final StudentEnrollmentRepository studentEnrollmentRepository; // Sprint 9 / BE-9.3
-private final com.edushift.modules.auth.repository.UserRepository userRepository; // DEBT-NOTIF-4 (Sprint 9A)
+	private final com.edushift.modules.auth.repository.UserRepository userRepository; // DEBT-NOTIF-4 (Sprint 9A)
+	private final LmsAssignmentBinder lmsAssignmentBinder;
 
 	// ------------------------------------------------------------------
 	// Builder
@@ -95,9 +101,12 @@ private final com.edushift.modules.auth.repository.UserRepository userRepository
 			CreateQuizRequest request, UUID ownerUserId) {
 		Section section = requireSection(sectionPublicUuid);
 		validateDueAt(request.dueAt());
+		TeacherAssignment assignment = lmsAssignmentBinder.requireForCreate(
+				request.teacherAssignmentPublicUuid(), section);
 
 		Quiz entity = new Quiz();
 		entity.setSection(section);
+		entity.setTeacherAssignment(assignment);
 		entity.setTitle(request.title());
 		entity.setDescription(request.description());
 		entity.setDueAt(request.dueAt());
@@ -106,10 +115,8 @@ private final com.edushift.modules.auth.repository.UserRepository userRepository
 		entity.setAttemptsAllowed(request.maxAttempts().shortValue());
 		entity.setMaxScore(request.maxScore().shortValue());
 		entity.setOwnerUserId(ownerUserId);
-		// status defaults to DRAFT in @PrePersist.
 		Quiz saved = quizRepository.save(entity);
 
-		// Optionally bulk-create questions on the same call.
 		if (request.questions() != null) {
 			for (CreateQuestionRequest q : request.questions()) {
 				persistQuestion(saved, q);
@@ -284,6 +291,7 @@ private final com.edushift.modules.auth.repository.UserRepository userRepository
 							.payload(java.util.Map.of(
 									"studentName", "",
 									"quizTitle", saved.getTitle(),
+									"quizPublicUuid", saved.getPublicUuid().toString(),
 									"courseName", section.getName(),
 									"dueDate", dueDate))
 							.build()));
@@ -337,10 +345,37 @@ private final com.edushift.modules.auth.repository.UserRepository userRepository
 	@Transactional(readOnly = true)
 	public Page<QuizSummary> listBySection(UUID sectionPublicUuid,
 			Pageable pageable) {
+		return listBySection(sectionPublicUuid, null, pageable);
+	}
+
+	@Override
+	@Transactional(readOnly = true)
+	public Page<QuizSummary> listBySection(
+			UUID sectionPublicUuid, UUID assignmentPublicUuid, Pageable pageable) {
 		Section section = requireSection(sectionPublicUuid);
-		return quizRepository
-				.findAllBySectionOrderByDueAtDesc(section, pageable)
-				.map(quizMapper::toSummary);
+		if (assignmentPublicUuid != null) {
+			TeacherAssignment assignment = lmsAssignmentBinder.requireForFilter(
+					assignmentPublicUuid, section);
+			return toSummaries(quizRepository
+					.findAllBySectionAndTeacherAssignmentOrderByDueAtDesc(
+							section, assignment, pageable));
+		}
+		return toSummaries(quizRepository
+				.findAllBySectionOrderByDueAtDesc(section, pageable));
+	}
+
+	private Page<QuizSummary> toSummaries(Page<Quiz> page) {
+		List<UUID> ids = page.getContent().stream().map(Quiz::getId).toList();
+		Map<UUID, QuizQuestionTotals> totals = ids.isEmpty()
+				? Map.of()
+				: questionRepository.aggregateByQuizIds(ids).stream()
+						.collect(Collectors.toMap(QuizQuestionTotals::quizId, row -> row));
+		return page.map(quiz -> {
+			QuizQuestionTotals row = totals.get(quiz.getId());
+			int questionCount = row == null ? 0 : (int) row.questionCount();
+			int totalPoints = row == null ? 0 : (int) row.totalPoints();
+			return quizMapper.toSummary(quiz, questionCount, totalPoints);
+		});
 	}
 
 	// ------------------------------------------------------------------

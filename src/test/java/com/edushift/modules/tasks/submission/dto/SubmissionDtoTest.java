@@ -108,9 +108,9 @@ class SubmissionDtoTest {
         }
 
         @Test
-        @DisplayName("grade=101 — Max violation")
+        @DisplayName("grade=1001 — exceeds every supported task scale")
         void gradeAboveHundred() {
-            var r = new GradeSubmissionRequest(101, "fb");
+            var r = new GradeSubmissionRequest(1001, "fb");
             assertThat(validator.validate(r)).isNotEmpty();
         }
 
@@ -150,7 +150,7 @@ class SubmissionDtoTest {
 
             var r = new SubmissionResponse(
                     pub, task, student, submitter,
-                    "body", attach, SubmissionStatus.GRADED,
+                    "body", attach, null, SubmissionStatus.GRADED,
                     95, "great", gradedBy, gradedAt,
                     Boolean.TRUE,
                     Instant.parse("2026-06-10T10:00:00Z"),
@@ -185,10 +185,11 @@ class SubmissionDtoTest {
             UUID pub = UUID.randomUUID();
             UUID student = UUID.randomUUID();
             var s = new SubmissionSummary(
-                    pub, student, SubmissionStatus.SUBMITTED, null,
-                    false, Instant.parse("2026-06-10T10:00:00Z"));
+                    pub, student, "Juan Pérez", SubmissionStatus.SUBMITTED, null,
+                    false, null, Instant.parse("2026-06-10T10:00:00Z"));
             assertThat(s.publicUuid()).isEqualTo(pub);
             assertThat(s.studentPublicUuid()).isEqualTo(student);
+            assertThat(s.studentFullName()).isEqualTo("Juan Pérez");
             assertThat(s.status()).isEqualTo(SubmissionStatus.SUBMITTED);
             assertThat(s.grade()).isNull();
             assertThat(s.hasAttachment()).isFalse();
@@ -198,8 +199,8 @@ class SubmissionDtoTest {
         @DisplayName("graded + hasAttachment")
         void gradedWithAttachment() {
             var s = new SubmissionSummary(
-                    UUID.randomUUID(), UUID.randomUUID(),
-                    SubmissionStatus.GRADED, 90, true, Instant.now());
+                    UUID.randomUUID(), UUID.randomUUID(), "Ana López",
+                    SubmissionStatus.GRADED, 90, true, null, Instant.now());
             assertThat(s.status()).isEqualTo(SubmissionStatus.GRADED);
             assertThat(s.grade()).isEqualTo(90);
             assertThat(s.hasAttachment()).isTrue();

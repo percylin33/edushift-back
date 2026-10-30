@@ -15,6 +15,7 @@ import lombok.NoArgsConstructor;
 import lombok.Setter;
 import lombok.ToString;
 import org.hibernate.annotations.SQLDelete;
+import org.hibernate.annotations.SQLRestriction;
 
 /**
  * Coarse education stage inside a tenant (INICIAL / PRIMARIA / SECUNDARIA
@@ -47,6 +48,7 @@ import org.hibernate.annotations.SQLDelete;
 @Setter
 @NoArgsConstructor
 @ToString(callSuper = true, of = {"publicUuid", "code", "name", "ordinal"})
+@SQLRestriction("deleted = false")
 @SQLDelete(sql = "UPDATE edushift.academic_levels "
 		+ "SET deleted = true, deleted_at = NOW(), updated_at = NOW() "
 		+ "WHERE id = ?")

@@ -83,6 +83,15 @@ private static final String BASE = "/v1/academic/years";
 				List.of(new SimpleGrantedAuthority("ROLE_TENANT_ADMIN")));
 	}
 
+	private static JwtAuthenticationToken teacherAuth() {
+		JwtAuthenticatedPrincipal principal = new JwtAuthenticatedPrincipal(
+				UUID.randomUUID(), UUID.randomUUID(),
+				"acme", "teacher@acme.test");
+		return new JwtAuthenticationToken(
+				principal, "fake.token",
+				List.of(new SimpleGrantedAuthority("ROLE_TEACHER")));
+	}
+
 	private static JwtAuthenticationToken plainAuth() {
 		JwtAuthenticatedPrincipal principal = new JwtAuthenticatedPrincipal(
 				UUID.randomUUID(), UUID.randomUUID(),
@@ -132,6 +141,17 @@ private static final String BASE = "/v1/academic/years";
 					.willReturn(List.of(stubListItem("2026", AcademicYearStatus.ACTIVE)));
 
 			mockMvc.perform(get(BASE + "?status=ACTIVE").with(authentication(adminAuth())))
+					.andExpect(status().isOk())
+					.andExpect(jsonPath("$[0].status").value("ACTIVE"));
+		}
+
+		@Test
+		@DisplayName("TEACHER → 200 (read-only list for section pickers)")
+		void teacherCanList() throws Exception {
+			given(service.listYears(any())).willReturn(List.of(
+					stubListItem("2026", AcademicYearStatus.ACTIVE)));
+
+			mockMvc.perform(get(BASE).with(authentication(teacherAuth())))
 					.andExpect(status().isOk())
 					.andExpect(jsonPath("$[0].status").value("ACTIVE"));
 		}

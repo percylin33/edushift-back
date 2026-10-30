@@ -29,10 +29,11 @@ public class StudentEnrollmentMapper {
 		return new EnrollmentResponse(
 				e.getPublicUuid(),
 				student.getPublicUuid(),
-				student.fullName(),
+				student.listDisplayName(),
 				student.getDocumentNumber(),
 				section.getPublicUuid(),
 				section.getName(),
+				gradeNameOf(section),
 				year.getPublicUuid(),
 				year.getName(),
 				e.getEnrolledAt(),
@@ -52,9 +53,10 @@ public class StudentEnrollmentMapper {
 		return new EnrollmentListItem(
 				e.getPublicUuid(),
 				student.getPublicUuid(),
-				student.fullName(),
+				student.listDisplayName(),
 				section.getPublicUuid(),
 				section.getName(),
+				gradeNameOf(section),
 				year.getPublicUuid(),
 				year.getName(),
 				e.getEnrolledAt(),
@@ -69,7 +71,7 @@ public class StudentEnrollmentMapper {
 		return new SectionStudentRosterItem(
 				e.getPublicUuid(),
 				student.getPublicUuid(),
-				student.fullName(),
+				student.listDisplayName(),
 				student.getDocumentType(),
 				student.getDocumentNumber(),
 				student.getEmail(),
@@ -78,5 +80,9 @@ public class StudentEnrollmentMapper {
 				e.getStatus(),
 				e.isActive()
 		);
+	}
+
+	private static String gradeNameOf(Section section) {
+		return section.getGrade() != null ? section.getGrade().getName() : null;
 	}
 }

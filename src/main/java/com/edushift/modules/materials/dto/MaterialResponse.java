@@ -7,16 +7,7 @@ import java.time.Instant;
 import java.util.UUID;
 
 /**
- * Full projection of a material row (Sprint 7a / BE-7a.1).
- *
- * <ul>
- *   <li>{@code file} is non-null when {@code kind=FILE}. The nested
- *       {@link FileObjectResponse} carries the download URL.</li>
- *   <li>{@code externalUrl} is non-null when {@code kind=VIDEO_LINK}.</li>
- *   <li>Cross-field: exactly one of {@code file} / {@code externalUrl}
- *       is non-null. Enforced by the DB CHECK
- *       {@code chk_lms_materials_kind_payload_consistent}.</li>
- * </ul>
+ * Full projection of a material row (Sprint 7a / BE-7a.1 + V105).
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public record MaterialResponse(
@@ -29,6 +20,10 @@ public record MaterialResponse(
 		String externalUrl,
 		UUID ownerPublicUuid,
 		Instant createdAt,
-		Instant updatedAt
+		Instant updatedAt,
+		UUID teacherAssignmentPublicUuid,
+		UUID coursePublicUuid,
+		String courseName,
+		String periodLabel
 ) {
 }

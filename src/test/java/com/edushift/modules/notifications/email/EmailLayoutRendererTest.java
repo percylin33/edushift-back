@@ -39,11 +39,12 @@ class EmailLayoutRendererTest {
 	}
 
 	@Test
-	void wrapWithoutLogoFallsBackToTextBrand() {
+	void wrapWithoutLogoEmbedsPlatformWordmark() {
 		EmailBrandingContext ctx = EmailBrandingContext.edushiftDefault(null);
 		String html = renderer.wrap("<p>Body</p>", null, ctx);
 		assertThat(html).contains("EduShift");
-		assertThat(html).doesNotContain("<img ");
+		assertThat(html).contains("cid:" + EmailLayoutRenderer.PLATFORM_WORDMARK_CID);
+		assertThat(html).doesNotContain("https://");
 	}
 
 	@Test

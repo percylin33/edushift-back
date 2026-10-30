@@ -5,6 +5,7 @@ import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
+import jakarta.persistence.PrePersist;
 import jakarta.persistence.Table;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -19,6 +20,9 @@ import lombok.Setter;
 @Setter
 @NoArgsConstructor
 public class B2BSubscription extends AuditableEntity {
+
+    @Column(name = "public_uuid", nullable = false, updatable = false, unique = true)
+    private UUID publicUuid;
 
     @Column(name = "tenant_id", nullable = false)
     private UUID tenantId;
@@ -50,6 +54,13 @@ public class B2BSubscription extends AuditableEntity {
 
     @Column(name = "next_billing_at", nullable = false)
     private LocalDate nextBillingAt;
+
+    @PrePersist
+    private void assignPublicUuid() {
+        if (publicUuid == null) {
+            publicUuid = UUID.randomUUID();
+        }
+    }
 
     public enum B2BSubscriptionStatus {
         TRIAL, ACTIVE, PAST_DUE, CANCELED, EXPIRED

@@ -26,6 +26,7 @@ import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RequestPart;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
@@ -115,8 +116,9 @@ public class MaterialController {
 	@Operation(summary = "List materials of a section (paged)")
 	public Page<MaterialSummary> list(
 			@PathVariable UUID sectionPublicUuid,
+			@RequestParam(required = false) UUID assignmentPublicUuid,
 			@PageableDefault(size = 20) Pageable pageable) {
-		return materialService.listBySection(sectionPublicUuid, pageable);
+		return materialService.listBySection(sectionPublicUuid, assignmentPublicUuid, pageable);
 	}
 
 	@GetMapping("/materials/{publicUuid}")

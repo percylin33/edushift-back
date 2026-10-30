@@ -12,6 +12,7 @@ import com.edushift.modules.files.service.FileObjectService;
 import com.edushift.modules.files.storage.FirebaseStorageService;
 import com.edushift.modules.files.storage.StorageService;
 import com.edushift.shared.api.ApiResponse;
+import com.edushift.shared.exception.ForbiddenException;
 import com.edushift.shared.security.CurrentUserProvider;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
@@ -82,6 +83,7 @@ public class FileObjectController {
 	private final StorageService storageService;
 	private final StorageProperties storageProperties;
 	private final CurrentUserProvider currentUserProvider;
+	private final java.util.List<com.edushift.modules.files.service.FileReadAccessGuard> readGuards;
 
 	// =====================================================================
 	// GET /v1/files/{publicUuid}
@@ -92,10 +94,12 @@ public class FileObjectController {
 	@PreAuthorize("isAuthenticated()")
 	@Operation(summary = "Get file metadata + a downloadable URL")
 	public ResponseEntity<ApiResponse<FileObjectResponse>> get(
-			@PathVariable UUID publicUuid) {
+			@PathVariable UUID publicUuid,
+			org.springframework.security.core.Authentication authentication) {
 
 		FileObject entity = fileObjectService.findByPublicUuid(publicUuid)
 				.orElseThrow(() -> new FileNotFoundException(publicUuid.toString()));
+		readGuards.forEach(guard -> guard.requireReadable(entity, authentication));
 
 		String url = resolveDownloadUrl(entity, publicUuid);
 		return ResponseEntity.ok(ApiResponse.ok(
@@ -114,10 +118,12 @@ public class FileObjectController {
 					+ "Content-Disposition header. When the active provider is "
 					+ "FIREBASE with serve-from-controller=false, the call is "
 					+ "redirected (302) to a pre-signed GCS URL.")
-	public ResponseEntity<?> download(@PathVariable UUID publicUuid) {
+	public ResponseEntity<?> download(@PathVariable UUID publicUuid,
+			org.springframework.security.core.Authentication authentication) {
 
 		FileObject entity = fileObjectService.findByPublicUuid(publicUuid)
 				.orElseThrow(() -> new FileNotFoundException(publicUuid.toString()));
+		readGuards.forEach(guard -> guard.requireReadable(entity, authentication));
 
 		// Firebase with serve-from-controller=false: redirect to a
 		// pre-signed URL so the heavy bytes never touch this server.
@@ -191,12 +197,26 @@ public class FileObjectController {
 
 	@DeleteMapping("/{publicUuid}")
 	@SecurityRequirement(name = "bearerAuth")
-	@PreAuthorize("hasAnyRole('TENANT_ADMIN','TEACHER')")
+	@PreAuthorize("hasAnyRole('TENANT_ADMIN','TEACHER') or (hasRole('STAFF') and hasAuthority('LMS_DISCLOSURE_MANAGE'))")
 	@Operation(summary = "Soft-delete the file row and remove the binary")
 	public ResponseEntity<ApiResponse<Void>> delete(
-			@PathVariable UUID publicUuid) {
+			@PathVariable UUID publicUuid,
+			org.springframework.security.core.Authentication authentication) {
+		FileObject entity = fileObjectService.findByPublicUuid(publicUuid)
+				.orElseThrow(() -> new FileNotFoundException(publicUuid.toString()));
+		if (hasRole(authentication, "STAFF")
+				&& (entity.getRemoteKey() == null || !entity.getRemoteKey().contains("/disclosures/"))) {
+			throw new ForbiddenException(
+					"FILE_DELETE_DENIED", "El personal solo puede retirar anexos sin referencias del expediente anual.");
+		}
+		readGuards.forEach(guard -> guard.requireDeletable(entity, authentication));
 		fileObjectService.delete(publicUuid);
 		return ResponseEntity.ok(ApiResponse.ok());
+	}
+
+	private static boolean hasRole(org.springframework.security.core.Authentication authentication, String role) {
+		return authentication != null && authentication.getAuthorities().stream()
+				.anyMatch(authority -> authority.getAuthority().equals("ROLE_" + role));
 	}
 
 	// =====================================================================
@@ -206,11 +226,13 @@ public class FileObjectController {
 	@PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE,
 			produces = MediaType.APPLICATION_JSON_VALUE)
 	@SecurityRequirement(name = "bearerAuth")
-	@PreAuthorize("isAuthenticated()")
+	@PreAuthorize("isAuthenticated() and (#module != 'ai-sources' or hasAuthority('AI:SOURCE_MANAGE')) and (#module != 'disclosures' or (hasAuthority('LMS_DISCLOSURE_MANAGE') and !hasRole('TENANT_ADMIN')))")
 	@Operation(summary = "Upload a file via multipart/form-data (BE-proxied)",
 			description = "The classic upload path: the BE streams the bytes "
 					+ "to the active storage provider. Use this on LOCAL_FS or "
-					+ "when the signed-URL flow is not desired.")
+					+ "when the signed-URL flow is not desired. "
+					+ "module must be one of: materials, submissions, avatars, "
+				+ "branding, attendance, schedule-bootstrap, reports, ai-sources, disclosures.")
 	public ResponseEntity<ApiResponse<FileObjectResponse>> upload(
 			@RequestParam("module") String module,
 			@RequestPart("file") MultipartFile file) throws java.io.IOException {
@@ -232,7 +254,7 @@ public class FileObjectController {
 
 	@PostMapping(value = "/upload-requests", produces = MediaType.APPLICATION_JSON_VALUE)
 	@SecurityRequirement(name = "bearerAuth")
-	@PreAuthorize("isAuthenticated()")
+	@PreAuthorize("isAuthenticated() and (#request.module() != 'ai-sources' or hasAuthority('AI:SOURCE_MANAGE')) and (#request.module() != 'disclosures' or (hasAuthority('LMS_DISCLOSURE_MANAGE') and !hasRole('TENANT_ADMIN')))")
 	@Operation(summary = "Mint a signed PUT URL for direct upload to Firebase",
 			description = "Returns a short-lived URL the client can PUT the bytes "
 					+ "to directly. For LOCAL_FS the URL is null — the FE must "
@@ -327,11 +349,12 @@ public class FileObjectController {
 
 	/**
 	 * Branding module objects live at
-	 * {@code tenants/{tid}/lms/branding/{uuid}.ext} (see {@code StoredObject.buildKey}).
+	 * {@code envs/{env}/tenants/{slug}-{tid}/branding/{yyyy}/{MM}/{uuid}.ext}
+	 * (see {@code StoredObject.buildKey}).
 	 */
 	private static boolean isBrandingAsset(FileObject entity) {
 		String key = entity.getRemoteKey();
-		return key != null && key.contains("/lms/branding/");
+		return key != null && (key.contains("/branding/") || key.contains("/lms/branding/"));
 	}
 
 	private static boolean isImageContentType(String contentType) {

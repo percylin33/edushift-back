@@ -4,6 +4,8 @@ import com.edushift.modules.academic.course.entity.Course;
 import com.edushift.shared.domain.TenantAwareEntity;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import jakarta.persistence.FetchType;
 import jakarta.persistence.ForeignKey;
 import jakarta.persistence.Index;
@@ -77,11 +79,35 @@ public class Competency extends TenantAwareEntity {
 	@Column(name = "description", columnDefinition = "text")
 	private String description;
 
+	/** Curriculum source release copied into this tenant course, when applicable. */
+	@Column(name = "source_catalog_version", length = 60)
+	private String sourceCatalogVersion;
+
+	/** Stable identifier of the source competency, retained if the school changes its local code. */
+	@Column(name = "source_catalog_code", length = 80)
+	private String sourceCatalogCode;
+
+	/** National education level, separate from a tenant's custom level labels. */
+	@Column(name = "source_level_code", length = 20)
+	private String sourceLevelCode;
+
+	/** CNEB cycles covered by the source entry, e.g. III,IV,V. */
+	@Column(name = "source_cycle_codes", length = 30)
+	private String sourceCycleCodes;
+
+	@Enumerated(EnumType.STRING)
+	@Column(name = "source_content_status", length = 32)
+	private CurriculumSourceContentStatus sourceContentStatus;
+
 	@Column(name = "display_order", nullable = false)
 	private Integer displayOrder;
 
 	@Column(name = "is_active", nullable = false)
 	private Boolean isActive = Boolean.TRUE;
+
+	@Enumerated(EnumType.STRING)
+	@Column(name = "origin", nullable = false, length = 20)
+	private CompetencyOrigin origin = CompetencyOrigin.INSTITUTIONAL;
 
 	@Column(name = "deleted_at")
 	private Instant deletedAt;
@@ -93,6 +119,9 @@ public class Competency extends TenantAwareEntity {
 		}
 		if (isActive == null) {
 			isActive = Boolean.TRUE;
+		}
+		if (origin == null) {
+			origin = CompetencyOrigin.INSTITUTIONAL;
 		}
 		normalise();
 	}

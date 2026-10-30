@@ -53,6 +53,17 @@ public interface TeacherService {
 
 	TeacherResponse getTeacher(UUID publicUuid);
 
+	/**
+	 * Resolve the {@link Teacher} linked to the authenticated caller's
+	 * {@code User.publicUuid}. Used by TEACHER self-service surfaces
+	 * (e.g. {@code /schedule}) that need the teacher UUID without
+	 * exposing admin-only listing endpoints.
+	 *
+	 * @throws com.edushift.shared.exception.ResourceNotFoundException
+	 *         when the caller has no linked teacher row (404 anti-enumeration)
+	 */
+	TeacherResponse getCurrentTeacher();
+
 	TeacherResponse createTeacher(CreateTeacherRequest request);
 
 	TeacherResponse updateTeacher(UUID publicUuid, UpdateTeacherRequest request);

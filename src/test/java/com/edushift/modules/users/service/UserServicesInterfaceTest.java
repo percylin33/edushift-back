@@ -68,8 +68,10 @@ class UserServicesInterfaceTest {
                 .getReturnType()).isEqualTo(UserDetailResponse.class);
         assertThat(iface.getMethod("enableUser", UUID.class)
                 .getReturnType()).isEqualTo(UserDetailResponse.class);
-        assertThat(iface.getMethod("resetPassword", UUID.class)
-                .getReturnType()).isEqualTo(void.class);
+        assertThat(iface.getMethod("resetPassword", UUID.class,
+                        com.edushift.modules.users.dto.AdminResetPasswordRequest.class)
+                .getReturnType()).isEqualTo(
+                        com.edushift.modules.users.dto.AdminResetPasswordResponse.class);
     }
 
     @Test

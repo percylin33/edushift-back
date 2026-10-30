@@ -143,7 +143,8 @@ public interface JwtService {
 			TokenType type,
 			java.util.UUID jti,
 			java.time.Instant issuedAt,
-			java.time.Instant expiresAt
+			java.time.Instant expiresAt,
+			java.util.UUID impersonatedBy
 	) {}
 
 }

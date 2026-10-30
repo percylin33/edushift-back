@@ -122,12 +122,19 @@ public class DayScheduleTemplateController {
 
 	@PostMapping("/schedule/day-templates/{uuid}/apply-day-plan")
 	@PreAuthorize("hasRole('TENANT_ADMIN')")
-	@Operation(summary = "Apply day plan (entrada/salida/periodos) and regenerate recess/lunch",
-			description = "Stores dayStart/dayEnd/periodMinutes, replaces RECESS/LUNCH blocks, "
-					+ "keeps ASSEMBLY/GUIDANCE/SPECIALIST_RESERVED. ADR-SCH-12.")
+	@Operation(summary = "Save the complete school-day plan",
+			description = "Stores dayStart/dayEnd/periodMinutes and atomically replaces RECESS, "
+					+ "LUNCH, ASSEMBLY, GUIDANCE and SPECIALIST_RESERVED blocks when activities are supplied. ADR-SCH-12.")
 	public ResponseEntity<ApiResponse<DayTemplateResponse>> applyDayPlan(
 			@PathVariable UUID uuid,
 			@Valid @RequestBody ApplyDayPlanRequest request) {
 		return ResponseEntity.ok(ApiResponse.ok(service.applyDayPlan(uuid, request)));
+	}
+
+	@PostMapping("/schedule/day-templates/{uuid}/review")
+	@PreAuthorize("hasRole('TENANT_ADMIN')")
+	@Operation(summary = "Mark a complete day schedule template as reviewed")
+	public ResponseEntity<ApiResponse<DayTemplateResponse>> markReviewed(@PathVariable UUID uuid) {
+		return ResponseEntity.ok(ApiResponse.ok(service.markReviewed(uuid)));
 	}
 }

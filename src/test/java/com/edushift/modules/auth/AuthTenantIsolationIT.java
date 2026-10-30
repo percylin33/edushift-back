@@ -124,8 +124,7 @@ class AuthTenantIsolationIT extends IntegrationTest {
 
 			assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
 			JsonNode body = objectMapper.readTree(response.getBody());
-			assertThat(body.get("accessToken").asText()).isNotBlank();
-			assertThat(body.get("refreshToken").asText()).isNotBlank();
+			AuthResponse session = readSessionResponse(objectMapper, response);
 			assertThat(body.get("expiresInSec").asLong()).isPositive();
 			assertThat(body.get("user").get("email").asText()).isEqualTo(SHARED_EMAIL);
 
@@ -133,7 +132,7 @@ class AuthTenantIsolationIT extends IntegrationTest {
 			// invariant. We decode the payload without verifying the signature
 			// because we only care about the routing claim here; signature
 			// validation is exercised by JwtServiceImplTest.
-			JsonNode claims = decodeJwtPayload(body.get("accessToken").asText());
+			JsonNode claims = decodeJwtPayload(session.accessToken());
 			assertThat(claims.get("tenant_id").asText())
 					.as("JWT tenant_id claim must equal tenant A's internal id")
 					.isEqualTo(pair.tenantA().getId().toString());
@@ -257,8 +256,9 @@ class AuthTenantIsolationIT extends IntegrationTest {
 					.as("logout of tenant A must not affect tenant B's refresh chain")
 					.isEqualTo(HttpStatus.OK);
 			JsonNode body = objectMapper.readTree(refreshBNow.getBody());
-			assertThat(body.get("accessToken").asText()).isNotBlank();
-			assertThat(body.get("refreshToken").asText())
+			AuthResponse rotated = readSessionResponse(objectMapper, refreshBNow);
+			assertThat(rotated.accessToken()).isNotBlank();
+			assertThat(rotated.refreshToken())
 					.as("rotation produces a new refresh distinct from the input")
 					.isNotEqualTo(loginB.refreshToken());
 		}
@@ -319,11 +319,12 @@ class AuthTenantIsolationIT extends IntegrationTest {
 		assertThat(response.getStatusCode())
 				.as("seed login() helper requires a successful response")
 				.isEqualTo(HttpStatus.OK);
-		return objectMapper.readValue(response.getBody(), AuthResponse.class);
+		return readSessionResponse(objectMapper, response);
 	}
 
 	private ResponseEntity<String> doRefresh(String refreshToken) {
 		HttpHeaders headers = new HttpHeaders();
+		headers.add(HttpHeaders.COOKIE, "edushift_refresh_token=" + refreshToken);
 		headers.setContentType(MediaType.APPLICATION_JSON);
 		String body = String.format("{\"refreshToken\":\"%s\"}", refreshToken);
 		return rest.exchange(AUTH_BASE + "/refresh", HttpMethod.POST,
@@ -392,7 +393,7 @@ class AuthTenantIsolationIT extends IntegrationTest {
 	}
 
 	private Tenant createTenant(String slugPrefix, TenantStatus status) {
-		Tenant t = new Tenant();
+		Tenant t = newTestTenant();
 		t.setSlug(slugPrefix + UUID.randomUUID().toString().substring(0, 8));
 		t.setName("IT Tenant " + t.getSlug());
 		t.setStatus(status);

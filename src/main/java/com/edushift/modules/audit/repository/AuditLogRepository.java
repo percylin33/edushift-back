@@ -37,30 +37,56 @@ public interface AuditLogRepository extends JpaRepository<AuditLog, UUID> {
 	 */
 	@Query(value = """
 			SELECT *
-			FROM edushift.audit_logs
-			WHERE (:tenantId IS NULL OR tenant_id = :tenantId)
-			  AND (:actorId   IS NULL OR actor_id   = :actorId)
-			  AND (:action    IS NULL OR action     = :action)
-			  AND (:resourceType IS NULL OR resource_type = :resourceType)
-			  AND (:from      IS NULL OR occurred_at >= :from)
-			  AND (:to        IS NULL OR occurred_at <= :to)
-			ORDER BY occurred_at DESC
+			FROM edushift.audit_logs audit
+			WHERE (CAST(:tenantId AS uuid) IS NULL OR audit.tenant_id = CAST(:tenantId AS uuid))
+			  AND (CAST(:actorId AS uuid) IS NULL OR audit.actor_id = CAST(:actorId AS uuid))
+			  AND (CAST(:action AS varchar) IS NULL OR audit.action = CAST(:action AS varchar))
+			  AND (CAST(:resourceType AS varchar) IS NULL OR audit.resource_type = CAST(:resourceType AS varchar))
+			  AND (CAST(:tenantSearch AS varchar) IS NULL OR EXISTS (
+			      SELECT 1 FROM edushift.tenants tenant
+			      WHERE tenant.id = audit.tenant_id AND tenant.deleted = false
+			        AND (tenant.name ILIKE '%' || CAST(:tenantSearch AS varchar) || '%'
+			          OR tenant.slug ILIKE '%' || CAST(:tenantSearch AS varchar) || '%')
+			  ))
+			  AND (CAST(:actorSearch AS varchar) IS NULL OR EXISTS (
+			      SELECT 1 FROM edushift.users actor
+			      WHERE actor.public_uuid = audit.actor_id AND actor.deleted = false
+			        AND (concat_ws(' ', actor.first_name, actor.last_name, actor.email)
+			             ILIKE '%' || CAST(:actorSearch AS varchar) || '%')
+			  ))
+			  AND (CAST(:from AS timestamptz) IS NULL OR audit.occurred_at >= CAST(:from AS timestamptz))
+			  AND (CAST(:to AS timestamptz) IS NULL OR audit.occurred_at <= CAST(:to AS timestamptz))
+			ORDER BY audit.occurred_at DESC
 			""",
 			countQuery = """
 			SELECT count(*)
-			FROM edushift.audit_logs
-			WHERE (:tenantId IS NULL OR tenant_id = :tenantId)
-			  AND (:actorId   IS NULL OR actor_id   = :actorId)
-			  AND (:action    IS NULL OR action     = :action)
-			  AND (:resourceType IS NULL OR resource_type = :resourceType)
-			  AND (:from      IS NULL OR occurred_at >= :from)
-			  AND (:to        IS NULL OR occurred_at <= :to)
+			FROM edushift.audit_logs audit
+			WHERE (CAST(:tenantId AS uuid) IS NULL OR audit.tenant_id = CAST(:tenantId AS uuid))
+			  AND (CAST(:actorId AS uuid) IS NULL OR audit.actor_id = CAST(:actorId AS uuid))
+			  AND (CAST(:action AS varchar) IS NULL OR audit.action = CAST(:action AS varchar))
+			  AND (CAST(:resourceType AS varchar) IS NULL OR audit.resource_type = CAST(:resourceType AS varchar))
+			  AND (CAST(:tenantSearch AS varchar) IS NULL OR EXISTS (
+			      SELECT 1 FROM edushift.tenants tenant
+			      WHERE tenant.id = audit.tenant_id AND tenant.deleted = false
+			        AND (tenant.name ILIKE '%' || CAST(:tenantSearch AS varchar) || '%'
+			          OR tenant.slug ILIKE '%' || CAST(:tenantSearch AS varchar) || '%')
+			  ))
+			  AND (CAST(:actorSearch AS varchar) IS NULL OR EXISTS (
+			      SELECT 1 FROM edushift.users actor
+			      WHERE actor.public_uuid = audit.actor_id AND actor.deleted = false
+			        AND (concat_ws(' ', actor.first_name, actor.last_name, actor.email)
+			             ILIKE '%' || CAST(:actorSearch AS varchar) || '%')
+			  ))
+			  AND (CAST(:from AS timestamptz) IS NULL OR audit.occurred_at >= CAST(:from AS timestamptz))
+			  AND (CAST(:to AS timestamptz) IS NULL OR audit.occurred_at <= CAST(:to AS timestamptz))
 			""",
 			nativeQuery = true)
 	Page<AuditLog> search(@Param("tenantId") UUID tenantId,
 			@Param("actorId") UUID actorId,
 			@Param("action") String action,
 			@Param("resourceType") String resourceType,
+			@Param("tenantSearch") String tenantSearch,
+			@Param("actorSearch") String actorSearch,
 			@Param("from") Instant from,
 			@Param("to") Instant to,
 			Pageable pageable);

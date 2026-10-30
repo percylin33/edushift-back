@@ -3,6 +3,7 @@ package com.edushift.modules.ai.controller;
 import com.edushift.modules.ai.dto.AiPromptResponse;
 import com.edushift.modules.ai.dto.SaveAiPromptRequest;
 import com.edushift.modules.ai.service.PromptManagementService;
+import com.edushift.modules.ai.service.AiEntitlementService;
 import com.edushift.shared.api.ApiResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -28,47 +29,53 @@ import org.springframework.web.bind.annotation.RestController;
 public class PromptManagementController {
 
     private final PromptManagementService service;
+    private final AiEntitlementService entitlements;
 
     @GetMapping("/template-keys")
-    @PreAuthorize("hasAuthority('LMS_AI_GENERATE')")
+    @PreAuthorize("hasAuthority('AI:PROMPT_MANAGE')")
     @Operation(summary = "List all prompt template keys (admin index)")
     public ResponseEntity<ApiResponse<List<String>>> listTemplateKeys() {
+        entitlements.require(AiEntitlementService.PROMPT_CUSTOMIZATION);
         return ResponseEntity.ok(ApiResponse.ok(service.listTemplateKeys()));
     }
 
     @GetMapping("/{templateKey}")
-    @PreAuthorize("hasAuthority('LMS_AI_GENERATE')")
+    @PreAuthorize("hasAuthority('AI:PROMPT_MANAGE')")
     @Operation(summary = "List all versions of a prompt template")
     public ResponseEntity<ApiResponse<List<AiPromptResponse>>> listVersions(
             @PathVariable String templateKey) {
+        entitlements.require(AiEntitlementService.PROMPT_CUSTOMIZATION);
         return ResponseEntity.ok(ApiResponse.ok(service.listVersions(templateKey)));
     }
 
     @PostMapping
-    @PreAuthorize("hasAuthority('LMS_AI_GENERATE')")
+    @PreAuthorize("hasAuthority('AI:PROMPT_MANAGE')")
     @Operation(summary = "Create or update a prompt version")
     public ResponseEntity<ApiResponse<AiPromptResponse>> save(
             @Valid @RequestBody SaveAiPromptRequest request) {
+        entitlements.require(AiEntitlementService.PROMPT_CUSTOMIZATION);
         AiPromptResponse response = service.save(request);
         return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.ok(response));
     }
 
     @PostMapping("/{templateKey}/{version}/activate")
-    @PreAuthorize("hasAuthority('LMS_AI_GENERATE')")
+    @PreAuthorize("hasAuthority('AI:PROMPT_MANAGE')")
     @Operation(summary = "Activate a specific prompt version")
     public ResponseEntity<ApiResponse<AiPromptResponse>> activate(
             @PathVariable String templateKey,
             @PathVariable String version) {
+        entitlements.require(AiEntitlementService.PROMPT_CUSTOMIZATION);
         AiPromptResponse response = service.activate(templateKey, version);
         return ResponseEntity.ok(ApiResponse.ok(response));
     }
 
     @DeleteMapping("/{templateKey}/{version}")
-    @PreAuthorize("hasAuthority('LMS_AI_GENERATE')")
+    @PreAuthorize("hasAuthority('AI:PROMPT_MANAGE')")
     @Operation(summary = "Soft-delete a prompt version (must not be active)")
     public ResponseEntity<Void> softDelete(
             @PathVariable String templateKey,
             @PathVariable String version) {
+        entitlements.require(AiEntitlementService.PROMPT_CUSTOMIZATION);
         service.softDelete(templateKey, version);
         return ResponseEntity.noContent().build();
     }

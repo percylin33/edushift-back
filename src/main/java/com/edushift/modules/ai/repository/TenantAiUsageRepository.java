@@ -34,7 +34,7 @@ public interface TenantAiUsageRepository extends JpaRepository<TenantAiUsage, UU
      * @param tenantId    the tenant's public UUID (injected by the
      *                    service from {@code TenantContext}).
      * @param usageDay    the UTC day to count toward.
-     * @param requestDelta added to {@code request_count} (always +1).
+     * @param requestDelta added to {@code request_count} for a new request reservation.
      * @param successDelta added to {@code success_count} (0 or 1).
      * @param failedDelta  added to {@code failed_count} (0 or 1).
      * @param tokensIn     added to {@code tokens_in_total}.
@@ -46,10 +46,11 @@ public interface TenantAiUsageRepository extends JpaRepository<TenantAiUsage, UU
                 (id, tenant_id, usage_day, request_count, success_count, failed_count,
                  tokens_in_total, tokens_out_total, created_at, updated_at, deleted)
             VALUES
-                (gen_random_uuid(), :tenantId, :usageDay, :requestDelta, :successDelta, :failedDelta,
+                (gen_random_uuid(), :tenantId, :usageDay,
+                 GREATEST(:requestDelta, :successDelta + :failedDelta), :successDelta, :failedDelta,
                  :tokensIn, :tokensOut, now(), now(), false)
             ON CONFLICT (tenant_id, usage_day) DO UPDATE
-               SET request_count    = edushift.tenant_ai_usage.request_count    + EXCLUDED.request_count,
+               SET request_count    = edushift.tenant_ai_usage.request_count    + :requestDelta,
                    success_count    = edushift.tenant_ai_usage.success_count    + EXCLUDED.success_count,
                    failed_count     = edushift.tenant_ai_usage.failed_count     + EXCLUDED.failed_count,
                    tokens_in_total  = edushift.tenant_ai_usage.tokens_in_total  + EXCLUDED.tokens_in_total,

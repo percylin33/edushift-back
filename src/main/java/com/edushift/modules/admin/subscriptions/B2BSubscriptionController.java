@@ -1,6 +1,8 @@
 package com.edushift.modules.admin.subscriptions;
 
+import com.edushift.infrastructure.multitenancy.TenantIdResolver;
 import com.edushift.shared.api.ApiResponse;
+import com.edushift.shared.multitenancy.TenantContext;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -30,34 +32,40 @@ public class B2BSubscriptionController {
 
     @GetMapping
     @Operation(summary = "Get the active subscription for a tenant")
-    public ApiResponse<SubscriptionResponse> get(@PathVariable("uuid") UUID tenantId) {
-        return subscriptionService.getActiveForTenant(tenantId)
-                .map(ApiResponse::ok)
-                .orElse(ApiResponse.error("NOT_FOUND", "No active subscription"));
+    public ApiResponse<SubscriptionResponse> get(@PathVariable("uuid") UUID tenantPublicUuid) {
+        return TenantContext.runAs(TenantIdResolver.SUPER_ADMIN_SENTINEL, () ->
+                subscriptionService.getActiveForTenant(tenantPublicUuid)
+                        .map(ApiResponse::ok)
+                        .orElse(ApiResponse.error("NOT_FOUND", "No active subscription")));
     }
 
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
     @Operation(summary = "Assign or change plan for a tenant")
     public ApiResponse<SubscriptionResponse> assign(
-            @PathVariable("uuid") UUID tenantId,
+            @PathVariable("uuid") UUID tenantPublicUuid,
             @Valid @RequestBody B2BSubscriptionRequest request) {
-        return ApiResponse.ok(subscriptionService.assignOrChangePlan(tenantId, request));
+        return TenantContext.runAs(TenantIdResolver.SUPER_ADMIN_SENTINEL,
+                () -> ApiResponse.ok(subscriptionService.assignOrChangePlan(tenantPublicUuid, request)));
     }
 
     @PostMapping("/cancel")
     @Operation(summary = "Cancel subscription at period end")
     public ApiResponse<Void> cancel(
-            @PathVariable("uuid") UUID tenantId,
+            @PathVariable("uuid") UUID tenantPublicUuid,
             @RequestParam(defaultValue = "No reason provided") String reason) {
-        subscriptionService.cancel(tenantId, reason);
-        return ApiResponse.ok();
+        return TenantContext.runAs(TenantIdResolver.SUPER_ADMIN_SENTINEL, () -> {
+            subscriptionService.cancel(tenantPublicUuid, reason);
+            return ApiResponse.ok();
+        });
     }
 
     @PostMapping("/reactivate")
     @Operation(summary = "Reactivate a canceled subscription (within 30d grace)")
-    public ApiResponse<SubscriptionResponse> reactivate(@PathVariable("uuid") UUID tenantId) {
-        subscriptionService.reactivate(tenantId);
-        return ApiResponse.ok();
+    public ApiResponse<SubscriptionResponse> reactivate(@PathVariable("uuid") UUID tenantPublicUuid) {
+        return TenantContext.runAs(TenantIdResolver.SUPER_ADMIN_SENTINEL, () -> {
+            subscriptionService.reactivate(tenantPublicUuid);
+            return ApiResponse.ok();
+        });
     }
 }

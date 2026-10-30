@@ -35,13 +35,13 @@ public class MercadoPagoProperties {
     private String apiBaseUrl = "https://api.mercadopago.com";
 
     /** Where MP redirects after a successful payment. */
-    private String successUrl = "https://app.edushift.com/payments/success";
+    private String successUrl = "https://app.edushift.pe/payments/success";
 
     /** Where MP redirects after a rejected/cancelled payment. */
-    private String failureUrl = "https://app.edushift.com/payments/failure";
+    private String failureUrl = "https://app.edushift.pe/payments/failure";
 
     /** Where MP sends IPN/webhook notifications. Must be HTTPS in prod. */
-    private String webhookUrl = "https://api.edushift.com/api/v1/webhooks/mercadopago";
+    private String webhookUrl = "https://api.edushift.pe/api/v1/webhooks/mercadopago";
 
     /**
      * HMAC secret for webhook signature verification (header

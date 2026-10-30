@@ -55,6 +55,7 @@ class SubmissionServiceImplTest {
     @Mock private SubmissionRevisionRepository revisionRepository;
     @Mock private FileObjectService fileObjectService;
     @Mock private SubmissionMapper submissionMapper;
+    @Mock private com.edushift.modules.auth.repository.UserRepository userRepository;
     @Mock private org.springframework.context.ApplicationEventPublisher eventPublisher;
 
     @InjectMocks private SubmissionServiceImpl service;
@@ -63,12 +64,26 @@ class SubmissionServiceImplTest {
 
     @BeforeEach
     void setUp() {
+        com.edushift.shared.multitenancy.TenantContext.set(UUID.randomUUID());
         task = new Task();
         setField(task, "publicUuid", UUID.randomUUID());
         setField(task, "id", UUID.randomUUID());
         task.setTitle("Tarea 1");
+        task.setStatus(com.edushift.modules.tasks.entity.TaskStatus.PUBLISHED);
+        org.mockito.Mockito.lenient().when(userRepository.findByPublicUuid(any()))
+                .thenAnswer(inv -> {
+                    var user = new com.edushift.modules.auth.entity.User();
+                    user.setPublicUuid(inv.getArgument(0));
+                    return Optional.of(user);
+                });
         task.setAllowResubmission(true);
+        task.setMaxScore((short) 100);
         task.setDueAt(Instant.now().plus(2, ChronoUnit.DAYS));
+    }
+
+    @org.junit.jupiter.api.AfterEach
+    void clearTenant() {
+        com.edushift.shared.multitenancy.TenantContext.clear();
     }
 
     // =====================================================================
@@ -422,8 +437,8 @@ class SubmissionServiceImplTest {
             when(submissionRepository.findAllByTaskOrderByCreatedAtDesc(task, p))
                     .thenReturn(new PageImpl<>(List.of(s), p, 1));
             SubmissionSummary sum = new SubmissionSummary(
-                    s.getPublicUuid(), UUID.randomUUID(),
-                    SubmissionStatus.SUBMITTED, null, false, Instant.now());
+                    s.getPublicUuid(), UUID.randomUUID(), "Estudiante",
+                    SubmissionStatus.SUBMITTED, null, false, null, Instant.now());
             when(submissionMapper.toSummary(s)).thenReturn(sum);
 
             Page<SubmissionSummary> page = service.listByTask(task.getPublicUuid(), p);
@@ -464,7 +479,7 @@ class SubmissionServiceImplTest {
                     .thenReturn(Optional.of(s));
             SubmissionResponse r = new SubmissionResponse(
                     s.getPublicUuid(), task.getPublicUuid(), student, student,
-                    "body", null, SubmissionStatus.SUBMITTED,
+                    "body", null, null, SubmissionStatus.SUBMITTED,
                     null, null, null, null, null,
                     Instant.now(), Instant.now());
             when(submissionMapper.toResponse(s)).thenReturn(r);
@@ -529,7 +544,11 @@ class SubmissionServiceImplTest {
         @Test
         @DisplayName("grade < 0 — GradeOutOfRangeException")
         void negative() {
-            assertThatThrownBy(() -> service.grade(UUID.randomUUID(),
+            Submission s = newSubmission();
+            when(submissionRepository.findByPublicUuid(s.getPublicUuid()))
+                    .thenReturn(Optional.of(s));
+
+            assertThatThrownBy(() -> service.grade(s.getPublicUuid(),
                     new GradeSubmissionRequest(-1, "x"), UUID.randomUUID()))
                     .isInstanceOf(GradeOutOfRangeException.class)
                     .hasMessageContaining("-1");
@@ -538,9 +557,13 @@ class SubmissionServiceImplTest {
         }
 
         @Test
-        @DisplayName("grade > 100 — GradeOutOfRangeException")
-        void aboveHundred() {
-            assertThatThrownBy(() -> service.grade(UUID.randomUUID(),
+        @DisplayName("grade > maxScore — GradeOutOfRangeException")
+        void aboveMaxScore() {
+            Submission s = newSubmission();
+            when(submissionRepository.findByPublicUuid(s.getPublicUuid()))
+                    .thenReturn(Optional.of(s));
+
+            assertThatThrownBy(() -> service.grade(s.getPublicUuid(),
                     new GradeSubmissionRequest(101, "x"), UUID.randomUUID()))
                     .isInstanceOf(GradeOutOfRangeException.class);
 
@@ -615,6 +638,7 @@ class SubmissionServiceImplTest {
                 s.getSubmitterUserId(),
                 s.getTextBody(),
                 s.getAttachmentPublicUuid(),
+                null,
                 s.getStatus(),
                 s.getGrade() != null ? s.getGrade().intValue() : null,
                 s.getFeedback(),

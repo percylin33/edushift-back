@@ -3,6 +3,7 @@ package com.edushift.modules.quizzes.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -191,7 +192,7 @@ class QuizAttemptServiceValidationTest {
 					.thenReturn(Optional.of(quiz));
 			when(userRepository.findByPublicUuid(studentUserId))
 					.thenReturn(Optional.of(user));
-			when(studentRepository.findByUserId(userInternalId))
+			when(studentRepository.findByUserId(studentUserId))
 					.thenReturn(Optional.of(student));
 			when(enrollmentRepository.existsActiveAt(
 					eq(student), eq(section), any()))
@@ -222,7 +223,7 @@ class QuizAttemptServiceValidationTest {
 					.thenReturn(Optional.of(quiz));
 			when(userRepository.findByPublicUuid(studentUserId))
 					.thenReturn(Optional.of(user));
-			when(studentRepository.findByUserId(userInternalId))
+			when(studentRepository.findByUserId(studentUserId))
 					.thenReturn(Optional.of(student));
 			when(enrollmentRepository.existsActiveAt(
 					eq(student), eq(section), any()))
@@ -255,7 +256,7 @@ class QuizAttemptServiceValidationTest {
 					.thenReturn(Optional.of(quiz));
 			when(userRepository.findByPublicUuid(studentUserId))
 					.thenReturn(Optional.of(user));
-			when(studentRepository.findByUserId(userInternalId))
+			when(studentRepository.findByUserId(studentUserId))
 					.thenReturn(Optional.of(student));
 			when(enrollmentRepository.existsActiveAt(
 					eq(student), eq(section), any()))
@@ -349,15 +350,16 @@ class QuizAttemptServiceValidationTest {
 					.thenReturn(List.of(a1, a2, a3));
 			when(questionRepository.findAllByQuizOrderByPositionAsc(quiz))
 					.thenReturn(questions);
-			when(optionRepository.findAllByQuestionOrderByPositionAsc(any()))
+			when(optionRepository.findAllByQuestionInOrderByPositionAsc(any()))
 					.thenAnswer(inv -> {
-						QuizQuestion q = inv.getArgument(0);
+						java.util.Collection<QuizQuestion> asked = inv.getArgument(0);
 						return options.stream()
 								.filter(o -> o.getQuestion() != null
-										&& o.getQuestion().getId().equals(q.getId()))
+										&& asked.stream().anyMatch(q ->
+												q.getId().equals(o.getQuestion().getId())))
 								.toList();
 					});
-			when(answerRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+			when(answerRepository.saveAll(any())).thenAnswer(inv -> inv.getArgument(0));
 			when(attemptRepository.save(any(QuizAttempt.class)))
 					.thenAnswer(inv -> inv.getArgument(0));
 
@@ -393,9 +395,9 @@ class QuizAttemptServiceValidationTest {
 					.thenReturn(List.of(aMc, aSa));
 			when(questionRepository.findAllByQuizOrderByPositionAsc(quiz))
 					.thenReturn(List.of(qMc, qSa));
-			when(optionRepository.findAllByQuestionOrderByPositionAsc(any()))
+			when(optionRepository.findAllByQuestionInOrderByPositionAsc(any()))
 					.thenAnswer(inv -> opts);
-			when(answerRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+			when(answerRepository.saveAll(any())).thenAnswer(inv -> inv.getArgument(0));
 			when(attemptRepository.save(any(QuizAttempt.class)))
 					.thenAnswer(inv -> inv.getArgument(0));
 
@@ -574,18 +576,13 @@ class QuizAttemptServiceValidationTest {
 			QuizAttempt a2 = inProgressAttempt();
 			QuizAnswer ans1 = newAnswerWithText(q, "answer 1");
 			QuizAnswer ans2 = newAnswerWithText(q, "answer 2");
+			setField(ans1, "attempt", a1);
+			setField(ans2, "attempt", a2);
 
 			when(quizRepository.findByPublicUuid(quizId))
 					.thenReturn(Optional.of(quiz));
-			Page<QuizAttempt> page = new PageImpl<>(List.of(a1, a2));
-			when(attemptRepository.findAllByQuizOrderByAttemptNumberAsc(
-					eq(quiz), any(Pageable.class))).thenReturn(page);
-			when(answerRepository
-					.findAllByAttemptAndTextAnswerIsNotNullAndGradedAtIsNull(a1))
-					.thenReturn(List.of(ans1));
-			when(answerRepository
-					.findAllByAttemptAndTextAnswerIsNotNullAndGradedAtIsNull(a2))
-					.thenReturn(List.of(ans2));
+			when(answerRepository.findPendingShortAnswersByQuiz(quiz))
+					.thenReturn(List.of(ans1, ans2));
 
 			List<GradingQueueItem> queue = service.getGradingQueue(quizId);
 

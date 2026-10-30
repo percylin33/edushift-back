@@ -24,5 +24,9 @@ public record UpdatePlanRequest(
 
         Integer sortOrder,
 
-        Boolean isActive
+        Boolean isActive,
+
+        boolean clearMaxStudents,
+
+        boolean clearMaxTeachers
 ) {}

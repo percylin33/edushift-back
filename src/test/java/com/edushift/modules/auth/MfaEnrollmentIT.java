@@ -57,7 +57,7 @@ class MfaEnrollmentIT extends IntegrationTest {
 
 	@BeforeEach
 	void setUp() {
-		tenant = new Tenant();
+		tenant = newTestTenant();
 		tenant.setName("MFA Enroll Test");
 		tenant.setSlug(tenantSlug);
 		tenant.setStatus(TenantStatus.ACTIVE);
@@ -90,7 +90,7 @@ class MfaEnrollmentIT extends IntegrationTest {
 				new HttpEntity<>(body, headers), String.class);
 		assertThat(resp.getStatusCode()).isEqualTo(HttpStatus.OK);
 		JsonNode json = objectMapper.readTree(resp.getBody());
-		return json.get("accessToken").asText();
+		return readSessionResponse(objectMapper, resp).accessToken();
 	}
 
 	/** Start MFA enrollment and return the secret. */
@@ -148,7 +148,7 @@ class MfaEnrollmentIT extends IntegrationTest {
 			String token = login();
 			String secret = startEnrollment(token);
 			int code = currentTotpCode(secret);
-			MfaEnrollVerifyRequest body = new MfaEnrollVerifyRequest(secret, String.valueOf(code));
+			MfaEnrollVerifyRequest body = new MfaEnrollVerifyRequest(secret, String.format("%06d", code));
 			HttpHeaders h = new HttpHeaders();
 			h.setBearerAuth(token);
 			h.setContentType(MediaType.APPLICATION_JSON);
@@ -179,7 +179,7 @@ class MfaEnrollmentIT extends IntegrationTest {
 			HttpHeaders h = new HttpHeaders();
 			h.setBearerAuth(token);
 			h.setContentType(MediaType.APPLICATION_JSON);
-			MfaEnrollVerifyRequest body = new MfaEnrollVerifyRequest(secret, String.valueOf(code));
+			MfaEnrollVerifyRequest body = new MfaEnrollVerifyRequest(secret, String.format("%06d", code));
 
 			ResponseEntity<String> resp = http.exchange(
 					AUTH_BASE + "/mfa/enroll/verify", HttpMethod.POST,
@@ -236,14 +236,14 @@ class MfaEnrollmentIT extends IntegrationTest {
 			h.setBearerAuth(token);
 			h.setContentType(MediaType.APPLICATION_JSON);
 			http.exchange(AUTH_BASE + "/mfa/enroll/verify", HttpMethod.POST,
-					new HttpEntity<>(new MfaEnrollVerifyRequest(secret, String.valueOf(code)), h), String.class);
+					new HttpEntity<>(new MfaEnrollVerifyRequest(secret, String.format("%06d", code)), h), String.class);
 
 			// Disable.
 			HttpHeaders disableHeaders = new HttpHeaders();
 			disableHeaders.setBearerAuth(token);
 			disableHeaders.setContentType(MediaType.APPLICATION_JSON);
 			int newCode = currentTotpCode(secret);
-			MfaDisableRequest disableBody = new MfaDisableRequest(RAW_PWD, String.valueOf(newCode));
+			MfaDisableRequest disableBody = new MfaDisableRequest(RAW_PWD, String.format("%06d", newCode));
 
 			ResponseEntity<String> resp = http.exchange(
 					AUTH_BASE + "/mfa/disable", HttpMethod.POST,
@@ -271,10 +271,10 @@ class MfaEnrollmentIT extends IntegrationTest {
 			h.setBearerAuth(token);
 			h.setContentType(MediaType.APPLICATION_JSON);
 			http.exchange(AUTH_BASE + "/mfa/enroll/verify", HttpMethod.POST,
-					new HttpEntity<>(new MfaEnrollVerifyRequest(secret, String.valueOf(code)), h), String.class);
+					new HttpEntity<>(new MfaEnrollVerifyRequest(secret, String.format("%06d", code)), h), String.class);
 
 			int newCode = currentTotpCode(secret);
-			MfaDisableRequest disableBody = new MfaDisableRequest("WrongPassword-1!", String.valueOf(newCode));
+			MfaDisableRequest disableBody = new MfaDisableRequest("WrongPassword-1!", String.format("%06d", newCode));
 			HttpHeaders dh = new HttpHeaders();
 			dh.setBearerAuth(token);
 			dh.setContentType(MediaType.APPLICATION_JSON);

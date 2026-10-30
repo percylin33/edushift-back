@@ -1,25 +1,16 @@
 package com.edushift.modules.users.dto;
 
-/**
- * Public-safe projection consumed by the accept-invitation page before
- * the recipient submits a password.
- *
- * <p>Only fields that are safe to surface on the open internet:
- * the recipient's name (so the page can greet them) and the tenant's
- * name (so the page can confirm <em>which school</em> they are joining
- * — important context when admins manage multiple tenants from the
- * same address). Email is included because the form pre-fills it and
- * the recipient can sanity-check the destination.
- *
- * <p>Notably absent: tenant id, role list, and any auditing
- * field. {@code tenantSlug} is included so the accept page can pin
- * {@code ?tenant=} even if the emailed link omitted it.</p>
- */
+/** Public-safe projection consumed by the accept-invitation page. */
 public record InvitationPreflightResponse(
 		String email,
 		String firstName,
 		String lastName,
+		String secondLastName,
 		String tenantName,
 		String tenantSlug
 ) {
+	public InvitationPreflightResponse(String email, String firstName, String lastName,
+			String tenantName, String tenantSlug) {
+		this(email, firstName, lastName, null, tenantName, tenantSlug);
+	}
 }

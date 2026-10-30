@@ -11,11 +11,6 @@ import com.edushift.shared.exception.BadRequestException;
 import com.edushift.shared.exception.ForbiddenException;
 import com.edushift.shared.exception.NotFoundException;
 import com.edushift.shared.exception.TooManyRequestsException;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
-import java.nio.file.StandardOpenOption;
-import java.time.Instant;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -45,22 +40,6 @@ public class ImpersonationService {
     /** Window for the impersonation rate limiter (ms). */
     static final int IMPERSONATION_WINDOW_MS = 60 * 60 * 1_000;
 
-    // #region agent log
-    private static final String DEBUG_LOG_PATH = "debug-9abf98.log";
-
-    private static void writeDebugLog(String hypothesisId, String message, java.util.Map<String, Object> data) {
-        try {
-            Path p = Paths.get(DEBUG_LOG_PATH);
-            String line = "{\"sessionId\":\"9abf98\",\"timestamp\":" + Instant.now().toEpochMilli()
-                    + ",\"location\":\"ImpersonationService.java\",\"hypothesisId\":\"" + hypothesisId
-                    + "\",\"message\":\"" + message.replace("\"", "'") + "\",\"data\":"
-                    + (data == null ? "{}" : new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(data))
-                    + ",\"runId\":\"post-flyway-repair\"}\n";
-            Files.writeString(p, line, StandardOpenOption.CREATE, StandardOpenOption.APPEND);
-        } catch (Exception ignored) { }
-    }
-    // #endregion agent log
-
     private final UserRepository userRepository;
     private final AuditLogger auditLogger;
     private final SimpleRateLimiter rateLimiter;
@@ -71,12 +50,6 @@ public class ImpersonationService {
      * SecurityContext — the rate-limit consumes a token only on accept.
      */
     public User resolveTarget(UUID targetPublicUuid, UUID adminUuid) {
-        // #region agent log
-        writeDebugLog("H2", "ImpersonationService.resolveTarget invoked — userRepository reachable", java.util.Map.of(
-                "bean", "ImpersonationService",
-                "method", "resolveTarget"
-        ));
-        // #endregion agent log
         User target = userRepository.findByPublicUuid(targetPublicUuid)
                 .orElseThrow(() -> new NotFoundException("USER_NOT_FOUND", "User not found"));
 
@@ -112,21 +85,28 @@ public class ImpersonationService {
     public void logImpersonation(UUID adminUuid, UUID targetUuid, UUID targetTenantId,
                                   String action, String path, String method, String ip,
                                   String bodyHash) {
+        logImpersonation(adminUuid, targetUuid, targetTenantId, action, path, method, ip, bodyHash, null);
+    }
+
+    public void logImpersonation(UUID adminUuid, UUID targetUuid, UUID targetTenantId,
+                                  String action, String path, String method, String ip,
+                                  String bodyHash, String reason) {
+        java.util.Map<String, Object> metadata = new java.util.LinkedHashMap<>();
+        metadata.put("adminId", adminUuid.toString());
+        metadata.put("targetId", targetUuid.toString());
+        if (targetTenantId != null) metadata.put("tenantId", targetTenantId.toString());
+        metadata.put("action", action);
+        metadata.put("path", path);
+        metadata.put("method", method);
+        metadata.put("ip", ip != null ? ip : "unknown");
+        metadata.put("bodySha256", bodyHash != null ? bodyHash : "");
+        if (reason != null && !reason.isBlank()) metadata.put("reason", reason.trim());
         auditLogger.log(AuditAction.IMPERSONATE, "user", targetUuid,
                 "Impersonation: admin=" + adminUuid + " target=" + targetUuid
                         + " action=" + action + " path=" + path,
-                java.util.Map.of(
-                        "adminId", adminUuid.toString(),
-                        "targetId", targetUuid.toString(),
-                        "tenantId", targetTenantId != null ? targetTenantId.toString() : null,
-                        "action", action,
-                        "path", path,
-                        "method", method,
-                        "ip", ip != null ? ip : "unknown",
-                        "bodySha256", bodyHash != null ? bodyHash : ""));
+                metadata);
         log.info("[impersonation] admin={} impersonates user={} for {} {} (bodyHash={})",
                 adminUuid, targetUuid, method, path,
                 bodyHash != null ? bodyHash.substring(0, Math.min(16, bodyHash.length())) : "");
     }
 }
-

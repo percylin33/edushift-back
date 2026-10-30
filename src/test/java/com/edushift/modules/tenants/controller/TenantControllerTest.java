@@ -30,6 +30,7 @@ import com.edushift.modules.tenants.entity.TenantPlan;
 import com.edushift.modules.tenants.entity.TenantStatus;
 import com.edushift.modules.tenants.exception.TenantNotFoundException;
 import com.edushift.modules.tenants.service.TenantService;
+import com.edushift.modules.tenants.service.TenantManifestService;
 import com.edushift.shared.exception.ConflictException;
 import com.edushift.shared.exception.GlobalExceptionHandler;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -80,6 +81,7 @@ import org.springframework.test.web.servlet.MockMvc;
 				type = FilterType.ASSIGNABLE_TYPE,
 				classes = {MultiTenancyConfiguration.class, TenantInterceptor.class}))
 @Import({
+        com.edushift.modules.auth.controller.CookieHelper.class,
 		GlobalExceptionHandler.class,
 		com.edushift.config.SecurityConfig.class,
 		com.edushift.config.WebConfiguration.class,
@@ -91,6 +93,7 @@ class TenantControllerTest {
 	@Autowired private ObjectMapper objectMapper;
 
 	@MockitoBean private TenantService tenantService;
+	@MockitoBean private TenantManifestService tenantManifestService;
 	@MockitoBean private SchoolInvitationService schoolInvitationService;
 
 	/** Filter dependency — never invoked in this slice (auth is simulated). */
@@ -312,7 +315,7 @@ private static final String BASE = "/v1/tenants";
 		private RegisterTenantRequest validBody() {
 			return new RegisterTenantRequest(
 					"Acme Corp",
-					"acme-co",
+					"acmeco",
 					"founder@acme.test",
 					"Sup3rSecret!",
 					"Founder",
@@ -334,8 +337,8 @@ private static final String BASE = "/v1/tenants";
 							.contentType(MediaType.APPLICATION_JSON)
 							.content(json(validBody())))
 					.andExpect(status().isCreated())
-					.andExpect(jsonPath("$.accessToken").value("access.token"))
-					.andExpect(jsonPath("$.refreshToken").value("refresh.token"))
+					.andExpect(jsonPath("$.accessToken").doesNotExist())
+					.andExpect(jsonPath("$.refreshToken").doesNotExist())
 					.andExpect(jsonPath("$.user.email").value("founder@acme.test"));
 		}
 
@@ -343,7 +346,7 @@ private static final String BASE = "/v1/tenants";
 		@DisplayName("slug already taken → 409 TENANT_SLUG_TAKEN")
 		void slugTakenSurfacesAs409() throws Exception {
 			given(tenantService.register(any(RegisterTenantRequest.class)))
-					.willThrow(new ConflictException("TENANT_SLUG_TAKEN", "slug 'acme-co' is taken"));
+					.willThrow(new ConflictException("TENANT_SLUG_TAKEN", "slug 'acmeco' is taken"));
 
 			mockMvc.perform(post(BASE + "/register")
 							.with(csrf())
@@ -373,7 +376,7 @@ private static final String BASE = "/v1/tenants";
 		@DisplayName("password shorter than 8 chars → 400, never reaches service")
 		void shortPasswordRejected() throws Exception {
 			RegisterTenantRequest body = new RegisterTenantRequest(
-					"Acme Corp", "acme-co", "founder@acme.test",
+				"Acme Corp", "acmeco", "founder@acme.test",
 					"short", "Founder", "Doe", INVITE_TOKEN);
 
 			mockMvc.perform(post(BASE + "/register")

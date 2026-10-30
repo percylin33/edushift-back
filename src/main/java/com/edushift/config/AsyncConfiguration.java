@@ -93,6 +93,36 @@ public class AsyncConfiguration {
 		return executor;
 	}
 
+	/** Keeps PDF/DOCX extraction off the shared scheduler and AI LLM pool. */
+	@Bean(name = "aiSourceIndexExecutor")
+	Executor aiSourceIndexExecutor() {
+		ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+		executor.setCorePoolSize(1);
+		executor.setMaxPoolSize(2);
+		executor.setQueueCapacity(10);
+		executor.setThreadNamePrefix("ai-source-index-");
+		executor.setRejectedExecutionHandler(new java.util.concurrent.ThreadPoolExecutor.CallerRunsPolicy());
+		executor.initialize();
+		return executor;
+	}
+
+	/**
+	 * Dedicated best-effort pool for Firebase delivery. Push must not hold
+	 * the domain transaction open while waiting on the external FCM service.
+	 */
+	@Bean(name = "fcmExecutor")
+	Executor fcmExecutor() {
+		ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+		executor.setCorePoolSize(2);
+		executor.setMaxPoolSize(4);
+		executor.setQueueCapacity(100);
+		executor.setThreadNamePrefix("fcm-push-");
+		executor.setTaskDecorator(new ContextPropagatingTaskDecorator());
+		executor.setRejectedExecutionHandler(new java.util.concurrent.ThreadPoolExecutor.AbortPolicy());
+		executor.initialize();
+		return executor;
+	}
+
 	/**
 	 * Single-thread scheduler for SSE heartbeats (Sprint 18 / BE-18.6).
 	 * 15-second heartbeat × N concurrent subscribers = at most N/15 wake-ups

@@ -17,6 +17,8 @@ import com.edushift.modules.ai.repository.TenantAiSettingsRepository;
 import com.edushift.modules.ai.repository.TenantAiUsageRepository;
 import com.edushift.shared.multitenancy.TenantContext;
 import java.time.LocalDate;
+import java.time.ZoneOffset;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.AfterEach;
@@ -36,6 +38,9 @@ class AiQuotaServiceTest {
     private TenantAiSettingsRepository settingsRepo;
     private TenantAiUsageRepository usageRepo;
     private AiTenantKeyResolver aiTenantKeyResolver;
+    private AiEntitlementService entitlementService;
+    private AiDailyQuotaReservationService reservationService;
+    private AiMonthlyTokenReservationService monthlyReservations;
     private AiQuotaService service;
 
     private static final UUID TENANT_ID = UUID.fromString("11111111-1111-1111-1111-111111111111");
@@ -46,8 +51,16 @@ class AiQuotaServiceTest {
         settingsRepo = mock(TenantAiSettingsRepository.class);
         usageRepo = mock(TenantAiUsageRepository.class);
         aiTenantKeyResolver = mock(AiTenantKeyResolver.class);
+        entitlementService = mock(AiEntitlementService.class);
+        reservationService = mock(AiDailyQuotaReservationService.class);
+        monthlyReservations = mock(AiMonthlyTokenReservationService.class);
         when(aiTenantKeyResolver.resolve(TENANT_ID)).thenReturn(TENANT_ID);
-        service = new AiQuotaService(settingsRepo, usageRepo, aiTenantKeyResolver);
+        when(entitlementService.require(AiEntitlementService.GENERATE)).thenReturn(
+                new AiEntitlementService.EffectiveAiPlan(
+                        "PRO", List.of(AiEntitlementService.GENERATE),
+                        10_000, 10_000_000L, 20, 25, 100_000_000L, false));
+        service = new AiQuotaService(settingsRepo, usageRepo, aiTenantKeyResolver,
+                entitlementService, reservationService, monthlyReservations);
         TenantContext.set(TENANT_ID);
     }
 
@@ -102,16 +115,15 @@ class AiQuotaServiceTest {
     }
 
     @Test
-    @DisplayName("daily quota + current usage at limit → AiQuotaExceededException (daily)")
+    @DisplayName("daily quota is passed to the atomic reservation service")
     void dailyAtLimitThrows() {
         TenantAiSettings s = settings(true, 100, null, null);
         TenantAiUsage u = usage(100, 0, 0, 0L, 0L);
         when(settingsRepo.findActiveByTenantId(TENANT_ID)).thenReturn(Optional.of(s));
         when(usageRepo.findByUsageDay(any())).thenReturn(Optional.of(u));
 
-        assertThatThrownBy(() -> service.verifyCanCall())
-                .isInstanceOf(AiQuotaExceededException.class)
-                .hasMessageContaining("Daily");
+        service.verifyCanCall();
+        verify(reservationService).reserve(TENANT_ID, 100, 10_000_000L);
     }
 
     @Test
@@ -126,16 +138,15 @@ class AiQuotaServiceTest {
     }
 
     @Test
-    @DisplayName("monthly token quota + tokens at limit → AiQuotaExceededException (monthly)")
+    @DisplayName("monthly token quota is passed to the atomic reservation service")
     void monthlyTokensAtLimitThrows() {
         TenantAiSettings s = settings(true, null, 1_000_000L, null);
         when(settingsRepo.findActiveByTenantId(TENANT_ID)).thenReturn(Optional.of(s));
         when(usageRepo.findByUsageDay(any())).thenReturn(Optional.empty());
         when(usageRepo.sumTokensThisMonth(TENANT_ID)).thenReturn(1_000_000L);
 
-        assertThatThrownBy(() -> service.verifyCanCall())
-                .isInstanceOf(AiQuotaExceededException.class)
-                .hasMessageContaining("Monthly");
+        service.verifyCanCall();
+        verify(reservationService).reserve(TENANT_ID, 10_000, 1_000_000L);
     }
 
     // -------------------------------------------------------------------
@@ -178,21 +189,27 @@ class AiQuotaServiceTest {
     // -------------------------------------------------------------------
 
     @Test
-    @DisplayName("incrementCounters(success) → +1 request, +1 success, token counts")
+    @DisplayName("incrementCounters(success) settles an already reserved request")
     void incrementCountersSuccess() {
+        when(settingsRepo.findActiveByTenantId(TENANT_ID)).thenReturn(Optional.of(
+                settings(true, null, null, null)));
+        service.verifyCanCall();
         service.incrementCounters(true, 42L, 28L);
 
         verify(usageRepo).incrementCounters(
-                TENANT_ID, LocalDate.now(), 1, 1, 0, 42L, 28L);
+                TENANT_ID, LocalDate.now(ZoneOffset.UTC), 0, 1, 0, 42L, 28L);
     }
 
     @Test
-    @DisplayName("incrementCounters(failure) → +1 request, +1 failed, 0 tokens")
+    @DisplayName("incrementCounters(failure) settles an already reserved request")
     void incrementCountersFailure() {
+        when(settingsRepo.findActiveByTenantId(TENANT_ID)).thenReturn(Optional.of(
+                settings(true, null, null, null)));
+        service.verifyCanCall();
         service.incrementCounters(false, 0L, 0L);
 
         verify(usageRepo).incrementCounters(
-                TENANT_ID, LocalDate.now(), 1, 0, 1, 0L, 0L);
+                TENANT_ID, LocalDate.now(ZoneOffset.UTC), 0, 0, 1, 0L, 0L);
     }
 
     // -------------------------------------------------------------------

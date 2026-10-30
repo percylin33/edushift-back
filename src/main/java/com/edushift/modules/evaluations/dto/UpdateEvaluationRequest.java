@@ -53,6 +53,9 @@ public record UpdateEvaluationRequest(
 		@ValidUuid(message = "learningSessionPublicUuid must be a valid UUID")
 		String learningSessionPublicUuid,
 
+		@ValidUuid(message = "categoryPublicUuid must be a valid UUID")
+		String categoryPublicUuid,
+
 		Boolean isActive
 ) {
 
@@ -66,6 +69,7 @@ public record UpdateEvaluationRequest(
 				&& scale == null
 				&& unitPublicUuid == null
 				&& learningSessionPublicUuid == null
+				&& categoryPublicUuid == null
 				&& isActive == null;
 	}
 }

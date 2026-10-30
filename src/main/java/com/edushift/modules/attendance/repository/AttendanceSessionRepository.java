@@ -79,6 +79,21 @@ public interface AttendanceSessionRepository extends JpaRepository<AttendanceSes
 			Pageable pageable);
 
 	/**
+	 * ACTIVE sessions on {@code day} that have zero attendance records.
+	 * Used by the end-of-day abandon job (tenant-scoped via {@code @TenantId}).
+	 */
+	@Query("""
+			select s from AttendanceSession s
+			where s.status = com.edushift.modules.attendance.entity.AttendanceSessionStatus.ACTIVE
+			  and s.occurredOn = :day
+			  and not exists (
+			      select 1 from AttendanceRecord r
+			      where r.session = s
+			  )
+			""")
+	List<AttendanceSession> findActiveUnusedOn(@Param("day") LocalDate day);
+
+	/**
 	 * Last-N closed sessions across the tenant — drives the "Ultimas
 	 * sesiones cerradas" widget on the admin dashboard (FE-6.4).
 	 */

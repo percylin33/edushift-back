@@ -1,6 +1,7 @@
 package com.edushift.modules.evaluations.entity;
 
 import com.edushift.modules.academic.unit.entity.Unit;
+import com.edushift.modules.evaluations.graderegister.entity.GradeCategory;
 import com.edushift.modules.sessions.learning.entity.LearningSession;
 import com.edushift.modules.teachers.assignments.entity.TeacherAssignment;
 import com.edushift.shared.domain.TenantAwareEntity;
@@ -25,6 +26,7 @@ import lombok.NoArgsConstructor;
 import lombok.Setter;
 import lombok.ToString;
 import org.hibernate.annotations.SQLDelete;
+import org.hibernate.annotations.SQLRestriction;
 
 /**
  * Graded item authored by a teacher against a
@@ -76,6 +78,7 @@ import org.hibernate.annotations.SQLDelete;
 @NoArgsConstructor
 @ToString(callSuper = true,
 		of = {"publicUuid", "name", "kind", "scale", "status", "scheduledDate"})
+@SQLRestriction("deleted = false")
 @SQLDelete(sql = "UPDATE edushift.evaluations "
 		+ "SET deleted = true, deleted_at = NOW(), updated_at = NOW() "
 		+ "WHERE id = ?")
@@ -100,6 +103,11 @@ public class Evaluation extends TenantAwareEntity {
 	@JoinColumn(name = "learning_session_id", columnDefinition = "uuid",
 			foreignKey = @ForeignKey(name = "fk_evaluations_learning_session"))
 	private LearningSession learningSession;
+
+	@ManyToOne(fetch = FetchType.LAZY)
+	@JoinColumn(name = "category_id", columnDefinition = "uuid",
+			foreignKey = @ForeignKey(name = "fk_evaluations_grade_category"))
+	private GradeCategory category;
 
 	@Enumerated(EnumType.STRING)
 	@Column(name = "kind", nullable = false, length = 16)

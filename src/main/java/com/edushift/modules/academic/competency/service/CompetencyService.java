@@ -35,6 +35,16 @@ import java.util.UUID;
  *   <tr><td>{@code COMPETENCY_IN_USE_BY_SESSIONS}</td><td>409</td>
  *       <td>delete attempted while learning sessions reference the
  *       competency (placeholder until BE-5A.4)</td></tr>
+ *   <tr><td>{@code TEACHER_NOT_ASSIGNED_TO_COURSE}</td><td>403</td>
+ *       <td>teacher write without an active assignment on the course</td></tr>
+ *   <tr><td>{@code COMPETENCY_ORIGIN_LOCKED}</td><td>403 or 409</td>
+ *       <td>teacher touched a competency they do not own, or promote
+ *       targeted a non-TEACHER origin</td></tr>
+ *   <tr><td>{@code COMPETENCY_USED_BY_OTHER_TEACHER}</td><td>409</td>
+ *       <td>teacher tried to deactivate a competency already used in
+ *       another teacher's session</td></tr>
+ *   <tr><td>{@code COMPETENCY_NEEDS_CAPACITY}</td><td>400</td>
+ *       <td>teacher create without at least one capacity</td></tr>
  * </table>
  */
 public interface CompetencyService {
@@ -51,4 +61,17 @@ public interface CompetencyService {
 			CompetencyReorderRequest request);
 
 	void deleteCompetency(UUID publicUuid);
+
+	/**
+	 * Sets {@code isActive=false}. A teacher may only deactivate a
+	 * {@code TEACHER} competency they created, and only when no other
+	 * teacher's session references it. An admin may deactivate any origin.
+	 */
+	CompetencyResponse deactivateCompetency(UUID publicUuid);
+
+	/**
+	 * Promotes a {@code TEACHER} competency to {@code INSTITUTIONAL}.
+	 * Admin only. {@code created_by} is left unchanged.
+	 */
+	CompetencyResponse promoteCompetency(UUID publicUuid);
 }

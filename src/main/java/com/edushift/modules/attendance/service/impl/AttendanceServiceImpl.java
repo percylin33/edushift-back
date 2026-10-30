@@ -10,6 +10,7 @@ import com.edushift.modules.attendance.dto.CheckInRequest;
 import com.edushift.modules.attendance.dto.CreateSessionRequest;
 import com.edushift.modules.attendance.dto.ManualCheckInRequest;
 import com.edushift.modules.attendance.dto.ScanCheckInRequest;
+import com.edushift.modules.attendance.dto.StudentAttendanceHistoryResponse;
 import com.edushift.modules.attendance.dto.UpdateRecordRequest;
 import com.edushift.modules.attendance.entity.AttendanceRecord;
 import com.edushift.modules.attendance.entity.AttendanceRecordStatus;
@@ -19,6 +20,7 @@ import com.edushift.modules.attendance.entity.AttendanceSessionSlot;
 import com.edushift.modules.attendance.entity.AttendanceSessionStatus;
 import com.edushift.modules.attendance.entity.StudentAttendanceQr;
 import com.edushift.modules.attendance.error.AttendanceErrorCodes;
+import com.edushift.modules.attendance.events.SessionClosedAbsencesEvent;
 import com.edushift.modules.attendance.exception.EditWindowExpiredException;
 import com.edushift.modules.attendance.exception.ForcedStatusForbiddenException;
 import com.edushift.modules.attendance.exception.QrExpiredException;
@@ -50,9 +52,11 @@ import com.edushift.shared.exception.ResourceNotFoundException;
 import com.edushift.shared.exception.UnauthorizedException;
 import com.edushift.shared.multitenancy.TenantContext;
 import com.edushift.shared.security.CurrentUserProvider;
+import com.edushift.shared.identifier.UuidV7;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -191,27 +195,53 @@ public class AttendanceServiceImpl implements AttendanceService {
 			return toResponseWithCounts(session);
 		}
 
+		// Empty session (0 check-ins): abandon without ABSENT / notifs.
+		// Protects holidays and unused gate sessions from mass false absences.
+		long existingRecords = recordRepository.countBySession(session);
+		if (existingRecords == 0) {
+			log.info("[attendance] closeSession empty — abandoning session={}",
+					session.getPublicUuid());
+			auditLogger.logSessionAbandoned(session, "empty_close");
+			AttendanceSessionResponse snapshot = toResponseWithCounts(session);
+			sessionRepository.delete(session);
+			return snapshot;
+		}
+
 		session.setStatus(AttendanceSessionStatus.CLOSED);
 		session.setClosedAt(Instant.now());
 		session.setClosedByUserId(actorPublicUuid);
 
-		int materialized = materializeAbsentRecords(session);
+		List<SessionClosedAbsencesEvent.AbsentStudent> absents =
+				materializeAbsentRecords(session);
 
 		AttendanceSession saved = sessionRepository.saveAndFlush(session);
 		log.info("[attendance] session closed -- session={} absent_materialized={}",
-				saved.getPublicUuid(), materialized);
-		auditLogger.logSessionClosed(saved, materialized);
+				saved.getPublicUuid(), absents.size());
+		auditLogger.logSessionClosed(saved, absents.size());
+
+		if (!absents.isEmpty()) {
+			String sectionName = saved.getSection() == null ? "" : saved.getSection().getName();
+			eventPublisher.publishEvent(new SessionClosedAbsencesEvent(
+					TenantContext.currentRequired(),
+					saved.getPublicUuid(),
+					sectionName,
+					saved.getClosedAt() != null ? saved.getClosedAt() : Instant.now(),
+					absents));
+		}
 		return toResponseWithCounts(saved);
 	}
 
-	private int materializeAbsentRecords(AttendanceSession session) {
-		// All ACTIVE enrollments of the section (regardless of date —
-		// the section is the same, and a withdrawn student has status
-		// != ACTIVE so they won't be materialized as ABSENT).
+	/**
+	 * Materializes ABSENT rows for enrolled students without a record.
+	 * Notification fan-out is deferred via {@link SessionClosedAbsencesEvent}
+	 * (AFTER_COMMIT) so this method stays on the hot close path.
+	 */
+	private List<SessionClosedAbsencesEvent.AbsentStudent> materializeAbsentRecords(
+			AttendanceSession session) {
 		List<StudentEnrollment> activeEnrollments = enrollmentRepository
 				.findActiveBySection(session.getSection());
 		if (activeEnrollments.isEmpty()) {
-			return 0;
+			return List.of();
 		}
 
 		Set<UUID> alreadyRecordedStudentIds = recordRepository
@@ -235,97 +265,21 @@ public class AttendanceServiceImpl implements AttendanceService {
 			toInsert.add(absent);
 		}
 		if (toInsert.isEmpty()) {
-			return 0;
+			return List.of();
 		}
 		recordRepository.saveAll(toInsert);
 
-		// Sprint 9A / BE-9A.1 — fire STUDENT_ABSENT for each materialized
-		// absent record to the student's PRIMARY LINKED GUARDIAN (NOT
-		// the student themselves, which is the bug this replaces — the
-		// original BE-9.3 publisher used student.userId, which is almost
-		// always null for K-12 students, so notifications were silently
-		// dropped). The lookup uses a single bulk query
-		// (StudentGuardianRepository.findActiveByStudentIdsWithLinkedGuardian)
-		// to avoid N+1 across N absences.
-		String sectionName = session.getSection() == null ? "" : session.getSection().getName();
-		List<UUID> studentIds = toInsert.stream()
-				.map(r -> r.getStudent() == null ? null : r.getStudent().getId())
-				.filter(Objects::nonNull)
-				.toList();
-		if (!studentIds.isEmpty()) {
-			List<StudentGuardian> guardians =
-					studentGuardianRepository.findActiveByStudentIdsWithLinkedGuardian(studentIds);
-			// DEBT-NOTIF-4 (Sprint 9A): build a single bulk lookup map
-			// (guardian internal id -> publicUuid) so the listener
-			// async receives a recipient.userId that matches users(public_uuid),
-			// not users(id). Avoids N+1 across N absences.
-			java.util.Set<UUID> guardianUserInternalIds = new java.util.HashSet<>();
-			for (StudentGuardian sg : guardians) {
-				if (sg.getGuardian() != null && sg.getGuardian().getUserId() != null) {
-					guardianUserInternalIds.add(sg.getGuardian().getUserId());
-				}
-			}
-			java.util.Map<UUID, UUID> guardianInternalToPublic = new java.util.HashMap<>();
-			for (com.edushift.modules.auth.entity.User u : userRepository.findAllById(guardianUserInternalIds)) {
-				guardianInternalToPublic.put(u.getId(), u.getPublicUuid());
-			}
-			int published = 0;
-			int skipped = 0;
-			for (StudentGuardian sg : guardians) {
-				Student student = sg.getStudent();
-				if (student == null) {
-					skipped++;
-					continue;
-				}
-				Guardian guardian = sg.getGuardian();
-				if (guardian == null || guardian.getUserId() == null) {
-					skipped++;
-					continue;
-				}
-				UUID guardianPublicUserId = guardianInternalToPublic.get(guardian.getUserId());
-				if (guardianPublicUserId == null) {
-					log.warn(
-							"[attendance] absence fan-out -- skip; guardian user_id={} not found in users (orphaned link)",
-							guardian.getUserId());
-					skipped++;
-					continue;
-				}
-				AttendanceRecord record = toInsert.stream()
-						.filter(r -> r.getStudent() != null && student.getId().equals(r.getStudent().getId()))
-						.findFirst()
-						.orElse(null);
-				UUID recordPublicUuid = record == null ? null : record.getPublicUuid();
-				java.util.Map<String, Object> payload = new java.util.HashMap<>();
-				payload.put("studentName", student.fullName());
-				payload.put("date", absentAt.toString());
-				payload.put("reason", "");
-				payload.put("courseName", sectionName);
-				payload.put("parentName", guardian.fullName());
-				payload.put("studentPublicUuid", student.getPublicUuid().toString());
-				if (recordPublicUuid != null) {
-					payload.put("recordPublicUuid", recordPublicUuid.toString());
-				}
-				eventPublisher.publishEvent(
-						com.edushift.modules.notifications.event.NotificationEvent.builder()
-								.templateKey("STUDENT_ABSENT")
-								.category(com.edushift.modules.notifications.entity.Notification.Category.ABSENCE)
-								.sourceId(recordPublicUuid != null ? recordPublicUuid : session.getPublicUuid())
-								.tenantId(TenantContext.currentRequired())
-								.recipients(java.util.List.of(
-										new com.edushift.modules.notifications.event.NotificationEvent.Recipient(
-												guardianPublicUserId,
-												guardian.getEmail())))
-								.payload(payload)
-								.build());
-				published++;
-			}
-			log.info(
-					"[attendance] absence fan-out -- session={} sessionDate={} materialized={} published={} skipped={}",
-					session.getPublicUuid(), session.getOccurredOn(),
-					toInsert.size(), published, skipped);
+		List<SessionClosedAbsencesEvent.AbsentStudent> refs = new ArrayList<>(toInsert.size());
+		for (AttendanceRecord r : toInsert) {
+			Student student = r.getStudent();
+			if (student == null || student.getId() == null) continue;
+			refs.add(new SessionClosedAbsencesEvent.AbsentStudent(
+					student.getId(),
+					student.getPublicUuid(),
+					student.fullName(),
+					r.getPublicUuid()));
 		}
-
-		return toInsert.size();
+		return refs;
 	}
 
 	// =====================================================================
@@ -384,37 +338,22 @@ public class AttendanceServiceImpl implements AttendanceService {
 		AttendanceRecordStatus status = computeStatus(
 				request.forcedStatus(), session, occurredAt, currentTenantId);
 
-		AttendanceRecord fresh = new AttendanceRecord();
-		fresh.setSession(session);
-		fresh.setStudent(student);
-		fresh.setStatus(status);
-		fresh.setOccurredAt(occurredAt);
-		fresh.setScannedByUserId(actorPublicUuid);
-
-		AttendanceRecord saved;
-		try {
-			saved = recordRepository.saveAndFlush(fresh);
-		}
-		catch (org.springframework.dao.DataIntegrityViolationException e) {
-			// Race: another scan persisted the (session, student) pair
-			// between our pre-check and the insert. Reload and return
-			// it as idempotent — semantically the same outcome.
-			AttendanceRecord stored = recordRepository
-					.findBySessionAndStudent(session, student)
-					.orElseThrow(() -> e);
+		CheckInPersistResult persisted = insertCheckInIdempotent(
+				session, student, status, occurredAt, actorPublicUuid);
+		if (persisted.wasIdempotent()) {
 			log.info("[attendance] check-in race resolved -- session={} student={} record={}",
 					session.getPublicUuid(), student.getPublicUuid(),
-					stored.getPublicUuid());
-			auditLogger.logCheckedIn(stored, true);
-			return toRecordResponseWithUsers(stored, true);
+					persisted.record().getPublicUuid());
+			auditLogger.logCheckedIn(persisted.record(), true);
+			return toRecordResponseWithUsers(persisted.record(), true);
 		}
 
 		log.info("[attendance] check-in created -- session={} student={} status={} record={}",
 				session.getPublicUuid(), student.getPublicUuid(),
-				saved.getStatus(), saved.getPublicUuid());
-		auditLogger.logCheckedIn(saved, false);
-		publishRealtime(saved, false);
-		return toRecordResponseWithUsers(saved, false);
+				persisted.record().getStatus(), persisted.record().getPublicUuid());
+		auditLogger.logCheckedIn(persisted.record(), false);
+		publishRealtime(persisted.record(), false);
+		return toRecordResponseWithUsers(persisted.record(), false);
 	}
 
 	// =====================================================================
@@ -487,35 +426,23 @@ public class AttendanceServiceImpl implements AttendanceService {
 		AttendanceRecordStatus status = computeStatus(
 				request.forcedStatus(), session, occurredAt, currentTenantId);
 
-		AttendanceRecord fresh = new AttendanceRecord();
-		fresh.setSession(session);
-		fresh.setStudent(student);
-		fresh.setStatus(status);
-		fresh.setOccurredAt(occurredAt);
-		fresh.setScannedByUserId(actorPublicUuid);
-
-		AttendanceRecord saved;
-		try {
-			saved = recordRepository.saveAndFlush(fresh);
-		}
-		catch (org.springframework.dao.DataIntegrityViolationException e) {
-			AttendanceRecord stored = recordRepository
-					.findBySessionAndStudent(session, student)
-					.orElseThrow(() -> e);
+		CheckInPersistResult persisted = insertCheckInIdempotent(
+				session, student, status, occurredAt, actorPublicUuid);
+		if (persisted.wasIdempotent()) {
 			log.info("[attendance] manual check-in race resolved -- session={} student={} record={}",
 					session.getPublicUuid(), student.getPublicUuid(),
-					stored.getPublicUuid());
-			auditLogger.logManualCheckedIn(stored, true, resolved.opened());
-			return toRecordResponseWithUsers(stored, true);
+					persisted.record().getPublicUuid());
+			auditLogger.logManualCheckedIn(persisted.record(), true, resolved.opened());
+			return toRecordResponseWithUsers(persisted.record(), true);
 		}
 
 		log.info("[attendance] manual check-in created -- session={} student={} status={} record={} sessionOpened={} actor={}",
 				session.getPublicUuid(), student.getPublicUuid(),
-				saved.getStatus(), saved.getPublicUuid(), resolved.opened(),
+				persisted.record().getStatus(), persisted.record().getPublicUuid(), resolved.opened(),
 				actorPublicUuid);
-		auditLogger.logManualCheckedIn(saved, false, resolved.opened());
-		publishRealtime(saved, false);
-		return toRecordResponseWithUsers(saved, false);
+		auditLogger.logManualCheckedIn(persisted.record(), false, resolved.opened());
+		publishRealtime(persisted.record(), false);
+		return toRecordResponseWithUsers(persisted.record(), false);
 	}
 
 	// =====================================================================
@@ -588,35 +515,57 @@ public class AttendanceServiceImpl implements AttendanceService {
 		AttendanceRecordStatus status = computeStatus(
 				request.forcedStatus(), session, occurredAt, currentTenantId);
 
-		AttendanceRecord fresh = new AttendanceRecord();
-		fresh.setSession(session);
-		fresh.setStudent(student);
-		fresh.setStatus(status);
-		fresh.setOccurredAt(occurredAt);
-		fresh.setScannedByUserId(actorPublicUuid);
-
-		AttendanceRecord saved;
-		try {
-			saved = recordRepository.saveAndFlush(fresh);
-		}
-		catch (org.springframework.dao.DataIntegrityViolationException e) {
-			AttendanceRecord stored = recordRepository
-					.findBySessionAndStudent(session, student)
-					.orElseThrow(() -> e);
+		CheckInPersistResult persisted = insertCheckInIdempotent(
+				session, student, status, occurredAt, actorPublicUuid);
+		if (persisted.wasIdempotent()) {
 			log.info("[attendance] scan check-in race resolved -- session={} student={} record={}",
 					session.getPublicUuid(), student.getPublicUuid(),
-					stored.getPublicUuid());
-			auditLogger.logCheckedIn(stored, true);
-			return toRecordResponseWithUsers(stored, true);
+					persisted.record().getPublicUuid());
+			auditLogger.logCheckedIn(persisted.record(), true);
+			return toRecordResponseWithUsers(persisted.record(), true);
 		}
 
 		log.info("[attendance] scan check-in created -- session={} student={} status={} record={} sessionOpened={} actor={}",
 				session.getPublicUuid(), student.getPublicUuid(),
-				saved.getStatus(), saved.getPublicUuid(), resolved.opened(),
+				persisted.record().getStatus(), persisted.record().getPublicUuid(), resolved.opened(),
 				actorPublicUuid);
-		auditLogger.logCheckedIn(saved, false);
-		publishRealtime(saved, false);
-		return toRecordResponseWithUsers(saved, false);
+		auditLogger.logCheckedIn(persisted.record(), false);
+		publishRealtime(persisted.record(), false);
+		return toRecordResponseWithUsers(persisted.record(), false);
+	}
+
+	/**
+	 * Native UPSERT (ON CONFLICT DO NOTHING) for the check-in hot path.
+	 * Avoids DataIntegrityViolationException races under concurrent scans.
+	 */
+	private CheckInPersistResult insertCheckInIdempotent(
+			AttendanceSession session,
+			Student student,
+			AttendanceRecordStatus status,
+			Instant occurredAt,
+			UUID actorPublicUuid) {
+		UUID tenantId = TenantContext.currentRequired();
+		UUID id = UuidV7.create();
+		UUID publicUuid = UUID.randomUUID();
+		int inserted = recordRepository.insertCheckInIgnoreConflict(
+				id,
+				tenantId,
+				publicUuid,
+				session.getId(),
+				student.getId(),
+				status.name(),
+				occurredAt,
+				actorPublicUuid);
+		AttendanceRecord stored = recordRepository
+				.findBySessionAndStudent(session, student)
+				.orElseThrow(() -> new IllegalStateException(
+						"Check-in insert/conflict left no row for session="
+								+ session.getPublicUuid()
+								+ " student=" + student.getPublicUuid()));
+		return new CheckInPersistResult(stored, inserted == 0);
+	}
+
+	private record CheckInPersistResult(AttendanceRecord record, boolean wasIdempotent) {
 	}
 
 	/**
@@ -746,6 +695,28 @@ public class AttendanceServiceImpl implements AttendanceService {
 	private record ResolvedSession(AttendanceSession session, boolean opened) {
 	}
 
+	/**
+	 * Soft-delete ACTIVE sessions for {@code day} that have zero check-in
+	 * records. Used by the end-of-day abandon job — never materializes ABSENT.
+	 *
+	 * @return number of sessions abandoned
+	 */
+	@Transactional
+	public int abandonUnusedSessionsForDay(LocalDate day) {
+		List<AttendanceSession> unused = sessionRepository.findActiveUnusedOn(day);
+		if (unused.isEmpty()) {
+			return 0;
+		}
+		int n = 0;
+		for (AttendanceSession session : unused) {
+			auditLogger.logSessionAbandoned(session, "end_of_day_job");
+			sessionRepository.delete(session);
+			n++;
+		}
+		log.info("[attendance] abandoned {} unused ACTIVE session(s) for day={}", n, day);
+		return n;
+	}
+
 	private AttendanceRecordStatus computeStatus(
 			AttendanceRecordStatus forced,
 			AttendanceSession session,
@@ -851,7 +822,7 @@ public class AttendanceServiceImpl implements AttendanceService {
 
 		out.sort(Comparator.comparing(
 				AttendanceRecordResponse::studentFullName,
-				Comparator.nullsLast(String.CASE_INSENSITIVE_ORDER)));
+				Comparator.nullsLast(java.text.Collator.getInstance(java.util.Locale.forLanguageTag("es")))));
 		return out;
 	}
 
@@ -1269,5 +1240,24 @@ public class AttendanceServiceImpl implements AttendanceService {
 			}
 			return mapper.toListItem(s, c[0], c[1], c[2], c[3]);
 		});
+	}
+
+	@Override
+	@Transactional(readOnly = true)
+	public List<StudentAttendanceHistoryResponse> listStudentAttendanceHistory(
+			UUID studentPublicUuid, LocalDate from, LocalDate to) {
+		Student student = studentRepository.findByPublicUuid(studentPublicUuid)
+				.orElseThrow(() -> new ResourceNotFoundException("Student", studentPublicUuid));
+		Instant fromInstant = from != null
+				? from.atStartOfDay(ZoneOffset.UTC).toInstant() : null;
+		Instant toInstant = to != null
+				? to.plusDays(1).atStartOfDay(ZoneOffset.UTC).toInstant() : null;
+		return recordRepository.findByStudentInRange(student, fromInstant, toInstant).stream()
+				.map(r -> new StudentAttendanceHistoryResponse(
+						r.getPublicUuid(),
+						r.getOccurredAt(),
+						r.getStatus(),
+						r.getNotes()))
+				.toList();
 	}
 }

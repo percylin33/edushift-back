@@ -46,6 +46,8 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.SimpleTransactionStatus;
 
 /**
  * Unit tests for {@link SessionGeneratorService} (Sprint 8 / BE-8.1).
@@ -74,6 +76,7 @@ class SessionGeneratorServiceTest {
     private com.edushift.modules.sessions.learning.service.LearningSessionService learningSessionService;
     private com.edushift.modules.teachers.assignments.repository.TeacherAssignmentRepository teacherAssignmentRepository;
     private com.edushift.modules.ai.rag.RagContextService ragContextService;
+    private com.edushift.modules.sessions.template.service.SessionTemplateService sessionTemplateService;
     private SessionGeneratorService service;
 
     private final UUID tenantId = UUID.fromString("11111111-1111-1111-1111-111111111111");
@@ -96,11 +99,15 @@ class SessionGeneratorServiceTest {
         learningSessionService = mock(com.edushift.modules.sessions.learning.service.LearningSessionService.class);
         teacherAssignmentRepository = mock(com.edushift.modules.teachers.assignments.repository.TeacherAssignmentRepository.class);
         ragContextService = mock(com.edushift.modules.ai.rag.RagContextService.class);
+        sessionTemplateService = mock(com.edushift.modules.sessions.template.service.SessionTemplateService.class);
 
+        PlatformTransactionManager txManager = mock(PlatformTransactionManager.class);
+        when(txManager.getTransaction(any())).thenReturn(new SimpleTransactionStatus());
         service = new SessionGeneratorService(
                 llmClient, promptBuilder, quotaService, generationRepo, currentUser, objectMapper,
                 courseRepository, courseLevelRepository, competencyRepository, capacityRepository,
-                learningSessionService, teacherAssignmentRepository, ragContextService);
+                learningSessionService, teacherAssignmentRepository, ragContextService,
+                sessionTemplateService, txManager);
 
         when(ragContextService.retrieveForCourse(any(), any())).thenReturn(List.of());
 
@@ -109,7 +116,7 @@ class SessionGeneratorServiceTest {
         when(currentUser.currentUserId()).thenReturn(Optional.of(userId));
         when(llmClient.providerId()).thenReturn("mock");
         // Prompt builder returns a stub LlmRequest.
-        when(promptBuilder.build(any(), anyString(), any(), any(), any()))
+        when(promptBuilder.build(any(), anyString(), any(), any(), any(), any()))
                 .thenReturn(new LlmRequest("mock-model", "system", "user", 0.3, 2048, null, null));
     }
 
@@ -128,7 +135,7 @@ class SessionGeneratorServiceTest {
             when(quotaService.verifyCanCall()).thenThrow(new AiDisabledException());
 
             GenerateSessionRequest req = new GenerateSessionRequest(
-                    "Fotosíntesis", courseId, unitId, 45, null, null);
+                    "Fotosíntesis", courseId, unitId, 45, null, null, null);
 
             assertThatThrownBy(() -> service.generateSession(req))
                     .isInstanceOf(AiDisabledException.class);
@@ -144,7 +151,7 @@ class SessionGeneratorServiceTest {
             when(quotaService.verifyCanCall()).thenThrow(new AiQuotaExceededException("daily cap"));
 
             GenerateSessionRequest req = new GenerateSessionRequest(
-                    "Fotosíntesis", courseId, unitId, 45, null, null);
+                    "Fotosíntesis", courseId, unitId, 45, null, null, null);
 
             assertThatThrownBy(() -> service.generateSession(req))
                     .isInstanceOf(AiQuotaExceededException.class);
@@ -165,7 +172,7 @@ class SessionGeneratorServiceTest {
             when(courseRepository.findByPublicUuid(courseId)).thenReturn(Optional.empty());
 
             GenerateSessionRequest req = new GenerateSessionRequest(
-                    "Fotosíntesis", courseId, unitId, 45, null, null);
+                    "Fotosíntesis", courseId, unitId, 45, null, null, null);
 
             assertThatThrownBy(() -> service.generateSession(req))
                     .isInstanceOf(ResourceNotFoundException.class);
@@ -210,7 +217,7 @@ class SessionGeneratorServiceTest {
                     new LlmResponse(llmJson, "mock-model", 200, 350, 1234L));
 
             GenerateSessionRequest req = new GenerateSessionRequest(
-                    "Fotosíntesis", courseId, unitId, 45, null, null);
+                    "Fotosíntesis", courseId, unitId, 45, null, null, null);
 
             SessionGeneratorService.SessionGeneratorResult result = service.generateSession(req);
 
@@ -218,9 +225,9 @@ class SessionGeneratorServiceTest {
             assertThat(result.session().activities()).hasSize(4);
             assertThat(result.session().activities())
                     .extracting(GenerateSessionResponse.Activity::phase)
-                    .contains(GenerateSessionResponse.Activity.Phase.INICIO,
-                              GenerateSessionResponse.Activity.Phase.DESARROLLO,
-                              GenerateSessionResponse.Activity.Phase.CIERRE);
+                    .contains("INICIO",
+                              "DESARROLLO",
+                              "CIERRE");
             assertThat(result.session().evaluationCriteria()).hasSize(2);
             assertThat(result.model()).isEqualTo("mock-model");
             assertThat(result.provider()).isEqualTo("mock");
@@ -296,7 +303,7 @@ class SessionGeneratorServiceTest {
                     new LlmResponse(llmJson, "mock-model", 200, 350, 1234L));
 
             GenerateSessionRequest req = new GenerateSessionRequest(
-                    "Fotosíntesis", courseId, unitId, 45, null, null);
+                    "Fotosíntesis", courseId, unitId, 45, null, null, null);
 
             assertThatThrownBy(() -> service.generateSession(req))
                     .isInstanceOf(AiParseException.class)
@@ -317,7 +324,7 @@ class SessionGeneratorServiceTest {
             when(llmClient.complete(any())).thenThrow(new LlmException("TIMEOUT", "upstream timeout"));
 
             GenerateSessionRequest req = new GenerateSessionRequest(
-                    "Fotosíntesis", courseId, unitId, 45, null, null);
+                    "Fotosíntesis", courseId, unitId, 45, null, null, null);
 
             assertThatThrownBy(() -> service.generateSession(req))
                     .isInstanceOf(LlmException.class)
@@ -376,7 +383,7 @@ class SessionGeneratorServiceTest {
                     new LlmResponse(VALID_LLM_JSON, "mock-model", 200, 350, 1234L));
 
             GenerateSessionRequest req = new GenerateSessionRequest(
-                    "Fotosíntesis", courseId, unitId, 45, null, null);
+                    "Fotosíntesis", courseId, unitId, 45, null, null, null);
 
             SessionGeneratorService.SessionGeneratorResult result = service.generateSession(req);
 
@@ -411,7 +418,7 @@ class SessionGeneratorServiceTest {
                     new LlmResponse(VALID_LLM_JSON, "mock-model", 200, 350, 1234L));
 
             GenerateSessionRequest req = new GenerateSessionRequest(
-                    "Fotosíntesis", courseId, unitId, 45, null, null);
+                    "Fotosíntesis", courseId, unitId, 45, null, null, null);
 
             SessionGeneratorService.SessionGeneratorResult result = service.generateSession(req);
 
@@ -440,7 +447,7 @@ class SessionGeneratorServiceTest {
                     new LlmResponse(VALID_LLM_JSON, "mock-model", 200, 350, 1234L));
 
             GenerateSessionRequest req = new GenerateSessionRequest(
-                    "Fotosíntesis", courseId, unitId, 45, null, null);
+                    "Fotosíntesis", courseId, unitId, 45, null, null, null);
 
             SessionGeneratorService.SessionGeneratorResult result = service.generateSession(req);
 

@@ -65,6 +65,7 @@ import org.springframework.security.core.context.SecurityContextHolder;
 class TimeSlotServiceImplTest {
 
 	@Mock private TimeSlotRepository timeSlotRepository;
+	@Mock private com.edushift.modules.schedule.timeslot.service.ScheduleConflictDetector conflictDetector;
 	@Mock private TeacherAssignmentRepository assignmentRepository;
 	@Mock private TeacherRepository teacherRepository;
 	@Mock private SectionRepository sectionRepository;
@@ -325,7 +326,8 @@ class TimeSlotServiceImplTest {
 
 			service.deleteSlot(slot.getPublicUuid());
 
-			verify(timeSlotRepository).delete(slot);
+			verify(timeSlotRepository).saveAndFlush(slot);
+			assertThat(slot.isDeleted()).isTrue();
 		}
 
 		@Test

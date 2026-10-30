@@ -34,6 +34,7 @@ class TaskMapperTest {
         task.setAttachmentPublicUuid(UUID.randomUUID());
         task.setOwnerUserId(UUID.randomUUID());
         task.setAllowResubmission(true);
+        task.setMaxScore((short) 20);
         task.setCreatedAt(Instant.parse("2026-05-01T10:00:00Z"));
         task.setUpdatedAt(Instant.parse("2026-05-15T10:00:00Z"));
     }
@@ -55,6 +56,9 @@ class TaskMapperTest {
             assertThat(r.attachmentPublicUuid()).isEqualTo(task.getAttachmentPublicUuid());
             assertThat(r.ownerPublicUuid()).isEqualTo(task.getOwnerUserId());
             assertThat(r.allowResubmission()).isTrue();
+            assertThat(r.maxScore()).isEqualTo(20);
+            assertThat(r.submissionsCount()).isEqualTo(0);
+            assertThat(r.gradedSubmissionsCount()).isEqualTo(0);
             assertThat(r.createdAt()).isEqualTo(task.getCreatedAt());
             assertThat(r.updatedAt()).isEqualTo(task.getUpdatedAt());
         }
@@ -83,6 +87,9 @@ class TaskMapperTest {
             assertThat(s.dueAt()).isEqualTo(task.getDueAt());
             assertThat(s.hasAttachment()).isTrue();
             assertThat(s.ownerPublicUuid()).isEqualTo(task.getOwnerUserId());
+            assertThat(s.maxScore()).isEqualTo(20);
+            assertThat(s.submissionsCount()).isEqualTo(0);
+            assertThat(s.gradedSubmissionsCount()).isEqualTo(0);
             assertThat(s.createdAt()).isEqualTo(task.getCreatedAt());
         }
 

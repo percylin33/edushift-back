@@ -84,7 +84,7 @@ public class TotpService {
 		String issuer = (tenantName == null || tenantName.isBlank())
 				? ISSUER
 				: ISSUER + " (" + tenantName + ")";
-		return GoogleAuthenticatorQRGenerator.getOtpAuthURL(issuer, email, key);
+		return GoogleAuthenticatorQRGenerator.getOtpAuthTotpURL(issuer, email, key);
 	}
 
 	/**

@@ -1,5 +1,7 @@
 package com.edushift.modules.academic.competency.dto;
 
+import com.edushift.modules.academic.competency.entity.CompetencyOrigin;
+import com.edushift.modules.academic.competency.entity.CurriculumSourceContentStatus;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
@@ -20,8 +22,22 @@ public record CompetencyResponse(
 		Boolean isActive,
 		List<CapacityRef> capacities,
 		Instant createdAt,
-		Instant updatedAt
+		Instant updatedAt,
+		CompetencyOrigin origin,
+		UUID createdBy,
+		String sourceCatalogVersion,
+		String sourceCatalogCode,
+		String sourceLevelCode,
+		String sourceCycleCodes,
+		CurriculumSourceContentStatus sourceContentStatus
 ) {
+	/** Backward-compatible constructor for older API-focused tests and callers. */
+	public CompetencyResponse(UUID publicUuid, CourseRef course, String code, String name,
+			String description, Integer displayOrder, Boolean isActive, List<CapacityRef> capacities,
+			Instant createdAt, Instant updatedAt, CompetencyOrigin origin, UUID createdBy) {
+		this(publicUuid, course, code, name, description, displayOrder, isActive, capacities,
+				createdAt, updatedAt, origin, createdBy, null, null, null, null, null);
+	}
 
 	public record CourseRef(
 			UUID publicUuid,
@@ -35,7 +51,14 @@ public record CompetencyResponse(
 			String code,
 			String name,
 			Integer displayOrder,
-			Boolean isActive
+			Boolean isActive,
+			String sourceCatalogVersion,
+			String sourceCatalogCode,
+			CurriculumSourceContentStatus sourceContentStatus
 	) {
+		public CapacityRef(UUID publicUuid, String code, String name,
+				Integer displayOrder, Boolean isActive) {
+			this(publicUuid, code, name, displayOrder, isActive, null, null, null);
+		}
 	}
 }

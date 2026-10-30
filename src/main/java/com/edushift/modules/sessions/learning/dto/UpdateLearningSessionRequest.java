@@ -47,20 +47,52 @@ public record UpdateLearningSessionRequest(
 
 		List<UUID> competencyUuids,
 
-		List<UUID> capacityUuids
+		List<UUID> capacityUuids,
+
+		/** {@code null} leaves the flag unchanged. Author or admin only. */
+		Boolean sharedWithGrade,
+
+		/**
+		 * When non-null, replaces the session worksheets.
+		 * Null leaves existing sheets untouched. Not a plan change.
+		 */
+		List<ApplicationSheetWriteRequest> applicationSheets
 ) {
+
+	public UpdateLearningSessionRequest(
+			UUID unitUuid,
+			String title,
+			String objective,
+			LocalDate scheduledDate,
+			Integer durationMinutes,
+			SessionContentDto content,
+			List<UUID> competencyUuids,
+			List<UUID> capacityUuids,
+			Boolean sharedWithGrade) {
+		this(unitUuid, title, objective, scheduledDate, durationMinutes, content,
+				competencyUuids, capacityUuids, sharedWithGrade, null);
+	}
 
 	/**
 	 * @return true when every field is null (no merge happens).
 	 */
 	public boolean isEmpty() {
-		return unitUuid == null
-				&& title == null
-				&& objective == null
-				&& scheduledDate == null
-				&& durationMinutes == null
-				&& content == null
-				&& competencyUuids == null
-				&& capacityUuids == null;
+		return !hasPlanChanges() && sharedWithGrade == null;
+	}
+
+	/**
+	 * @return true when the patch changes the pedagogical plan or the
+	 * schedule. The share flag is separate so a completed session can
+	 * still be marked shareable.
+	 */
+	public boolean hasPlanChanges() {
+		return unitUuid != null
+				|| title != null
+				|| objective != null
+				|| scheduledDate != null
+				|| durationMinutes != null
+				|| content != null
+				|| competencyUuids != null
+				|| capacityUuids != null;
 	}
 }

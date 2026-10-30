@@ -34,7 +34,7 @@ class AuthServiceInterfaceTest {
     void surface() throws Exception {
         Class<?>[] paramTypes = new Class<?>[] {LoginRequest.class, String.class};
         Method login = AuthService.class.getMethod("login", paramTypes);
-        assertThat(login.getReturnType()).isEqualTo(AuthResponse.class);
+        assertThat(login.getReturnType()).isEqualTo(AuthService.LoginResult.class);
 
         Method refresh = AuthService.class.getMethod("refresh", String.class);
         assertThat(refresh.getReturnType()).isEqualTo(AuthResponse.class);

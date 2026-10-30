@@ -19,7 +19,9 @@ import java.util.UUID;
  *                          today and the teacher is expected to
  *                          open one).
  * @param sectionPublicUuid public UUID of the section.
- * @param sectionName       section name.
+ * @param sectionName       section name (e.g. {@code "A"}).
+ * @param gradeName         grade name (e.g. {@code "1ro Primaria"}). May be
+ *                          {@code null} if the grade row was removed.
  * @param occurredOn         session date.
  * @param slot               time-of-day slot.
  * @param status             session status (typically {@code PENDING}
@@ -37,6 +39,7 @@ public record MySessionItem(
 		UUID sessionPublicUuid,
 		UUID sectionPublicUuid,
 		String sectionName,
+		String gradeName,
 		LocalDate occurredOn,
 		AttendanceSessionSlot slot,
 		String status,

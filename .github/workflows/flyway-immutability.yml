@@ -1,0 +1,29 @@
+name: Flyway migration immutability
+
+on:
+  pull_request:
+    paths:
+      - 'src/main/resources/db/migration/V*.sql'
+      - '.github/workflows/flyway-immutability.yml'
+      - 'scripts/check-flyway-immutability.mjs'
+      - 'scripts/flyway-immutable-baseline.json'
+
+permissions:
+  contents: read
+
+jobs:
+  check-versioned-migrations:
+    name: Reject edits to existing migrations
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout full history
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+
+      - name: Check migration immutability
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: node scripts/check-flyway-immutability.mjs "$BASE_SHA" "$HEAD_SHA"

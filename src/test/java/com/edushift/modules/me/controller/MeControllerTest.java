@@ -57,8 +57,15 @@ class MeControllerTest extends AbstractControllerTest {
     }
 
     @Test
+    void gradesSummary_returnsOk_whenAuthenticated() throws Exception {
+        given(meAcademicService.summarizeMyGrades(null)).willReturn(null);
+        mockMvc.perform(get("/v1/me/grades/summary").with(auth(student())))
+                .andExpect(status().isOk());
+    }
+
+    @Test
     void attendance_returnsOk_whenAuthenticated() throws Exception {
-        given(meSelfService.listMyAttendance()).willReturn(List.of());
+        given(meSelfService.listMyAttendance(null, null)).willReturn(List.of());
         mockMvc.perform(get("/v1/me/attendance").with(auth(student())))
                 .andExpect(status().isOk());
     }

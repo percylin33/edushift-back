@@ -113,7 +113,7 @@ class TeacherInviteAcceptFlowIT extends IntegrationTest {
 				.isNotNull();
 
 		User linkedUser = TenantContext.runAs(tenant.getId(),
-				() -> tx().execute(s -> userRepository.findById(reloaded.getUserId())
+				() -> tx().execute(s -> userRepository.findByPublicUuid(reloaded.getUserId())
 						.orElseThrow()));
 		assertThat(linkedUser.hasRole(UserRole.TEACHER)).isTrue();
 		assertThat(linkedUser.getEmail()).isEqualTo("ada-flow@acme.test");
@@ -146,7 +146,7 @@ class TeacherInviteAcceptFlowIT extends IntegrationTest {
 			t.setFirstName("Already");
 			t.setLastName("Linked");
 			t.setEmail("already-linked@x.test");
-			t.setUserId(otherUser.getId());
+			t.setUserId(otherUser.getPublicUuid());
 			t.setEmploymentStatus(EmploymentStatus.ACTIVE);
 			return teacherRepository.saveAndFlush(t);
 		}));
@@ -177,7 +177,7 @@ class TeacherInviteAcceptFlowIT extends IntegrationTest {
 		ResponseEntity<String> response = rest.exchange(AUTH_BASE + "/login", HttpMethod.POST,
 				new HttpEntity<>(body, headers), String.class);
 		assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
-		return objectMapper.readValue(response.getBody(), AuthResponse.class);
+		return readSessionResponse(objectMapper, response);
 	}
 
 	private ResponseEntity<String> doPost(String path, String bearer, String body) {
@@ -190,7 +190,7 @@ class TeacherInviteAcceptFlowIT extends IntegrationTest {
 	}
 
 	private Tenant createTenant(String slugPrefix) {
-		Tenant t = new Tenant();
+		Tenant t = newTestTenant();
 		t.setSlug(slugPrefix + UUID.randomUUID().toString().substring(0, 8));
 		t.setName("IT Tenant " + t.getSlug());
 		t.setStatus(TenantStatus.ACTIVE);

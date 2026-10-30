@@ -4,6 +4,7 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 import com.edushift.modules.tenants.entity.Tenant;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -39,6 +40,9 @@ public record AdminTenantDetail(
 		Integer maxStudents,
 		Integer maxTeachers,
 		Integer maxStorageMb,
+		Long storageUsedBytes,
+		List<String> planFeatures,
+		Instant metricsUpdatedAt,
 		Instant createdAt,
 		Instant updatedAt
 ) {
@@ -76,6 +80,9 @@ public record AdminTenantDetail(
 				null,
 				t.getMaxStudents(),
 				t.getMaxTeachers(),
+				null,
+				null,
+				null,
 				null,
 				t.getCreatedAt(),
 				t.getUpdatedAt());

@@ -41,6 +41,9 @@ public interface MaterialService {
 	 */
 	Page<MaterialSummary> listBySection(UUID sectionPublicUuid, Pageable pageable);
 
+	Page<MaterialSummary> listBySection(
+			UUID sectionPublicUuid, UUID assignmentPublicUuid, Pageable pageable);
+
 	/** Fetch a single material. Anti-enumeration: 404 on cross-tenant. */
 	MaterialResponse getByPublicUuid(UUID publicUuid);
 

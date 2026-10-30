@@ -80,7 +80,7 @@ class CourseControllerTest {
 	private CourseResponse stubResponse(String code, String name) {
 		return new CourseResponse(
 				UUID.randomUUID(), code, name, null, 4, 5, true,
-				List.of(new CourseResponse.CourseLevelRef(
+				null, null, List.of(new CourseResponse.CourseLevelRef(
 						UUID.randomUUID(), "PRIMARIA", "Primaria", 2)),
 				Instant.parse("2026-01-01T00:00:00Z"),
 				Instant.parse("2026-01-01T00:00:00Z"));
@@ -89,7 +89,7 @@ class CourseControllerTest {
 	private CourseListItem stubItem(String code, String name) {
 		return new CourseListItem(
 				UUID.randomUUID(), code, name, 4, 5, true,
-				List.of(new CourseResponse.CourseLevelRef(
+				null, null, List.of(new CourseResponse.CourseLevelRef(
 						UUID.randomUUID(), "PRIMARIA", "Primaria", 2)));
 	}
 
@@ -157,8 +157,7 @@ class CourseControllerTest {
 							.with(authentication(adminAuth()))
 							.contentType(MediaType.APPLICATION_JSON)
 							.content(objectMapper.writeValueAsString(new CreateCourseRequest(
-									"MAT", "Matematica", null, 4, 5, true,
-									List.of(UUID.randomUUID())))))
+									"MAT", "Matematica", null, 4, 5, true, null, null, List.of(UUID.randomUUID())))))
 					.andExpect(status().isCreated())
 					.andExpect(jsonPath("$.data.code").value("MAT"));
 		}
@@ -171,7 +170,7 @@ class CourseControllerTest {
 							.with(authentication(adminAuth()))
 							.contentType(MediaType.APPLICATION_JSON)
 							.content(objectMapper.writeValueAsString(new CreateCourseRequest(
-									"MAT", "Matematica", null, null, null, null, List.of()))))
+									"MAT", "Matematica", null, null, null, null, null, null, List.of()))))
 					.andExpect(status().isBadRequest());
 		}
 
@@ -183,8 +182,7 @@ class CourseControllerTest {
 							.with(authentication(adminAuth()))
 							.contentType(MediaType.APPLICATION_JSON)
 							.content(objectMapper.writeValueAsString(new CreateCourseRequest(
-									"bad code!", "Matematica", null, null, null, null,
-									List.of(UUID.randomUUID())))))
+									"bad code!", "Matematica", null, null, null, null, null, null, List.of(UUID.randomUUID())))))
 					.andExpect(status().isBadRequest());
 		}
 
@@ -199,8 +197,7 @@ class CourseControllerTest {
 							.with(authentication(adminAuth()))
 							.contentType(MediaType.APPLICATION_JSON)
 							.content(objectMapper.writeValueAsString(new CreateCourseRequest(
-									"MAT", "Matematica", null, null, null, null,
-									List.of(UUID.randomUUID())))))
+									"MAT", "Matematica", null, null, null, null, null, null, List.of(UUID.randomUUID())))))
 					.andExpect(status().isConflict())
 					.andExpect(jsonPath("$.errors[0].code").value("COURSE_CODE_TAKEN"));
 		}
@@ -217,8 +214,7 @@ class CourseControllerTest {
 							.with(authentication(adminAuth()))
 							.contentType(MediaType.APPLICATION_JSON)
 							.content(objectMapper.writeValueAsString(new CreateCourseRequest(
-									"MAT", "Matematica", null, null, null, null,
-									List.of(UUID.randomUUID())))))
+									"MAT", "Matematica", null, null, null, null, null, null, List.of(UUID.randomUUID())))))
 					.andExpect(status().isUnprocessableEntity())
 					.andExpect(jsonPath("$.errors[0].code").value("COURSE_NEEDS_AT_LEAST_ONE_LEVEL"));
 		}

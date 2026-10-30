@@ -18,6 +18,8 @@ import com.edushift.modules.materials.exception.SectionNotFoundException;
 import com.edushift.modules.materials.mapper.MaterialMapper;
 import com.edushift.modules.materials.repository.MaterialRepository;
 import com.edushift.modules.materials.service.MaterialService;
+import com.edushift.modules.teachers.assignments.entity.TeacherAssignment;
+import com.edushift.modules.teachers.assignments.support.LmsAssignmentBinder;
 import com.edushift.shared.security.CurrentUserProvider;
 import java.net.MalformedURLException;
 import java.net.URL;
@@ -52,6 +54,7 @@ public class MaterialServiceImpl implements MaterialService {
 	private final FileObjectService fileObjectService;
 	private final MaterialMapper materialMapper;
 	private final CurrentUserProvider currentUserProvider;
+	private final LmsAssignmentBinder lmsAssignmentBinder;
 
 	@Override
 	@Transactional
@@ -61,13 +64,14 @@ public class MaterialServiceImpl implements MaterialService {
 			UUID ownerUserId) {
 		Section section = requireSection(sectionPublicUuid);
 		UUID effectiveOwner = requireOwner(ownerUserId);
+		TeacherAssignment assignment = lmsAssignmentBinder.requireForCreate(
+				request.teacherAssignmentPublicUuid(), section);
 
-		// Store the binary via the files shared kernel. The kernel
-		// validates size + MIME allow-list and persists the metadata.
 		FileObject stored = fileObjectService.store(currentTenant(), "materials", file);
 
 		Material entity = new Material();
 		entity.setSection(section);
+		entity.setTeacherAssignment(assignment);
 		entity.setFilePublicUuid(stored.getPublicUuid());
 		entity.setTitle(request.title());
 		entity.setDescription(request.description());
@@ -76,9 +80,6 @@ public class MaterialServiceImpl implements MaterialService {
 		entity.setOwnerUserId(effectiveOwner);
 		Material saved = materialRepository.save(entity);
 
-		// Reference count bookkeeping: the material is the first
-		// consumer of this file. The cascade (DELETE material) calls
-		// releaseReference via the service below.
 		fileObjectService.acquireReference(stored.getPublicUuid());
 
 		String url = String.format("/api/v1/files/%s/download", stored.getPublicUuid());
@@ -92,14 +93,13 @@ public class MaterialServiceImpl implements MaterialService {
 			UUID ownerUserId) {
 		Section section = requireSection(sectionPublicUuid);
 		UUID effectiveOwner = requireOwner(ownerUserId);
+		TeacherAssignment assignment = lmsAssignmentBinder.requireForCreate(
+				request.teacherAssignmentPublicUuid(), section);
 
 		if (request.kind() != MaterialKind.VIDEO_LINK) {
 			throw new InconsistentPayloadException(
 					"createLink requires kind=VIDEO_LINK; got " + request.kind());
 		}
-		// URL must be parseable. JDK does the heavy lifting; the
-		// MalformedURLException becomes a 400 INCONSISTENT_PAYLOAD so
-		// the FE surfaces a clean error.
 		try {
 			new URL(request.externalUrl());
 		}
@@ -110,6 +110,7 @@ public class MaterialServiceImpl implements MaterialService {
 
 		Material entity = new Material();
 		entity.setSection(section);
+		entity.setTeacherAssignment(assignment);
 		entity.setFilePublicUuid(null);
 		entity.setTitle(request.title());
 		entity.setDescription(request.description());
@@ -123,14 +124,24 @@ public class MaterialServiceImpl implements MaterialService {
 	@Override
 	@Transactional(readOnly = true)
 	public Page<MaterialSummary> listBySection(UUID sectionPublicUuid, Pageable pageable) {
-		// Tenant-safe listing: if the section is not visible to the
-		// current tenant (anti-enumeration), return an empty page
-		// instead of 404. The repository's @TenantId-filtered query
-		// already guarantees that even if a stale Section reference
-		// somehow leaked, no cross-tenant rows would be returned.
+		return listBySection(sectionPublicUuid, null, pageable);
+	}
+
+	@Override
+	@Transactional(readOnly = true)
+	public Page<MaterialSummary> listBySection(
+			UUID sectionPublicUuid, UUID assignmentPublicUuid, Pageable pageable) {
 		Optional<Section> section = sectionRepository.findByPublicUuid(sectionPublicUuid);
 		if (section.isEmpty()) {
 			return Page.empty(pageable);
+		}
+		if (assignmentPublicUuid != null) {
+			TeacherAssignment assignment = lmsAssignmentBinder.requireForFilter(
+					assignmentPublicUuid, section.get());
+			return materialRepository
+					.findAllBySectionAndTeacherAssignmentOrderByCreatedAtDesc(
+							section.get(), assignment, pageable)
+					.map(materialMapper::toSummary);
 		}
 		return materialRepository
 				.findAllBySectionOrderByCreatedAtDesc(section.get(), pageable)

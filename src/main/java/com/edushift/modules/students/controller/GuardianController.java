@@ -33,7 +33,7 @@ public class GuardianController {
 
 	@GetMapping("/by-document")
 	@SecurityRequirement(name = "bearerAuth")
-	@PreAuthorize("hasRole('TENANT_ADMIN')")
+	@PreAuthorize("hasRole('TENANT_ADMIN') or hasAuthority('GUARDIANS:READ')")
 	@Operation(
 			summary = "Lookup guardian by document (TENANT_ADMIN)",
 			description = "Returns the guardian profile for pre-filling the add-guardian "

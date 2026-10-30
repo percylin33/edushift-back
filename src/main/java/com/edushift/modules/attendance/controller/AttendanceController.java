@@ -144,7 +144,7 @@ public class AttendanceController {
 			consumes = MediaType.APPLICATION_JSON_VALUE,
 			produces = MediaType.APPLICATION_JSON_VALUE)
 	@SecurityRequirement(name = "bearerAuth")
-	@PreAuthorize("hasAnyRole('TENANT_ADMIN','TEACHER')")
+	@PreAuthorize("hasAnyRole('TENANT_ADMIN','TEACHER') or hasAuthority('ATTENDANCE:REGISTER')")
 	@Operation(summary = "Open an attendance session for a section",
 			description = "Idempotent on (sectionPublicUuid, "
 					+ "occurredOn, slot): re-opening returns the same "
@@ -163,7 +163,7 @@ public class AttendanceController {
 	@PatchMapping(value = "/attendance/sessions/{publicUuid}/close",
 			produces = MediaType.APPLICATION_JSON_VALUE)
 	@SecurityRequirement(name = "bearerAuth")
-	@PreAuthorize("hasAnyRole('TENANT_ADMIN','TEACHER')")
+	@PreAuthorize("hasAnyRole('TENANT_ADMIN','TEACHER') or hasAuthority('ATTENDANCE:REGISTER')")
 	@Operation(summary = "Close an attendance session",
 			description = "Transitions the session to CLOSED, "
 					+ "materialises ABSENT records for unscanned "
@@ -180,7 +180,7 @@ public class AttendanceController {
 	@GetMapping(value = "/attendance/sessions",
 			produces = MediaType.APPLICATION_JSON_VALUE)
 	@SecurityRequirement(name = "bearerAuth")
-	@PreAuthorize("hasAnyRole('TENANT_ADMIN','TEACHER')")
+	@PreAuthorize("hasAnyRole('TENANT_ADMIN','TEACHER') or hasAuthority('ATTENDANCE:READ')")
 	@Operation(summary = "List attendance sessions (tenant-scoped, paginated)",
 			description = "Drives the /attendance/sessions list page (FE-6.2). "
 					+ "All filters are optional and AND-combined: a single day "
@@ -221,7 +221,7 @@ public class AttendanceController {
 			consumes = MediaType.APPLICATION_JSON_VALUE,
 			produces = MediaType.APPLICATION_JSON_VALUE)
 	@SecurityRequirement(name = "bearerAuth")
-	@PreAuthorize("hasAnyRole('TENANT_ADMIN','TEACHER')")
+	@PreAuthorize("hasAnyRole('TENANT_ADMIN','TEACHER') or hasAuthority('ATTENDANCE:REGISTER')")
 	@Operation(summary = "Register a check-in scan",
 			description = "Validates the QR JWT (HS256, typ=attendance), "
 					+ "asserts tenant + enrollment + session ACTIVE, "
@@ -254,7 +254,7 @@ public class AttendanceController {
 			consumes = MediaType.APPLICATION_JSON_VALUE,
 			produces = MediaType.APPLICATION_JSON_VALUE)
 	@SecurityRequirement(name = "bearerAuth")
-	@PreAuthorize("hasAnyRole('TENANT_ADMIN','TEACHER')")
+	@PreAuthorize("hasAnyRole('TENANT_ADMIN','TEACHER') or hasAuthority('ATTENDANCE:REGISTER')")
 	@Operation(summary = "Session-less QR check-in (auto-resolves session)",
 			description = "Used by the scanner page (BE-6.8.b) when no "
 					+ "attendance session is pre-opened — the canonical "
@@ -284,7 +284,7 @@ public class AttendanceController {
 			consumes = MediaType.APPLICATION_JSON_VALUE,
 			produces = MediaType.APPLICATION_JSON_VALUE)
 	@SecurityRequirement(name = "bearerAuth")
-	@PreAuthorize("hasAnyRole('TENANT_ADMIN','TEACHER')")
+	@PreAuthorize("hasAnyRole('TENANT_ADMIN','TEACHER') or hasAuthority('ATTENDANCE:REGISTER')")
 	@Operation(summary = "Manual check-in by studentPublicUuid (no QR)",
 			description = "Used by the 'auxiliar en la entrada del colegio' "
 					+ "flow when the student has no QR card on hand. The "
@@ -315,7 +315,7 @@ public class AttendanceController {
 	@GetMapping(value = "/attendance/sessions/{publicUuid}/records",
 			produces = MediaType.APPLICATION_JSON_VALUE)
 	@SecurityRequirement(name = "bearerAuth")
-	@PreAuthorize("hasAnyRole('TENANT_ADMIN','TEACHER')")
+	@PreAuthorize("hasAnyRole('TENANT_ADMIN','TEACHER') or hasAuthority('ATTENDANCE:READ')")
 	@Operation(summary = "List the roster of a session",
 			description = "One row per enrolled student. ACTIVE "
 					+ "sessions emit virtual rows with status=null for "
@@ -331,7 +331,7 @@ public class AttendanceController {
 			produces = MediaType.APPLICATION_JSON_VALUE)
 	@ResponseStatus(HttpStatus.OK)
 	@SecurityRequirement(name = "bearerAuth")
-	@PreAuthorize("hasAnyRole('TENANT_ADMIN','TEACHER')")
+	@PreAuthorize("hasAnyRole('TENANT_ADMIN','TEACHER') or hasAuthority('ATTENDANCE:CORRECT')")
 	@Operation(summary = "Manually edit a record's status / notes",
 			description = "Patch semantics — non-null fields replace, "
 					+ "null fields are preserved. TEACHER edits are "
@@ -406,7 +406,7 @@ public class AttendanceController {
 	@GetMapping(value = "/attendance/sessions/{publicUuid}/events",
 			produces = MediaType.TEXT_EVENT_STREAM_VALUE)
 	@SecurityRequirement(name = "bearerAuth")
-	@PreAuthorize("hasAnyRole('TENANT_ADMIN','TEACHER')")
+	@PreAuthorize("hasAnyRole('TENANT_ADMIN','TEACHER') or hasAuthority('ATTENDANCE:READ')")
 	@Operation(summary = "Stream live attendance events for one session",
 			description = "Server-Sent Events. Each new attendance "
 					+ "record (checkIn / manualCheckIn / scanCheckIn) emits a "

@@ -3,7 +3,11 @@ package com.edushift.modules.students.listener;
 import com.edushift.modules.students.entity.Guardian;
 import com.edushift.modules.students.repository.GuardianRepository;
 import com.edushift.modules.students.service.impl.StudentGuardianServiceImpl;
+import com.edushift.modules.payments.service.SubscriptionService;
 import com.edushift.modules.users.events.InvitationAcceptedEvent;
+import com.edushift.shared.exception.BusinessException;
+import com.edushift.shared.exception.ConflictException;
+import com.edushift.shared.exception.ResourceNotFoundException;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -13,7 +17,8 @@ import org.springframework.stereotype.Component;
 /**
  * Links a freshly-created PARENT user to its originating Guardian when
  * the invitation carried {@code metadata.guardianId}. One Guardian, N
- * children: the listener does not touch {@code student_guardians}.
+ * children: the listener does not touch {@code student_guardians}. A stale
+ * profile reference aborts acceptance and rolls back the account creation.
  */
 @Slf4j
 @Component
@@ -21,6 +26,7 @@ import org.springframework.stereotype.Component;
 public class GuardianInvitationListener {
 
 	private final GuardianRepository guardianRepository;
+	private final SubscriptionService subscriptionService;
 
 	@EventListener
 	public void onInvitationAccepted(InvitationAcceptedEvent event) {
@@ -31,27 +37,23 @@ public class GuardianInvitationListener {
 
 		UUID guardianInternalId = parseUuid(raw);
 		if (guardianInternalId == null) {
-			log.warn("[guardians.invitations] ignored event {}: bad guardianId metadata={}",
-					event.invitationPublicUuid(), raw);
-			return;
+			throw new BusinessException("PROFILE_INVITATION_INVALID",
+					"The guardian invitation contains invalid profile metadata");
 		}
 
 		Guardian guardian = guardianRepository.findById(guardianInternalId).orElse(null);
 		if (guardian == null) {
-			log.warn("[guardians.invitations] event {} carried guardianId={} but no Guardian row found",
-					event.invitationPublicUuid(), guardianInternalId);
-			return;
+			throw new ResourceNotFoundException("Guardian", guardianInternalId);
 		}
 
 		if (guardian.getUserId() != null) {
-			log.warn("[guardians.invitations] event {}: guardian {} already linked to user {}; not overwriting with {}",
-					event.invitationPublicUuid(), guardian.getPublicUuid(),
-					guardian.getUserId(), event.userPublicUuid());
-			return;
+			throw new ConflictException("GUARDIAN_ALREADY_HAS_USER",
+					"The guardian was linked to another account before this invitation was accepted");
 		}
 
 		guardian.setUserId(event.userPublicUuid());
 		guardianRepository.save(guardian);
+		subscriptionService.synchronizeGuardianForBillingRules(guardian.getId());
 		log.info("[guardians.invitations] linked guardian={} to user={} via invitation={}",
 				guardian.getPublicUuid(), event.userPublicUuid(),
 				event.invitationPublicUuid());

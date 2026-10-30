@@ -5,8 +5,8 @@ import java.util.UUID;
 
 /**
  * Payload of {@code POST /v1/students/{student}/guardians/{g}/link-user}.
- * Rescue path: an admin invited a PARENT from Usuarios and now binds
- * that User to the guardian ficha.
+ * Links an existing account from the same tenant to the guardian ficha.
+ * The {@code PARENT} role is granted atomically with the profile link.
  */
 public record LinkGuardianUserRequest(
 		@NotNull(message = "userPublicUuid is required")

@@ -35,7 +35,7 @@ import lombok.Setter;
 @NoArgsConstructor
 public class Invoice extends TenantAwareEntity {
 
-    public enum Status { PENDING, PAID, OVERDUE, CANCELLED, REFUNDED }
+    public enum Status { PENDING, PENDING_REVIEW, PAID, OVERDUE, CANCELLED, REFUNDED }
 
     @Column(name = "public_uuid", nullable = false, updatable = false, unique = true)
     private UUID publicUuid;
@@ -46,8 +46,14 @@ public class Invoice extends TenantAwareEntity {
     @Column(name = "student_id", nullable = false)
     private UUID studentId;
 
-    @Column(name = "guardian_user_id", nullable = false)
+    @Column(name = "guardian_user_id")
     private UUID guardianUserId;
+
+    @Column(name = "guardian_public_uuid")
+    private UUID guardianPublicUuid;
+
+    @Column(name = "academic_year_public_uuid")
+    private UUID academicYearPublicUuid;
 
     /** Unique per tenant. Cron-derived: {@code "sub:<uuid>:<yyyy-MM>"}. */
     @Column(name = "idempotency_key", nullable = false, length = 120)
@@ -71,8 +77,12 @@ public class Invoice extends TenantAwareEntity {
     @Column(name = "total_cents", nullable = false)
     private long totalCents = 0;
 
+    /** Reservation money already transferred to this receivable. */
+    @Column(name = "advance_applied_cents", nullable = false)
+    private long advanceAppliedCents = 0;
+
     @Enumerated(EnumType.STRING)
-    @Column(name = "status", nullable = false, length = 15)
+    @Column(name = "status", nullable = false, length = 20)
     private Status status = Status.PENDING;
 
     @Column(name = "issued_at", nullable = false)
@@ -86,6 +96,34 @@ public class Invoice extends TenantAwareEntity {
 
     @Column(name = "notes")
     private String notes;
+
+    /** Soft-FK to {@code lms_file_objects.public_uuid} (parent voucher). */
+    @Column(name = "evidence_file_public_uuid")
+    private UUID evidenceFilePublicUuid;
+
+    @Column(name = "evidence_submitted_at")
+    private Instant evidenceSubmittedAt;
+
+    @Column(name = "evidence_notes")
+    private String evidenceNotes;
+
+    @Column(name = "evidence_rejection_reason")
+    private String evidenceRejectionReason;
+
+    /** Late-fee amount already applied (centavos). */
+    @Column(name = "mora_cents", nullable = false)
+    private long moraCents = 0;
+
+    @Column(name = "mora_applied_at")
+    private Instant moraAppliedAt;
+
+    @Column(name = "mora_exempt", nullable = false)
+    private boolean moraExempt = false;
+
+    public long getBalanceCents() {
+		if (status == Status.PAID) return 0;
+        return Math.max(0, totalCents - advanceAppliedCents);
+    }
 
     @PrePersist
     private void onCreate() {

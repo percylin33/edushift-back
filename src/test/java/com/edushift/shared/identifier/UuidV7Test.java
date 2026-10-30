@@ -64,7 +64,7 @@ class UuidV7Test {
     }
 
     @Test
-    @DisplayName("1000 generated UUIDs are sortable by timestamp (monotonically increasing)")
+    @DisplayName("UUID ordering preserves timestamps; random bits within one millisecond have no creation order")
     void generatedUuidsAreSortableByTimestamp() {
         var uuids = new ArrayList<UUID>(1000);
         for (int i = 0; i < 1000; i++) {
@@ -74,7 +74,7 @@ class UuidV7Test {
         var sorted = new ArrayList<>(uuids);
         sorted.sort(Comparator.naturalOrder());
 
-        assertThat(sorted).containsExactlyElementsOf(uuids);
+        assertThat(sorted.stream().map(UuidV7::extractTimestamp).toList()).containsExactlyElementsOf(uuids.stream().map(UuidV7::extractTimestamp).toList());
     }
 
     @Test

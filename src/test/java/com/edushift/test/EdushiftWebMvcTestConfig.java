@@ -48,8 +48,15 @@ import static org.mockito.Mockito.mock;
  * {@code @WebMvcSlice} meta-annotation, once present).</p>
  */
 @TestConfiguration
-@Import({RateLimitConfiguration.class, WebConfiguration.class})
+@Import({RateLimitConfiguration.class, WebConfiguration.class,
+		com.edushift.modules.auth.controller.CookieHelper.class})
 public class EdushiftWebMvcTestConfig {
+
+	@Bean
+	com.edushift.infrastructure.multitenancy.TenantHostResolver tenantHostResolver() {
+		return new com.edushift.infrastructure.multitenancy.TenantHostResolver(
+				mock(com.edushift.modules.tenants.repository.TenantRepository.class), "edushift.pe");
+	}
 
 	/**
 	 * Test-scope {@link CurrentUserProvider}. See class javadoc.
@@ -100,6 +107,15 @@ public class EdushiftWebMvcTestConfig {
 	@Bean
 	com.edushift.modules.auth.service.GoogleAuthService googleAuthService() {
 		return mock(com.edushift.modules.auth.service.GoogleAuthService.class);
+	}
+
+	/**
+	 * Stand-in {@code FirstLoginOnboardingService} (CRED-7). Avoids pulling
+	 * Student/Guardian repositories into the auth controller slice.
+	 */
+	@Bean
+	com.edushift.modules.auth.service.FirstLoginOnboardingService firstLoginOnboardingService() {
+		return mock(com.edushift.modules.auth.service.FirstLoginOnboardingService.class);
 	}
 
 	/**
@@ -159,6 +175,34 @@ public class EdushiftWebMvcTestConfig {
 	@Bean
 	com.edushift.modules.tenants.repository.TenantRepository tenantRepository() {
 		return mock(com.edushift.modules.tenants.repository.TenantRepository.class);
+	}
+
+	/**
+	 * The security filter rechecks the JWT user on each request. MVC slices do
+	 * not load JPA repositories, so provide a stand-in for their filter chain.
+	 */
+	@Bean
+	com.edushift.modules.auth.repository.UserRepository userRepository() {
+		return mock(com.edushift.modules.auth.repository.UserRepository.class);
+	}
+
+	/**
+	 * Stand-in {@code TenantStatusCache}. {@code JwtAuthenticationFilter}
+	 * checks tenant lifecycle (ACTIVE / SUSPENDED) on every request; the
+	 * real cache pulls Redis + TenantRepository — too heavy for a slice.
+	 */
+	@Bean
+	com.edushift.modules.tenants.service.TenantStatusCache tenantStatusCache() {
+		return mock(com.edushift.modules.tenants.service.TenantStatusCache.class);
+	}
+
+	/**
+	 * Stand-in {@code PaymentAccessService}. {@code PaymentLmsAccessFilter}
+	 * is auto-detected as a Filter and needs this dependency.
+	 */
+	@Bean
+	com.edushift.modules.payments.service.PaymentAccessService paymentAccessService() {
+		return mock(com.edushift.modules.payments.service.PaymentAccessService.class);
 	}
 
 	/**

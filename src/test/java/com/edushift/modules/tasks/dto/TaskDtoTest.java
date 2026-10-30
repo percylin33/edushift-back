@@ -34,10 +34,6 @@ class TaskDtoTest {
         factory.close();
     }
 
-    // =====================================================================
-    // CreateTaskRequest
-    // =====================================================================
-
     @Nested
     @DisplayName("CreateTaskRequest")
     class CreateTaskRequestTests {
@@ -49,7 +45,10 @@ class TaskDtoTest {
                     "Algebra Tarea 1",
                     "Resolver ejercicios",
                     Instant.now().plus(2, ChronoUnit.DAYS),
-                    UUID.randomUUID());
+                    UUID.randomUUID(),
+                    UUID.randomUUID(),
+                    20,
+                    null);
             assertThat(validator.validate(req)).isEmpty();
         }
 
@@ -60,6 +59,9 @@ class TaskDtoTest {
                     "   ",
                     "desc",
                     Instant.now().plus(1, ChronoUnit.DAYS),
+                    null,
+                    UUID.randomUUID(),
+                    20,
                     null);
             Set<ConstraintViolation<CreateTaskRequest>> v = validator.validate(req);
             assertThat(v).extracting(c -> c.getPropertyPath().toString())
@@ -73,6 +75,9 @@ class TaskDtoTest {
                     null,
                     "desc",
                     Instant.now().plus(1, ChronoUnit.DAYS),
+                    null,
+                    UUID.randomUUID(),
+                    20,
                     null);
             assertThat(validator.validate(req)).isNotEmpty();
         }
@@ -84,6 +89,9 @@ class TaskDtoTest {
                     "x".repeat(201),
                     "desc",
                     Instant.now().plus(1, ChronoUnit.DAYS),
+                    null,
+                    UUID.randomUUID(),
+                    20,
                     null);
             assertThat(validator.validate(req)).isNotEmpty();
         }
@@ -95,6 +103,9 @@ class TaskDtoTest {
                     "T",
                     "d".repeat(10001),
                     Instant.now().plus(1, ChronoUnit.DAYS),
+                    null,
+                    UUID.randomUUID(),
+                    20,
                     null);
             assertThat(validator.validate(req)).isNotEmpty();
         }
@@ -106,6 +117,9 @@ class TaskDtoTest {
                     "T",
                     null,
                     Instant.now().minus(1, ChronoUnit.HOURS),
+                    null,
+                    UUID.randomUUID(),
+                    20,
                     null);
             assertThat(validator.validate(req)).isNotEmpty();
         }
@@ -113,14 +127,10 @@ class TaskDtoTest {
         @Test
         @DisplayName("dueAt null — allowed (optional)")
         void dueAtNullAllowed() {
-            var req = new CreateTaskRequest("T", null, null, null);
+            var req = new CreateTaskRequest("T", null, null, null, UUID.randomUUID(), 20, null);
             assertThat(validator.validate(req)).isEmpty();
         }
     }
-
-    // =====================================================================
-    // TaskResponse
-    // =====================================================================
 
     @Nested
     @DisplayName("TaskResponse")
@@ -138,7 +148,8 @@ class TaskDtoTest {
             var resp = new TaskResponse(
                     task, sec, "title", "desc",
                     now.plus(1, ChronoUnit.DAYS), attach, owner,
-                    true, TaskStatus.PUBLISHED, now, null, now, now);
+                    true, 20, TaskStatus.PUBLISHED, now, null, now, now,
+                    null, null, null, null, 0, 0);
 
             assertThat(resp.publicUuid()).isEqualTo(task);
             assertThat(resp.sectionPublicUuid()).isEqualTo(sec);
@@ -159,16 +170,13 @@ class TaskDtoTest {
         void nullSection() {
             var resp = new TaskResponse(
                     UUID.randomUUID(), null, "t", null, null,
-                    null, UUID.randomUUID(), false, TaskStatus.DRAFT,
-                    null, null, Instant.now(), Instant.now());
+                    null, UUID.randomUUID(), false, 100, TaskStatus.DRAFT,
+                    null, null, Instant.now(), Instant.now(),
+                    null, null, null, null, 0, 0);
             assertThat(resp.sectionPublicUuid()).isNull();
             assertThat(resp.status()).isEqualTo(TaskStatus.DRAFT);
         }
     }
-
-    // =====================================================================
-    // TaskSummary
-    // =====================================================================
 
     @Nested
     @DisplayName("TaskSummary")
@@ -179,7 +187,8 @@ class TaskDtoTest {
         void construct() {
             UUID id = UUID.randomUUID();
             Instant due = Instant.parse("2026-06-10T00:00:00Z");
-            var sum = new TaskSummary(id, "T", due, true, UUID.randomUUID(), TaskStatus.DRAFT, Instant.now());
+            var sum = new TaskSummary(id, "T", due, true, UUID.randomUUID(), 100,
+                    TaskStatus.DRAFT, Instant.now(), null, null, null, null, 0, 0);
             assertThat(sum.publicUuid()).isEqualTo(id);
             assertThat(sum.title()).isEqualTo("T");
             assertThat(sum.dueAt()).isEqualTo(due);
@@ -189,14 +198,12 @@ class TaskDtoTest {
         @Test
         @DisplayName("hasAttachment=false when null")
         void noAttachment() {
-            var sum = new TaskSummary(UUID.randomUUID(), "T", null, false, UUID.randomUUID(), TaskStatus.DRAFT, Instant.now());
+            var sum = new TaskSummary(UUID.randomUUID(), "T", null, false,
+                    UUID.randomUUID(), 100, TaskStatus.DRAFT, Instant.now(),
+                    null, null, null, null, 0, 0);
             assertThat(sum.hasAttachment()).isFalse();
         }
     }
-
-    // =====================================================================
-    // UpdateTaskRequest
-    // =====================================================================
 
     @Nested
     @DisplayName("UpdateTaskRequest")
@@ -205,7 +212,7 @@ class TaskDtoTest {
         @Test
         @DisplayName("all-null — passes (no @NotNull), the service rejects empty patches")
         void allNull() {
-            var req = new UpdateTaskRequest(null, null, null, null, null);
+            var req = new UpdateTaskRequest(null, null, null, null, null, null);
             assertThat(validator.validate(req)).isEmpty();
         }
 
@@ -217,21 +224,22 @@ class TaskDtoTest {
                     "new desc",
                     Instant.now().plus(2, ChronoUnit.DAYS),
                     UUID.randomUUID(),
-                    Boolean.FALSE);
+                    Boolean.FALSE,
+                    null);
             assertThat(validator.validate(req)).isEmpty();
         }
 
         @Test
         @DisplayName("title over 200 chars — Size violation")
         void titleTooLong() {
-            var req = new UpdateTaskRequest("x".repeat(201), null, null, null, null);
+            var req = new UpdateTaskRequest("x".repeat(201), null, null, null, null, null);
             assertThat(validator.validate(req)).isNotEmpty();
         }
 
         @Test
         @DisplayName("description over 10000 chars — Size violation")
         void descriptionTooLong() {
-            var req = new UpdateTaskRequest(null, "d".repeat(10001), null, null, null);
+            var req = new UpdateTaskRequest(null, "d".repeat(10001), null, null, null, null);
             assertThat(validator.validate(req)).isNotEmpty();
         }
 
@@ -239,7 +247,7 @@ class TaskDtoTest {
         @DisplayName("dueAt in the past — Future violation")
         void dueAtPast() {
             var req = new UpdateTaskRequest(null, null,
-                    Instant.now().minus(1, ChronoUnit.HOURS), null, null);
+                    Instant.now().minus(1, ChronoUnit.HOURS), null, null, null);
             assertThat(validator.validate(req)).isNotEmpty();
         }
     }

@@ -26,6 +26,7 @@ import com.edushift.modules.quizzes.exception.QuizNotPublishedException;
 import com.edushift.modules.quizzes.exception.StudentNotEnrolledException;
 import com.edushift.modules.quizzes.grader.QuizAutoGrader;
 import com.edushift.modules.quizzes.mapper.QuizAttemptMapper;
+import com.edushift.modules.quizzes.repository.AttemptPendingCount;
 import com.edushift.modules.quizzes.repository.QuizAnswerRepository;
 import com.edushift.modules.quizzes.repository.QuizAttemptRepository;
 import com.edushift.modules.quizzes.repository.QuizOptionRepository;
@@ -43,10 +44,9 @@ import com.edushift.shared.security.LmsAuthorities;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -152,7 +152,7 @@ public class QuizAttemptServiceImpl implements QuizAttemptService {
 
 		// Taker starts with no answers; revealCorrectness=false
 		// until the attempt reaches GRADED.
-		return attemptMapper.toResponse(saved, quiz, false, 0);
+		return attemptMapper.toResponse(saved, quiz, false);
 	}
 
 	@Override
@@ -172,11 +172,9 @@ public class QuizAttemptServiceImpl implements QuizAttemptService {
 			// attempt to a non-taker non-grader caller.
 			throw new AttemptNotFoundException(attemptPublicUuid.toString());
 		}
-		int pending = pendingAnswerCount(attempt);
 		boolean reveal = isGrader
 				|| attempt.getStatus() == AttemptStatus.GRADED;
-		return attemptMapper.toResponse(attempt, attempt.getQuiz(),
-				reveal, pending);
+		return attemptMapper.toResponse(attempt, attempt.getQuiz(), reveal);
 	}
 
 	@Override
@@ -189,8 +187,7 @@ public class QuizAttemptServiceImpl implements QuizAttemptService {
 			throw new AttemptNotInProgressException(attempt.getStatus().name());
 		}
 		if (inputs == null || inputs.isEmpty()) {
-			return attemptMapper.toResponse(attempt, attempt.getQuiz(), false,
-					pendingAnswerCount(attempt));
+			return attemptMapper.toResponse(attempt, attempt.getQuiz(), false);
 		}
 
 		// Resolve all referenced questions in one shot so we can
@@ -202,21 +199,17 @@ public class QuizAttemptServiceImpl implements QuizAttemptService {
 			byPublicUuid.put(q.getPublicUuid(), q);
 		}
 
-		// Pre-resolve options for MC answers (so we can later
-		// auto-grade the in-place rows if the student submits
-		// without an explicit "regrade" — currently we only
-		// auto-grade on submit, so this is just a sanity check).
-		Map<UUID, QuizOption> optionsByPublicUuid = new HashMap<>();
-		for (QuizQuestion q : questions) {
-			if (q.getQuestionType() != QuestionType.MC) {
-				continue;
-			}
-			for (QuizOption o : optionRepository
-					.findAllByQuestionOrderByPositionAsc(q)) {
-				optionsByPublicUuid.put(o.getPublicUuid(), o);
+		Map<UUID, QuizOption> optionsByPublicUuid = indexOptions(questions);
+
+		Map<UUID, QuizAnswer> existingByQuestionId = new HashMap<>();
+		for (QuizAnswer row : answerRepository
+				.findAllByAttemptOrderByQuestionPositionAsc(attempt)) {
+			if (row.getQuestion() != null && row.getQuestion().getId() != null) {
+				existingByQuestionId.put(row.getQuestion().getId(), row);
 			}
 		}
 
+		Map<UUID, QuizAnswer> toSave = new LinkedHashMap<>();
 		for (AnswerInput in : inputs) {
 			QuizQuestion q = byPublicUuid.get(in.questionPublicUuid());
 			if (q == null) {
@@ -227,21 +220,19 @@ public class QuizAttemptServiceImpl implements QuizAttemptService {
 			// {@code questionType} hint.
 			validateAnswerShape(q, in);
 
-			// Upsert the row.
-			QuizAnswer row = answerRepository
-					.findByAttemptAndQuestion(attempt, q)
-					.orElseGet(() -> {
-						QuizAnswer a = new QuizAnswer();
-						a.setAttempt(attempt);
-						a.setQuestion(q);
-						return a;
-					});
+			QuizAnswer row = existingByQuestionId.get(q.getId());
+			if (row == null) {
+				row = new QuizAnswer();
+				row.setAttempt(attempt);
+				row.setQuestion(q);
+				existingByQuestionId.put(q.getId(), row);
+			}
 			applyAnswerPayload(row, q, in, optionsByPublicUuid);
-			answerRepository.save(row);
+			toSave.put(q.getId(), row);
 		}
+		answerRepository.saveAll(toSave.values());
 
-		return attemptMapper.toResponse(attempt, attempt.getQuiz(), false,
-				pendingAnswerCount(attempt));
+		return attemptMapper.toResponse(attempt, attempt.getQuiz(), false);
 	}
 
 	@Override
@@ -269,7 +260,6 @@ public class QuizAttemptServiceImpl implements QuizAttemptService {
 				continue;
 			}
 			QuizAutoGrader.grade(ans, q, optionsIndex::get);
-			answerRepository.save(ans);
 			if (Boolean.TRUE.equals(ans.getCorrect())
 					&& ans.getPointsAwarded() != null) {
 				autoTotal = (short) (autoTotal + ans.getPointsAwarded());
@@ -283,6 +273,7 @@ public class QuizAttemptServiceImpl implements QuizAttemptService {
 				hasShortAnswerPending = true;
 			}
 		}
+		answerRepository.saveAll(answers);
 
 		attempt.setAutoScore(autoTotal);
 		attempt.setScore(autoTotal);
@@ -296,9 +287,18 @@ public class QuizAttemptServiceImpl implements QuizAttemptService {
 			// was auto-graded to a "graded at" stamp (BE-7b.2
 			// does NOT stamp gradedAt for SHORT_ANSWER — the
 			// teacher still owns the final verdict via the queue).
+			//
+			// chk_lms_quiz_attempts_graded_consistent requires BOTH
+			// graded_at AND graded_by_user_id when status=GRADED.
+			// Attribute system auto-grade to the quiz owner (teacher).
 			attempt.setStatus(AttemptStatus.GRADED);
 			attempt.setGradedAt(Instant.now());
-			attempt.setGradedByUserId(null); // system
+			UUID systemGrader = attempt.getQuiz() != null
+					? attempt.getQuiz().getOwnerUserId() : null;
+			if (systemGrader == null) {
+				systemGrader = callerUserId;
+			}
+			attempt.setGradedByUserId(systemGrader);
 		}
 		QuizAttempt saved = attemptRepository.save(attempt);
 		log.info("Quiz attempt submitted publicUuid={} status={} autoScore={}",
@@ -312,8 +312,7 @@ public class QuizAttemptServiceImpl implements QuizAttemptService {
 		// Caller (student) sees their own attempt; reveal only if
 		// already fully graded.
 		boolean reveal = saved.getStatus() == AttemptStatus.GRADED;
-		return attemptMapper.toResponse(saved, attempt.getQuiz(), reveal,
-				pendingAnswerCount(saved));
+		return attemptMapper.toResponse(saved, attempt.getQuiz(), reveal);
 	}
 
 	// ------------------------------------------------------------------
@@ -332,16 +331,31 @@ public class QuizAttemptServiceImpl implements QuizAttemptService {
 		// teachers/admins keep the full view (used for grading).
 		UUID caller = currentUserProvider.currentUserId().orElse(null);
 		if (caller != null && isStudentCaller(caller)) {
-			return attemptRepository
+			return mapAttempts(attemptRepository
 					.findAllByQuizAndStudentUserIdOrderByAttemptNumberAsc(
-							quiz, caller, pageable)
-					.map(a -> attemptMapper.toSummary(a, quiz,
-							pendingAnswerCount(a)));
+							quiz, caller, pageable), quiz);
 		}
-		return attemptRepository
-				.findAllByQuizOrderByAttemptNumberAsc(quiz, pageable)
-				.map(a -> attemptMapper.toSummary(a, quiz,
-						pendingAnswerCount(a)));
+		return mapAttempts(attemptRepository
+				.findAllByQuizOrderByAttemptNumberAsc(quiz, pageable), quiz);
+	}
+
+	private Page<AttemptSummary> mapAttempts(Page<QuizAttempt> page, Quiz quiz) {
+		Map<UUID, Integer> pending = pendingCounts(page.getContent());
+		return page.map(a -> attemptMapper.toSummary(a, quiz,
+				pending.getOrDefault(a.getId(), 0)));
+	}
+
+	private Map<UUID, Integer> pendingCounts(List<QuizAttempt> attempts) {
+		List<UUID> ids = attempts.stream().map(QuizAttempt::getId).toList();
+		if (ids.isEmpty()) {
+			return Map.of();
+		}
+		Map<UUID, Integer> counts = new HashMap<>();
+		for (AttemptPendingCount row : answerRepository
+				.countPendingShortAnswersByAttemptIds(ids)) {
+			counts.put(row.attemptId(), (int) row.pendingCount());
+		}
+		return counts;
 	}
 
 	/**
@@ -362,31 +376,24 @@ public class QuizAttemptServiceImpl implements QuizAttemptService {
 	@Transactional(readOnly = true)
 	public List<GradingQueueItem> getGradingQueue(UUID quizPublicUuid) {
 		Quiz quiz = requireQuiz(quizPublicUuid);
-		List<QuizAttempt> attempts = attemptRepository
-				.findAllByQuizOrderByAttemptNumberAsc(quiz,
-						Pageable.unpaged())
-				.getContent();
 		List<GradingQueueItem.Row> rows = new ArrayList<>();
-		for (QuizAttempt a : attempts) {
-			for (QuizAnswer ans : answerRepository
-					.findAllByAttemptAndTextAnswerIsNotNullAndGradedAtIsNull(
-							a)) {
-				QuizQuestion q = ans.getQuestion();
-				if (q == null) {
-					continue;
-				}
-				rows.add(new GradingQueueItem.Row(
-						ans.getPublicUuid(),
-						a.getPublicUuid(),
-						q.getPublicUuid(),
-						a.getStudentUserId(),
-						quiz.getTitle(),
-						q.getPrompt(),
-						q.getPoints() == null
-								? Integer.valueOf(0)
-								: Integer.valueOf(q.getPoints()),
-						ans.getTextAnswer()));
+		for (QuizAnswer ans : answerRepository.findPendingShortAnswersByQuiz(quiz)) {
+			QuizQuestion q = ans.getQuestion();
+			QuizAttempt a = ans.getAttempt();
+			if (q == null || a == null) {
+				continue;
 			}
+			rows.add(new GradingQueueItem.Row(
+					ans.getPublicUuid(),
+					a.getPublicUuid(),
+					q.getPublicUuid(),
+					a.getStudentUserId(),
+					quiz.getTitle(),
+					q.getPrompt(),
+					q.getPoints() == null
+							? Integer.valueOf(0)
+							: Integer.valueOf(q.getPoints()),
+					ans.getTextAnswer()));
 		}
 		return GradingQueueItem.fromRows(rows);
 	}
@@ -417,8 +424,7 @@ public class QuizAttemptServiceImpl implements QuizAttemptService {
 		// Sprint 9 / BE-9.3 — fire AI_FEEDBACK_READY after manual grading.
 		publishAiFeedbackReadyTo(saved);
 
-		return attemptMapper.toResponse(saved, attempt.getQuiz(), true,
-				pendingAnswerCount(saved));
+		return attemptMapper.toResponse(saved, attempt.getQuiz(), true);
 	}
 
 	/**
@@ -494,8 +500,7 @@ public class QuizAttemptServiceImpl implements QuizAttemptService {
 		// explicitly gradeAttempt to attach the feedback.
 		recountScores(attempt);
 		QuizAttempt saved = attemptRepository.save(attempt);
-		return attemptMapper.toResponse(saved, attempt.getQuiz(), true,
-				pendingAnswerCount(saved));
+		return attemptMapper.toResponse(saved, attempt.getQuiz(), true);
 	}
 
 	// ------------------------------------------------------------------
@@ -744,31 +749,22 @@ public class QuizAttemptServiceImpl implements QuizAttemptService {
 		answerRepository.save(ans);
 	}
 
-	private int pendingAnswerCount(QuizAttempt attempt) {
-		return (int) answerRepository
-				.findAllByAttemptOrderByQuestionPositionAsc(attempt)
-				.stream()
-				.filter(a -> a.getQuestion() != null
-						&& a.getQuestion().getQuestionType()
-								== QuestionType.SHORT_ANSWER
-						&& a.getGradedAt() == null)
-				.count();
+	private Map<UUID, QuizOption> indexOptions(QuizAttempt attempt) {
+		return indexOptions(questionRepository
+				.findAllByQuizOrderByPositionAsc(attempt.getQuiz()));
 	}
 
-	private Map<UUID, QuizOption> indexOptions(QuizAttempt attempt) {
+	private Map<UUID, QuizOption> indexOptions(List<QuizQuestion> questions) {
+		List<QuizQuestion> multipleChoice = questions.stream()
+				.filter(q -> q.getQuestionType() == QuestionType.MC)
+				.toList();
+		if (multipleChoice.isEmpty()) {
+			return Map.of();
+		}
 		Map<UUID, QuizOption> idx = new HashMap<>();
-		Set<UUID> seen = new HashSet<>();
-		for (QuizQuestion q : questionRepository
-				.findAllByQuizOrderByPositionAsc(attempt.getQuiz())) {
-			if (q.getQuestionType() != QuestionType.MC) {
-				continue;
-			}
-			for (QuizOption o : optionRepository
-					.findAllByQuestionOrderByPositionAsc(q)) {
-				if (seen.add(o.getPublicUuid())) {
-					idx.put(o.getPublicUuid(), o);
-				}
-			}
+		for (QuizOption option : optionRepository
+				.findAllByQuestionInOrderByPositionAsc(multipleChoice)) {
+			idx.putIfAbsent(option.getPublicUuid(), option);
 		}
 		return idx;
 	}

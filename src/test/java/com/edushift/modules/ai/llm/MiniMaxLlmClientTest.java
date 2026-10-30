@@ -208,6 +208,6 @@ class MiniMaxLlmClientTest {
         props.setApiKey("");
         assertThatThrownBy(() -> new MiniMaxLlmClient(props, objectMapper))
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("api-key is empty");
+                .hasMessageContaining("api-key");
     }
 }

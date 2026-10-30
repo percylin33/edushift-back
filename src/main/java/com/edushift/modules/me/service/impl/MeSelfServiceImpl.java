@@ -3,6 +3,7 @@ package com.edushift.modules.me.service.impl;
 import com.edushift.modules.attendance.dto.AttendanceQrInfo;
 import com.edushift.modules.attendance.entity.AttendanceRecord;
 import com.edushift.modules.attendance.repository.AttendanceRecordRepository;
+import com.edushift.modules.attendance.service.AttendanceExportService;
 import com.edushift.modules.attendance.service.AttendanceQrService;
 import com.edushift.modules.attendance.service.AttendanceQrService.IssuedQr;
 import com.edushift.modules.attendance.service.QrRenderer;
@@ -17,6 +18,11 @@ import com.edushift.modules.students.entity.Student;
 import com.edushift.modules.students.repository.StudentRepository;
 import com.edushift.shared.exception.NotFoundException;
 import com.edushift.shared.security.CurrentUserProvider;
+import com.edushift.modules.reports.entity.ReportJob;
+import java.io.IOException;
+import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneOffset;
 import java.util.Base64;
 import java.util.List;
 import java.util.UUID;
@@ -34,16 +40,36 @@ public class MeSelfServiceImpl implements MeSelfService {
     private final AttendanceRecordRepository attendanceRecordRepository;
     private final AttendanceQrService attendanceQrService;
     private final QrRenderer qrRenderer;
+    private final AttendanceExportService attendanceExportService;
     private final PaymentService paymentService;
     private final TimeSlotService timeSlotService;
 
     @Override
     @Transactional(readOnly = true)
-    public List<MeAttendanceRecordResponse> listMyAttendance() {
+    public List<MeAttendanceRecordResponse> listMyAttendance(LocalDate from, LocalDate to) {
         Student student = requireStudent();
-        return attendanceRecordRepository.findByStudentInRange(student, null, null).stream()
+        Instant fromInstant = from != null
+                ? from.atStartOfDay(ZoneOffset.UTC).toInstant() : null;
+        Instant toInstant = to != null
+                ? to.plusDays(1).atStartOfDay(ZoneOffset.UTC).toInstant() : null;
+        return attendanceRecordRepository.findByStudentInRange(student, fromInstant, toInstant).stream()
                 .map(this::toAttendance)
                 .toList();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public byte[] exportMyAttendance(LocalDate from, LocalDate to, ReportJob.Format format)
+            throws IOException {
+        Student student = requireStudent();
+        Instant fromInstant = from != null
+                ? from.atStartOfDay(ZoneOffset.UTC).toInstant() : null;
+        Instant toInstant = to != null
+                ? to.plusDays(1).atStartOfDay(ZoneOffset.UTC).toInstant() : null;
+        List<AttendanceRecord> records =
+                attendanceRecordRepository.findByStudentInRange(student, fromInstant, toInstant);
+        return attendanceExportService.exportRecords(
+                records, format, "Mi asistencia — " + student.fullName());
     }
 
     @Override

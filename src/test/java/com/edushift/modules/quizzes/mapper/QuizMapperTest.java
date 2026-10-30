@@ -2,6 +2,9 @@ package com.edushift.modules.quizzes.mapper;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.edushift.modules.quizzes.dto.OptionResponse;
@@ -57,10 +60,8 @@ class QuizMapperTest {
 		// already-sorted-by-position data.
 		when(questionRepository.findAllByQuizOrderByPositionAsc(q))
 				.thenReturn(qs);
-		for (QuizQuestion qq : qs) {
-			when(optionRepository.findAllByQuestionOrderByPositionAsc(qq))
-					.thenReturn(List.of());
-		}
+		when(optionRepository.findAllByQuestionInOrderByPositionAsc(qs))
+				.thenReturn(List.of());
 
 		QuizResponse r = mapper.toResponse(q, /* revealCorrectness */ true);
 
@@ -69,6 +70,33 @@ class QuizMapperTest {
 		assertThat(r.questions()).extracting(QuestionResponse::position)
 				.containsExactly(1, 2, 3);
 		assertThat(r.revealCorrectness()).isTrue();
+		verify(optionRepository, times(1)).findAllByQuestionInOrderByPositionAsc(qs);
+		verify(optionRepository, never()).findAllByQuestionOrderByPositionAsc(org.mockito.ArgumentMatchers.any());
+	}
+
+	@Test
+	@DisplayName("toResponse assigns each option to its question from a single load")
+	void responseGroupsOptionsInOneQuery() {
+		Quiz q = quiz();
+		QuizQuestion q1 = question(QuestionType.MC, (short) 1, (short) 1);
+		QuizQuestion q2 = question(QuestionType.MC, (short) 1, (short) 2);
+		setField(q1, "id", UUID.randomUUID());
+		setField(q2, "id", UUID.randomUUID());
+		List<QuizQuestion> qs = List.of(q1, q2);
+		QuizOption a = option("A", true, 1);
+		setField(a, "question", q1);
+		QuizOption b = option("B", false, 1);
+		setField(b, "question", q2);
+		when(questionRepository.findAllByQuizOrderByPositionAsc(q)).thenReturn(qs);
+		when(optionRepository.findAllByQuestionInOrderByPositionAsc(qs))
+				.thenReturn(List.of(a, b));
+
+		QuizResponse r = mapper.toResponse(q, true);
+
+		assertThat(r.questions().get(0).options()).extracting(OptionResponse::label)
+				.containsExactly("A");
+		assertThat(r.questions().get(1).options()).extracting(OptionResponse::label)
+				.containsExactly("B");
 	}
 
 	@Test
@@ -83,17 +111,15 @@ class QuizMapperTest {
 	}
 
 	@Test
-	@DisplayName("toSummary does not embed questions (slim projection)")
+	@DisplayName("toSummary uses the pre-aggregated totals and does not load questions")
 	void summaryHasNoQuestions() {
 		Quiz q = quiz();
-		QuizQuestion qq = question(QuestionType.MC, (short) 2, (short) 1);
-		when(questionRepository.findAllByQuizOrderByPositionAsc(q))
-				.thenReturn(List.of(qq));
 
-		QuizSummary s = mapper.toSummary(q);
+		QuizSummary s = mapper.toSummary(q, 1, 2);
 		assertThat(s.questionCount()).isEqualTo(1);
 		assertThat(s.totalPoints()).isEqualTo(2);
 		assertThat(s.status()).isEqualTo(QuizStatus.DRAFT);
+		verify(questionRepository, never()).findAllByQuizOrderByPositionAsc(q);
 	}
 
 	@Test
@@ -105,7 +131,7 @@ class QuizMapperTest {
 				option("A", true, 1),
 				option("B", false, 2),
 				option("C", false, 3));
-		when(optionRepository.findAllByQuestionOrderByPositionAsc(q))
+		when(optionRepository.findAllByQuestionInOrderByPositionAsc(List.of(q)))
 				.thenReturn(opts);
 
 		QuestionResponse r = mapper.toQuestionResponse(q);
@@ -118,7 +144,7 @@ class QuizMapperTest {
 	void expectedKeywordsJoined() {
 		QuizQuestion q = question(QuestionType.SHORT_ANSWER, (short) 1, (short) 1);
 		setField(q, "expectedKeywords", new String[]{"k1", "k2", "k3"});
-		when(optionRepository.findAllByQuestionOrderByPositionAsc(q))
+		when(optionRepository.findAllByQuestionInOrderByPositionAsc(List.of(q)))
 				.thenReturn(List.of());
 
 		QuestionResponse r = mapper.toQuestionResponse(q);
@@ -129,7 +155,7 @@ class QuizMapperTest {
 	@DisplayName("null expectedKeywords returns null (no NPE)")
 	void nullKeywordsReturnsNull() {
 		QuizQuestion q = question(QuestionType.MC, (short) 1, (short) 1);
-		when(optionRepository.findAllByQuestionOrderByPositionAsc(q))
+		when(optionRepository.findAllByQuestionInOrderByPositionAsc(List.of(q)))
 				.thenReturn(List.of());
 
 		QuestionResponse r = mapper.toQuestionResponse(q);

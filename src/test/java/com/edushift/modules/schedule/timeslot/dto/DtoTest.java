@@ -58,7 +58,8 @@ class DtoTest {
     @DisplayName("ScheduleSlotItem — constructor + accessors")
     void scheduleSlotItem() {
         var teacherRef = new ScheduleSlotItem.TeacherRef(UUID.randomUUID(), "Juan", "Pérez");
-        var courseRef = new ScheduleSlotItem.CourseRef(UUID.randomUUID(), "MAT", "Mat");
+        var courseRef = new ScheduleSlotItem.CourseRef(
+            UUID.randomUUID(), "MAT", "Mat", "#3B82F6", "target");
         var sectionRef = new ScheduleSlotItem.SectionRef(UUID.randomUUID(), "A");
         var periodRef = new ScheduleSlotItem.PeriodRef(UUID.randomUUID(), "BIMESTRE", 1, "I Bimestre");
         var item = new ScheduleSlotItem(UUID.randomUUID(), UUID.randomUUID(),
@@ -66,5 +67,7 @@ class DtoTest {
             teacherRef, courseRef, sectionRef, periodRef);
         assertThat(item.dayOfWeek()).isEqualTo((short) 1);
         assertThat(item.teacher().firstName()).isEqualTo("Juan");
+        assertThat(item.course().color()).isEqualTo("#3B82F6");
+        assertThat(item.course().icon()).isEqualTo("target");
     }
 }

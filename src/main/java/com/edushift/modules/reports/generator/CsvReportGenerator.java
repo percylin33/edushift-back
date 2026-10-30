@@ -1,5 +1,6 @@
 package com.edushift.modules.reports.generator;
 
+import com.edushift.modules.reports.dto.AttendanceReportParams;
 import com.edushift.modules.reports.entity.ReportJob;
 import com.edushift.shared.multitenancy.TenantContext;
 import java.io.ByteArrayOutputStream;
@@ -35,7 +36,7 @@ public class CsvReportGenerator {
             UUID tenantId = TenantContext.currentRequired();
             JdbcTemplate jdbc = new JdbcTemplate(dataSource);
             switch (job.getReportType()) {
-                case ATTENDANCE_SUMMARY -> writeAttendanceSummary(writer, jdbc, tenantId);
+                case ATTENDANCE_SUMMARY -> writeAttendanceSummary(writer, jdbc, tenantId, job);
                 case GRADE_BOOK -> writeGradeBook(writer, jdbc, tenantId);
                 case PERIOD_CLOSE -> writePeriodClose(writer, jdbc, tenantId);
                 case STUDENT_TRANSCRIPT -> writeStudentTranscript(writer, jdbc, tenantId);
@@ -45,36 +46,34 @@ public class CsvReportGenerator {
     }
 
     private static void writeAttendanceSummary(
-            java.io.Writer w, JdbcTemplate jdbc, UUID tenantId) throws IOException {
+            java.io.Writer w, JdbcTemplate jdbc, UUID tenantId, ReportJob job) throws IOException {
+        AttendanceReportParams params = AttendanceReportParams.parse(job.getParams());
+        if (params.isStudentScope()) {
+            writeln(w, "student_uuid,student_name,section_name,date,slot,status,occurred_at,notes");
+            var spec = AttendanceReportQuerySupport.studentHistoryQuery(tenantId, params);
+            jdbc.query(
+                    spec.sql(),
+                    ps -> AttendanceReportQuerySupport.bind(ps, spec.binds()),
+                    rs -> {
+                        try {
+                            writeln(w,
+                                    safe(rs.getString(1)) + "," +
+                                    safe(rs.getString(2)) + "," +
+                                    safe(rs.getString(3)) + "," +
+                                    safe(rs.getString(4)) + "," +
+                                    safe(rs.getString(5)) + "," +
+                                    safe(rs.getString(6)) + "," +
+                                    safe(rs.getString(7)) + "," +
+                                    safe(rs.getString(8)));
+                        } catch (IOException e) { throw new RuntimeException(e); }
+                    });
+            return;
+        }
         writeln(w, "session_uuid,section_name,date,slot,total_students,present,absent,late,excused");
-        // Group the actual records: one row per session with the
-        // per-status counts. This replaces the previous (broken)
-        // LEFT JOIN against edushift.attendance_summaries, which
-        // was a non-existent table; the original query also
-        // referenced s.name which doesn't exist on attendance_sessions
-        // (the name is on sections).
-        //
-        // DEBT-NOTIF-CSV fix (Sprint 9B / BE-9B.2): the previous
-        // query would have crashed at runtime with a relation-
-        // does-not-exist error. Aggregating from attendance_records
-        // directly is also more accurate (no stale cached summary
-        // that could drift from the records).
+        var spec = AttendanceReportQuerySupport.sessionSummaryQuery(tenantId, params);
         jdbc.query(
-                """
-                SELECT s.public_uuid, sec.name, s.occurred_on, s.slot,
-                       count(r.id) as total,
-                       count(*) FILTER (WHERE r.status = 'PRESENT') as present,
-                       count(*) FILTER (WHERE r.status = 'ABSENT') as absent,
-                       count(*) FILTER (WHERE r.status = 'LATE') as late,
-                       count(*) FILTER (WHERE r.status = 'EXCUSED') as excused
-                FROM edushift.attendance_sessions s
-                JOIN edushift.sections sec ON sec.id = s.section_id
-                LEFT JOIN edushift.attendance_records r ON r.session_id = s.id
-                WHERE s.tenant_id = ? AND s.deleted = false
-                GROUP BY s.id, s.public_uuid, sec.name, s.occurred_on, s.slot
-                ORDER BY s.occurred_on DESC, s.slot ASC
-                """,
-                ps -> ps.setObject(1, tenantId),
+                spec.sql(),
+                ps -> AttendanceReportQuerySupport.bind(ps, spec.binds()),
                 rs -> {
                     try {
                         writeln(w,

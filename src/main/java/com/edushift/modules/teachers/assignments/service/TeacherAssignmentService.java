@@ -45,6 +45,27 @@ public interface TeacherAssignmentService {
 			UUID periodPublicUuid, boolean activeOnly);
 
 	/**
+	 * Tenant-wide list with optional filters. Used by the admin Registros
+	 * picker ({@code GET /v1/teacher-assignments}).
+	 *
+	 * <p>A non-admin {@code TEACHER} caller is forced to their own teacher
+	 * profile (anti-enumeration): they cannot browse other teachers'
+	 * assignments via this endpoint.</p>
+	 *
+	 * @param teacherPublicUuid optional teacher filter
+	 * @param sectionPublicUuid optional section filter
+	 * @param coursePublicUuid  optional course filter
+	 * @param periodPublicUuid  optional period filter
+	 * @param activeOnly        when true, hides soft-ended rows
+	 */
+	List<AssignmentListItem> listFiltered(
+			UUID teacherPublicUuid,
+			UUID sectionPublicUuid,
+			UUID coursePublicUuid,
+			UUID periodPublicUuid,
+			boolean activeOnly);
+
+	/**
 	 * Reverse view used by FE Sections detail. Always returns active rows.
 	 */
 	List<SectionTeacherItem> listForSection(UUID sectionPublicUuid,

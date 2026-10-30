@@ -25,6 +25,8 @@ public record EvaluationListItem(
 		LocalDate dueDate,
 		EvaluationScale scale,
 		EvaluationStatus status,
+		UUID categoryPublicUuid,
+		String categoryName,
 		Long gradeCount,
 		Boolean isActive,
 		Instant createdAt,

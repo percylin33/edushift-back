@@ -11,11 +11,15 @@ import static org.springframework.security.test.web.servlet.request.SecurityMock
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import static org.assertj.core.api.Assertions.assertThat;
+
 import com.edushift.infrastructure.multitenancy.MultiTenancyConfiguration;
 import com.edushift.infrastructure.multitenancy.TenantInterceptor;
+import com.edushift.modules.auth.controller.CookieHelper;
 import com.edushift.modules.auth.dto.AuthResponse;
 import com.edushift.modules.auth.dto.UserSummary;
 import com.edushift.modules.auth.entity.UserStatus;
@@ -36,11 +40,13 @@ import com.edushift.shared.exception.ResourceNotFoundException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.context.annotation.ComponentScan;
@@ -50,6 +56,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.MediaType;
+import org.springframework.http.ResponseCookie;
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
@@ -72,6 +79,7 @@ class UserInvitationControllerTest {
 	@Autowired private ObjectMapper objectMapper;
 
 	@MockitoBean private UserInvitationService service;
+	@MockitoBean private CookieHelper cookieHelper;
 	@MockitoBean private JwtService jwtService;
 	@MockitoBean private com.edushift.shared.security.LmsRoleAuthorityMapper roleAuthorityMapper;
 
@@ -128,8 +136,8 @@ private static final String BASE = "/v1/users/invitations";
 					.willReturn(stubInvitation(InvitationStatus.PENDING, "secret-token-1"));
 
 			CreateInvitationRequest body = new CreateInvitationRequest(
-					"teach@acme.test", "Teach", "Doe", Set.of("TEACHER"),
-					DocumentType.DNI, "87654321");
+					"staff@acme.test", "Staff", "User", Set.of("STAFF"),
+					DocumentType.DNI, "87654321", Map.of("teacherId", UUID.randomUUID().toString()));
 
 			mockMvc.perform(post(BASE)
 							.with(csrf())
@@ -140,6 +148,12 @@ private static final String BASE = "/v1/users/invitations";
 					.andExpect(jsonPath("$.success").value(true))
 					.andExpect(jsonPath("$.data.token").value("secret-token-1"))
 					.andExpect(jsonPath("$.data.status").value("PENDING"));
+
+			ArgumentCaptor<CreateInvitationRequest> requestCaptor =
+					ArgumentCaptor.forClass(CreateInvitationRequest.class);
+			then(service).should().createInvitation(requestCaptor.capture());
+			assertThat(requestCaptor.getValue().metadata()).isNull();
+			assertThat(requestCaptor.getValue().roles()).containsExactly("STAFF");
 		}
 
 		@Test
@@ -150,7 +164,7 @@ private static final String BASE = "/v1/users/invitations";
 							"already pending"));
 
 			CreateInvitationRequest body = new CreateInvitationRequest(
-					"dup@acme.test", "Dup", "User", Set.of("TEACHER"),
+					"dup@acme.test", "Dup", "User", Set.of("STAFF"),
 					DocumentType.DNI, "87654321");
 
 			mockMvc.perform(post(BASE)
@@ -166,7 +180,7 @@ private static final String BASE = "/v1/users/invitations";
 		@DisplayName("invalid email â†’ 400 (validation, never reaches service)")
 		void invalidEmailRejected() throws Exception {
 			CreateInvitationRequest body = new CreateInvitationRequest(
-					"not-an-email", "Teach", "Doe", Set.of("TEACHER"),
+					"not-an-email", "Teach", "Doe", Set.of("STAFF"),
 					DocumentType.DNI, "87654321");
 
 			mockMvc.perform(post(BASE)
@@ -183,7 +197,7 @@ private static final String BASE = "/v1/users/invitations";
 		@DisplayName("missing role â†’ 403 FORBIDDEN")
 		void forbiddenWithoutRole() throws Exception {
 			CreateInvitationRequest body = new CreateInvitationRequest(
-					"teach@acme.test", "Teach", "Doe", Set.of("TEACHER"),
+					"staff@acme.test", "Staff", "User", Set.of("STAFF"),
 					DocumentType.DNI, "87654321");
 
 			mockMvc.perform(post(BASE)
@@ -328,13 +342,17 @@ private static final String BASE = "/v1/users/invitations";
 	class Accept {
 
 		@Test
-		@DisplayName("public + valid token + valid password â†’ 201 with raw AuthResponse")
+		@DisplayName("public + valid token + valid password â†’ 201 with session cookies")
 		void happyPath() throws Exception {
 			AuthResponse session = new AuthResponse(
 					"access.token", "refresh.token", "Bearer", 900L,
 					new UserSummary(UUID.randomUUID(), "Teach Doe",
 							"teach@acme.test", null, UserStatus.ACTIVE));
 			given(service.acceptInvitation(any(AcceptInvitationRequest.class))).willReturn(session);
+			given(cookieHelper.createAccessTokenCookie("access.token", 900L))
+					.willReturn(ResponseCookie.from("edushift_access_token", "access.token").httpOnly(true).build());
+			given(cookieHelper.createRefreshTokenCookie("refresh.token", 7L * 24 * 60 * 60))
+					.willReturn(ResponseCookie.from("edushift_refresh_token", "refresh.token").httpOnly(true).build());
 
 			AcceptInvitationRequest body = new AcceptInvitationRequest(
 					"valid-token-1234567890abcdef", "Sup3rSecret!");
@@ -344,8 +362,9 @@ private static final String BASE = "/v1/users/invitations";
 							.contentType(MediaType.APPLICATION_JSON)
 							.content(json(body)))
 					.andExpect(status().isCreated())
-					.andExpect(jsonPath("$.accessToken").value("access.token"))
-					.andExpect(jsonPath("$.user.email").value("teach@acme.test"));
+					.andExpect(jsonPath("$.accessToken").doesNotExist())
+					.andExpect(jsonPath("$.user.email").value("teach@acme.test"))
+					.andExpect(header().exists("Set-Cookie"));
 		}
 
 		@Test

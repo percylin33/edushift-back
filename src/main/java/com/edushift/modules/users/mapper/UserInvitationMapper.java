@@ -34,7 +34,8 @@ public class UserInvitationMapper {
 				invitation.getExpiresAt(),
 				invitation.getAcceptedAt(),
 				invitation.getCancelledAt(),
-				invitation.getCreatedAt()
+				invitation.getCreatedAt(),
+				invitation.getSecondLastName()
 		);
 	}
 

@@ -1,5 +1,6 @@
 package com.edushift.modules.users;
 
+import com.edushift.modules.students.provision.SyntheticEmailFactory;
 import com.edushift.modules.notifications.email.EmailBrandingContext;
 import com.edushift.modules.notifications.email.EmailBrandingResolver;
 import com.edushift.modules.notifications.email.EmailLayoutRenderer;
@@ -46,9 +47,13 @@ public class UserInvitationMailer {
 
 	public boolean send(String to, String schoolName, String acceptUrl, Instant expiresAt,
 			Collection<String> roles) {
+		if (SyntheticEmailFactory.isSyntheticAddress(to)) {
+			log.debug("[invitations] skip SMTP for synthetic mailbox");
+			return false;
+		}
 		EmailSender sender = emailSender.getIfAvailable();
 		if (sender == null) {
-			log.info("[invitations] SMTP disabled — copy link for {} → {}", to, acceptUrl);
+			log.debug("[invitations] SMTP disabled — admin can copy the link");
 			return false;
 		}
 		Audience audience = Audience.fromRoles(roles);

@@ -3,26 +3,34 @@ package com.edushift.modules.users.service.impl;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.edushift.modules.auth.entity.EmailSource;
+import com.edushift.modules.auth.entity.RevocationReason;
 import com.edushift.modules.auth.entity.User;
 import com.edushift.modules.auth.entity.UserRole;
 import com.edushift.modules.auth.entity.UserStatus;
+import com.edushift.modules.auth.repository.RefreshTokenRepository;
 import com.edushift.modules.auth.repository.UserRepository;
 import com.edushift.modules.auth.security.JwtAuthenticatedPrincipal;
 import com.edushift.modules.auth.security.JwtAuthenticationToken;
 import com.edushift.modules.auth.service.PasswordResetService;
 import com.edushift.modules.tenants.entity.Tenant;
 import com.edushift.modules.tenants.repository.TenantRepository;
+import com.edushift.modules.users.dto.AdminPasswordResetDelivery;
+import com.edushift.modules.users.dto.AdminResetPasswordRequest;
+import com.edushift.modules.users.dto.AdminResetPasswordResponse;
 import com.edushift.modules.users.dto.AssignRolesRequest;
 import com.edushift.modules.users.dto.UpdateUserRequest;
 import com.edushift.modules.users.dto.UserDetailResponse;
 import com.edushift.modules.users.dto.UserListFilters;
 import com.edushift.modules.users.dto.UserListItem;
 import com.edushift.modules.users.mapper.UserManagementMapper;
+import com.edushift.shared.exception.BadRequestException;
 import com.edushift.shared.exception.BusinessException;
 import com.edushift.shared.exception.ConflictException;
 import com.edushift.shared.exception.ResourceNotFoundException;
@@ -48,6 +56,7 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.core.context.SecurityContextImpl;
+import org.springframework.security.crypto.password.PasswordEncoder;
 
 /**
  * Unit tests for {@link UserManagementServiceImpl}.
@@ -77,6 +86,10 @@ class UserManagementServiceImplTest {
 
 	@Mock private TenantRepository tenantRepository;
 
+	@Mock private PasswordEncoder passwordEncoder;
+
+	@Mock private RefreshTokenRepository refreshTokenRepository;
+
 	private UserManagementServiceImpl service;
 
 	private static final UUID TENANT_ID = UUID.fromString("11111111-1111-1111-1111-111111111111");
@@ -86,7 +99,7 @@ class UserManagementServiceImplTest {
 	void setUp() {
 		service = new UserManagementServiceImpl(
 				userRepository, new UserManagementMapper(), eventPublisher,
-				passwordResetService, tenantRepository);
+				passwordResetService, tenantRepository, passwordEncoder, refreshTokenRepository);
 		TenantContext.set(TENANT_ID);
 		seedSecurityContext(ADMIN_PUBLIC_UUID);
 	}
@@ -262,6 +275,40 @@ class UserManagementServiceImplTest {
 		}
 
 		@Test
+		@DisplayName("adding TEACHER through generic role assignment is rejected")
+		void profileRoleCannotBeAddedGenerically() {
+			UUID publicUuid = UUID.randomUUID();
+			User user = newUser("teacher@acme.test", "T", "User", UserStatus.ACTIVE);
+			user.setPublicUuid(publicUuid);
+			user.addRole(UserRole.STAFF);
+			when(userRepository.findByPublicUuid(publicUuid)).thenReturn(Optional.of(user));
+
+			assertThatThrownBy(() -> service.assignRoles(publicUuid,
+					new AssignRolesRequest(Set.of("STAFF", "TEACHER"))))
+					.isInstanceOfSatisfying(BusinessException.class,
+							ex -> assertThat(ex.getCode()).isEqualTo("PROFILE_ROLE_REQUIRES_PROFILE"));
+
+			verify(userRepository, never()).save(any(User.class));
+		}
+
+		@Test
+		@DisplayName("removing an existing profile role through generic role assignment is rejected")
+		void profileRoleCannotBeRemovedGenerically() {
+			UUID publicUuid = UUID.randomUUID();
+			User user = newUser("teacher@acme.test", "T", "User", UserStatus.ACTIVE);
+			user.setPublicUuid(publicUuid);
+			user.addRole(UserRole.TEACHER);
+			when(userRepository.findByPublicUuid(publicUuid)).thenReturn(Optional.of(user));
+
+			assertThatThrownBy(() -> service.assignRoles(publicUuid,
+					new AssignRolesRequest(Set.of(UserRole.STAFF.name()))))
+					.isInstanceOfSatisfying(BusinessException.class,
+							ex -> assertThat(ex.getCode()).isEqualTo("PROFILE_ROLE_REQUIRES_PROFILE"));
+
+			verify(userRepository, never()).save(any(User.class));
+		}
+
+		@Test
 		@DisplayName("removing TENANT_ADMIN from the last admin → ConflictException(LAST_ADMIN_PROTECTION)")
 		void lastAdminCannotLoseRole() {
 			UUID publicUuid = UUID.randomUUID();
@@ -291,10 +338,10 @@ class UserManagementServiceImplTest {
 			when(userRepository.countActiveTenantAdmins(TENANT_ID)).thenReturn(2L);
 			when(userRepository.save(any(User.class))).thenAnswer(inv -> inv.getArgument(0));
 
-			AssignRolesRequest request = new AssignRolesRequest(Set.of("TEACHER"));
+			AssignRolesRequest request = new AssignRolesRequest(Set.of("STAFF"));
 			UserDetailResponse response = service.assignRoles(publicUuid, request);
 
-			assertThat(response.roles()).containsExactly("TEACHER");
+			assertThat(response.roles()).containsExactly("STAFF");
 		}
 	}
 
@@ -432,24 +479,85 @@ class UserManagementServiceImplTest {
 	// ===========================================================================
 
 	@Nested
-	@DisplayName("resetPassword — queues PASSWORD_RESET")
+	@DisplayName("resetPassword — EMAIL / TEMPORARY")
 	class ResetPassword {
 
 		@Test
-		@DisplayName("loads the user and delegates to PasswordResetService")
+		@DisplayName("EMAIL — loads the user and delegates to PasswordResetService")
 		void queuesForgotPasswordFlow() {
 			UUID publicUuid = UUID.randomUUID();
 			User user = newUser("ada@acme.test", "Ada", "L", UserStatus.ACTIVE);
 			user.setPublicUuid(publicUuid);
+			user.setEmailSource(EmailSource.REAL);
 			when(userRepository.findByPublicUuid(publicUuid)).thenReturn(Optional.of(user));
 			Tenant tenant = new Tenant();
 			tenant.setSlug("acme");
 			when(tenantRepository.findById(TENANT_ID)).thenReturn(Optional.of(tenant));
 
-			service.resetPassword(publicUuid);
+			AdminResetPasswordResponse response = service.resetPassword(
+					publicUuid, new AdminResetPasswordRequest(AdminPasswordResetDelivery.EMAIL));
 
+			assertThat(response.delivery()).isEqualTo(AdminPasswordResetDelivery.EMAIL);
+			assertThat(response.temporaryPassword()).isNull();
 			verify(passwordResetService).requestReset("ada@acme.test", "acme", null);
 			verify(userRepository, never()).save(any(User.class));
+		}
+
+		@Test
+		@DisplayName("EMAIL + SYNTHETIC → BadRequestException EMAIL_SOURCE_SYNTHETIC")
+		void emailRejectsSynthetic() {
+			UUID publicUuid = UUID.randomUUID();
+			User user = newUser("ada@acme.accounts.edushift.local", "Ada", "L", UserStatus.ACTIVE);
+			user.setPublicUuid(publicUuid);
+			user.setEmailSource(EmailSource.SYNTHETIC);
+			when(userRepository.findByPublicUuid(publicUuid)).thenReturn(Optional.of(user));
+
+			assertThatThrownBy(() -> service.resetPassword(
+					publicUuid, new AdminResetPasswordRequest(AdminPasswordResetDelivery.EMAIL)))
+					.isInstanceOf(BadRequestException.class)
+					.hasMessageContaining("sintético");
+		}
+
+		@Test
+		@DisplayName("TEMPORARY — sets hash, mustChangePassword, revokes sessions, returns plaintext")
+		void temporaryPassword() {
+			UUID publicUuid = UUID.randomUUID();
+			User user = newUser("ada@acme.test", "Ada", "L", UserStatus.ACTIVE);
+			user.setPublicUuid(publicUuid);
+			setIdViaReflection(user, UUID.randomUUID());
+			when(userRepository.findByPublicUuid(publicUuid)).thenReturn(Optional.of(user));
+			when(passwordEncoder.encode(any())).thenReturn("bcrypt-hash");
+			when(userRepository.save(any(User.class))).thenAnswer(inv -> inv.getArgument(0));
+			when(refreshTokenRepository.revokeAllByUser(any(), eq(RevocationReason.ADMIN_REVOKE)))
+					.thenReturn(2);
+
+			AdminResetPasswordResponse response = service.resetPassword(
+					publicUuid, new AdminResetPasswordRequest(AdminPasswordResetDelivery.TEMPORARY));
+
+			assertThat(response.delivery()).isEqualTo(AdminPasswordResetDelivery.TEMPORARY);
+			assertThat(response.temporaryPassword()).isNotBlank();
+			assertThat(response.mustChangePassword()).isTrue();
+			assertThat(user.isMustChangePassword()).isTrue();
+			assertThat(user.getPasswordHash()).isEqualTo("bcrypt-hash");
+			verify(refreshTokenRepository).revokeAllByUser(user.getId(), RevocationReason.ADMIN_REVOKE);
+			verify(passwordResetService, never()).requestReset(any(), any(), any());
+		}
+
+		@Test
+		@DisplayName("null request defaults to EMAIL")
+		void nullRequestDefaultsToEmail() {
+			UUID publicUuid = UUID.randomUUID();
+			User user = newUser("ada@acme.test", "Ada", "L", UserStatus.ACTIVE);
+			user.setPublicUuid(publicUuid);
+			user.setEmailSource(EmailSource.REAL);
+			when(userRepository.findByPublicUuid(publicUuid)).thenReturn(Optional.of(user));
+			Tenant tenant = new Tenant();
+			tenant.setSlug("acme");
+			when(tenantRepository.findById(TENANT_ID)).thenReturn(Optional.of(tenant));
+
+			service.resetPassword(publicUuid, null);
+
+			verify(passwordResetService).requestReset("ada@acme.test", "acme", null);
 		}
 
 		@Test
@@ -458,7 +566,7 @@ class UserManagementServiceImplTest {
 			UUID publicUuid = UUID.randomUUID();
 			when(userRepository.findByPublicUuid(publicUuid)).thenReturn(Optional.empty());
 
-			assertThatThrownBy(() -> service.resetPassword(publicUuid))
+			assertThatThrownBy(() -> service.resetPassword(publicUuid, null))
 					.isInstanceOf(ResourceNotFoundException.class);
 		}
 	}

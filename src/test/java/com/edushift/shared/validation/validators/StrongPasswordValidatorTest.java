@@ -27,7 +27,15 @@ class StrongPasswordValidatorTest {
     void validPassword() {
         assertThat(validator.isValid("P@ssw0rd!", null)).isTrue();
         assertThat(validator.isValid("Str0ng!Pass", null)).isTrue();
-        assertThat(validator.isValid("Abcd1234#", null)).isTrue();
+        assertThat(validator.isValid("Azqd1924#", null)).isTrue();
+    }
+
+    @Test
+    void rejectsCommonPasswordsAndSequencesEvenWhenCharacterClassesAreSatisfied() {
+        assertThat(validator.isValid("Abcd1234#", null)).isFalse();
+        assertThat(validator.isValid("Zyxw93!q", null)).isFalse();
+        validator.initialize(annotationWith(8, 72, false, true, true, false));
+        assertThat(validator.isValid("password1", null)).isFalse();
     }
 
     @Test
@@ -70,16 +78,16 @@ class StrongPasswordValidatorTest {
     @DisplayName("honours custom minLength")
     void customMinLength() {
         validator.initialize(annotationWith(10, 72, true, true, true, true));
-        assertThat(validator.isValid("Ab1!defgh", null)).isFalse();
-        assertThat(validator.isValid("Ab1!defghij", null)).isTrue();
+        assertThat(validator.isValid("Az1!dgfhj", null)).isFalse();
+        assertThat(validator.isValid("Az1!dgfhjik", null)).isTrue();
     }
 
     @Test
     @DisplayName("honours maxLength")
     void customMaxLength() {
         validator.initialize(annotationWith(8, 10, true, true, true, true));
-        assertThat(validator.isValid("Ab1!defghij", null)).isFalse();
-        assertThat(validator.isValid("Ab1!defgh", null)).isTrue();
+        assertThat(validator.isValid("Az1!dgfhjik", null)).isFalse();
+        assertThat(validator.isValid("Az1!dgfhj", null)).isTrue();
     }
 
     @Test
@@ -107,7 +115,7 @@ class StrongPasswordValidatorTest {
     @DisplayName("can disable special character requirement")
     void noSpecialRequired() {
         validator.initialize(annotationWith(8, 72, true, true, true, false));
-        assertThat(validator.isValid("Password1", null)).isTrue();
+        assertThat(validator.isValid("Passw0rd1", null)).isTrue();
     }
 
     private static StrongPassword defaultAnnotation() {

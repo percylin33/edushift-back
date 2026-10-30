@@ -14,6 +14,7 @@ import com.edushift.modules.audit.events.AuditAction;
 import com.edushift.modules.audit.service.AuditLogger;
 import com.edushift.modules.auth.security.JwtAuthenticatedPrincipal;
 import com.edushift.modules.students.repository.StudentRepository;
+import com.edushift.modules.students.entity.EnrollmentStatus;
 import com.edushift.modules.tenants.entity.Tenant;
 import com.edushift.modules.tenants.entity.TenantPlan;
 import com.edushift.modules.tenants.entity.TenantStatus;
@@ -24,11 +25,15 @@ import com.edushift.shared.multitenancy.TenantContext;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.constraints.Size;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.Valid;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.time.Instant;
 import lombok.RequiredArgsConstructor;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -57,6 +62,7 @@ public class AdminTenantController {
 	private final StudentRepository studentRepository;
 	private final AuditLogger auditLogger;
 	private final PlatformTransactionManager txManager;
+	private final JdbcTemplate jdbcTemplate;
 
 	@GetMapping
 	@Operation(summary = "List tenants with optional filters (search / status / plan, paged)")
@@ -64,11 +70,18 @@ public class AdminTenantController {
 			@RequestParam(required = false) String search,
 			@RequestParam(required = false) TenantStatus status,
 			@RequestParam(required = false) TenantPlan plan,
+			@RequestParam(defaultValue = "recent") String sort,
 			@RequestParam(defaultValue = "0") int page,
 			@RequestParam(defaultValue = "20") int size) {
 		String trimmedSearch = (search != null && !search.isBlank()) ? search.trim() : "";
 		String statusName = status != null ? status.name() : "";
 		String planName = plan != null ? plan.name() : "";
+		String safeSort = switch (sort == null ? "" : sort.toLowerCase(java.util.Locale.ROOT)) {
+			case "students" -> "students";
+			case "billing" -> "billing";
+			case "name" -> "name";
+			default -> "recent";
+		};
 		int safeSize = Math.min(Math.max(size, 1), 100);
 		int safePage = Math.max(page, 0);
 		org.springframework.data.domain.Pageable pageable =
@@ -78,11 +91,9 @@ public class AdminTenantController {
 				TenantIdResolver.SUPER_ADMIN_SENTINEL,
 				() -> {
 					var pageResult = tenantRepository.adminSearch(
-							trimmedSearch, statusName, planName, pageable);
+							trimmedSearch, statusName, planName, safeSort, pageable);
 					List<Tenant> tenants = pageResult.getContent();
-					List<UUID> tenantIds = tenants.stream().map(Tenant::getId).toList();
-
-					Aggregates aggregates = buildAggregates(tenantIds);
+					Aggregates aggregates = buildAggregates(tenants);
 
 					List<AdminTenantSummary> rows = tenants.stream()
 							.map(t -> AdminTenantMapper.toSummary(t, aggregates))
@@ -106,7 +117,7 @@ public class AdminTenantController {
 					Tenant tenant = tenantRepository.findByPublicUuid(publicUuid)
 							.orElseThrow(() -> new ResourceNotFoundException(
 									"tenants/" + publicUuid));
-					Aggregates aggregates = buildAggregates(List.of(tenant.getId()));
+					Aggregates aggregates = buildAggregates(List.of(tenant));
 					return AdminTenantMapper.toDetail(tenant, aggregates);
 				});
 		return ApiResponse.ok(result);
@@ -136,7 +147,7 @@ public class AdminTenantController {
 									"planId", String.valueOf(request.planId()),
 									"actorUuid",
 									actor != null ? actor.getId().toString() : null));
-					Aggregates aggregates = buildAggregates(List.of(saved.getId()));
+					Aggregates aggregates = buildAggregates(List.of(saved));
 					return AdminTenantMapper.toDetail(saved, aggregates);
 				}));
 		return ApiResponse.ok(result);
@@ -146,7 +157,8 @@ public class AdminTenantController {
 	@Operation(summary = "Suspend a tenant")
 	public ApiResponse<AdminTenantDetail> suspend(
 			@AuthenticationPrincipal JwtAuthenticatedPrincipal actor,
-			@PathVariable("uuid") UUID publicUuid) {
+			@PathVariable("uuid") UUID publicUuid,
+			@Valid @org.springframework.web.bind.annotation.RequestBody TenantSuspendRequest request) {
 		AdminTenantDetail result = TenantContext.runAs(
 				TenantIdResolver.SUPER_ADMIN_SENTINEL,
 				() -> new TransactionTemplate(txManager).execute(status -> {
@@ -156,10 +168,10 @@ public class AdminTenantController {
 					tenant.setStatus(TenantStatus.SUSPENDED);
 					Tenant saved = tenantRepository.save(tenant);
 					auditLogger.log(AuditAction.UPDATE, "tenant", publicUuid,
-							"Tenant suspended",
+							"Tenant suspended: " + request.reason().trim(),
 							java.util.Map.of("actorUuid",
 									actor != null ? actor.getId().toString() : null));
-					Aggregates aggregates = buildAggregates(List.of(saved.getId()));
+					Aggregates aggregates = buildAggregates(List.of(saved));
 					return AdminTenantMapper.toDetail(saved, aggregates);
 				}));
 		return ApiResponse.ok(result);
@@ -182,7 +194,7 @@ public class AdminTenantController {
 							"Tenant reactivated",
 							java.util.Map.of("actorUuid",
 									actor != null ? actor.getId().toString() : null));
-					Aggregates aggregates = buildAggregates(List.of(saved.getId()));
+					Aggregates aggregates = buildAggregates(List.of(saved));
 					return AdminTenantMapper.toDetail(saved, aggregates);
 				}));
 		return ApiResponse.ok(result);
@@ -201,47 +213,63 @@ public class AdminTenantController {
 	 * under {@code SUPER_ADMIN_SENTINEL} which bypasses Hibernate's
 	 * {@code @TenantId} auto-filter.
 	 *
-	 * <p>Sprint 16 / hardening — replaces the previous summary projection
-	 * which left {@code planName}, {@code activeStudents} and
-	 * {@code nextBillingDate} empty.</p>
+	 * <p>All list aggregates are fetched in grouped queries, avoiding one query
+	 * per tenant. Capacity is resolved from the plan or tenant override.</p>
 	 */
-	private Aggregates buildAggregates(List<UUID> tenantIds) {
-		if (tenantIds == null || tenantIds.isEmpty()) {
-			return new Aggregates(Map.of(), Map.of(), Map.of());
+	private Aggregates buildAggregates(List<Tenant> tenants) {
+		if (tenants == null || tenants.isEmpty()) {
+			return new Aggregates(Map.of(), Map.of(), Map.of(), Map.of(), Map.of(), Map.of(), Instant.now());
 		}
+		List<UUID> tenantIds = tenants.stream().map(Tenant::getId).toList();
+		String tenantPlaceholders = String.join(", ", java.util.Collections.nCopies(tenantIds.size(), "?"));
 
 		Map<UUID, PlatformPlan> plansById = new HashMap<>();
 		platformPlanRepository.findAllById(
-				tenantIds.stream()
-						.map(this::lookupPlanIdForTenant)
+				tenants.stream()
+						.map(Tenant::getPlanId)
 						.filter(java.util.Objects::nonNull)
+						.distinct()
 						.toList())
 				.forEach(p -> plansById.put(p.getId(), p));
 
 		Map<UUID, Long> activeStudentsByTenant = new HashMap<>();
+		Map<UUID, Long> usersByTenant = new HashMap<>();
+		Map<UUID, Long> teachersByTenant = new HashMap<>();
+		Map<UUID, Long> storageBytesByTenant = new HashMap<>();
 		Map<UUID, B2BSubscription> activeSubscriptionByTenant = new HashMap<>();
+		tenantIds.forEach(tenantId -> activeStudentsByTenant.put(tenantId, 0L));
+		tenantIds.forEach(tenantId -> usersByTenant.put(tenantId, 0L));
+		tenantIds.forEach(tenantId -> teachersByTenant.put(tenantId, 0L));
+		tenantIds.forEach(tenantId -> storageBytesByTenant.put(tenantId, 0L));
+		studentRepository.countEnrolledStudentsByTenantIds(tenantIds, EnrollmentStatus.ENROLLED)
+				.forEach(row -> activeStudentsByTenant.put(row.getTenantId(), row.getStudentCount()));
+		jdbcTemplate.query(
+				"SELECT tenant_id, COUNT(*) AS total_users, "
+						+ "COUNT(*) FILTER (WHERE 'TEACHER' = ANY(roles)) AS total_teachers "
+						+ "FROM edushift.users WHERE tenant_id IN (" + tenantPlaceholders + ") "
+						+ "AND status = 'ACTIVE' AND deleted = false GROUP BY tenant_id",
+						(rs, rowNum) -> {
+							UUID tenantId = (UUID) rs.getObject("tenant_id");
+							usersByTenant.put(tenantId, rs.getLong("total_users"));
+							teachersByTenant.put(tenantId, rs.getLong("total_teachers"));
+							return tenantId;
+						}, tenantIds.toArray());
+		jdbcTemplate.query(
+				"SELECT tenant_id, COALESCE(SUM(size_bytes), 0) AS storage_bytes "
+						+ "FROM edushift.lms_file_objects WHERE tenant_id IN (" + tenantPlaceholders + ") "
+						+ "AND deleted = false GROUP BY tenant_id",
+						(rs, rowNum) -> {
+							UUID tenantId = (UUID) rs.getObject("tenant_id");
+							storageBytesByTenant.put(tenantId, rs.getLong("storage_bytes"));
+							return tenantId;
+						}, tenantIds.toArray());
+		b2bSubscriptionRepository.findAllByTenantIdInAndStatusNot(
+				tenantIds, B2BSubscriptionStatus.CANCELED)
+			.forEach(sub -> activeSubscriptionByTenant.putIfAbsent(sub.getTenantId(), sub));
 
-		for (UUID tenantId : tenantIds) {
-			activeStudentsByTenant.put(tenantId, studentRepository.countByTenantId(tenantId));
-			b2bSubscriptionRepository
-					.findByTenantIdAndStatusNot(tenantId, B2BSubscriptionStatus.CANCELED)
-					.ifPresent(sub -> activeSubscriptionByTenant.put(tenantId, sub));
-		}
-
-		return new Aggregates(plansById, activeStudentsByTenant, activeSubscriptionByTenant);
+		return new Aggregates(plansById, activeStudentsByTenant, activeSubscriptionByTenant,
+				usersByTenant, teachersByTenant, storageBytesByTenant, Instant.now());
 	}
 
-	/**
-	 * Returns the {@code plan_id} for the given tenant, or {@code null}
-	 * if the tenant has no plan assigned. Used to pre-resolve which
-	 * {@link PlatformPlan}s to fetch in a single {@code findAllById}.
-	 *
-	 * <p>This intentionally re-queries {@link TenantRepository} instead
-	 * of trusting caller-side state — the list call already loaded the
-	 * tenants but the controller hands them to the mapper with their
-	 * full state and the mapper never touches the repository again.</p>
-	 */
-	private UUID lookupPlanIdForTenant(UUID tenantId) {
-		return tenantRepository.findById(tenantId).map(Tenant::getPlanId).orElse(null);
-	}
+	public record TenantSuspendRequest(@NotBlank @Size(max = 500) String reason) {}
 }

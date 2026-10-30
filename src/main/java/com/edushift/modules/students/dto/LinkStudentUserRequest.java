@@ -5,8 +5,9 @@ import java.util.UUID;
 
 /**
  * Payload of {@code POST /v1/students/{publicUuid}/link-user}. Links an
- * existing {@code User} (same tenant, {@code STUDENT} role) to a student
- * who has no portal account yet.
+ * existing {@code User} from the same tenant to a student who has no
+ * portal account yet. The {@code STUDENT} role is granted atomically
+ * with the profile link.
  */
 public record LinkStudentUserRequest(
 		@NotNull(message = "userPublicUuid is required")

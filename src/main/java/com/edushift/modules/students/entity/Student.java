@@ -216,4 +216,30 @@ public class Student extends TenantAwareEntity {
 		}
 		return sb.toString();
 	}
+
+	/**
+	 * Display form for alphabetical classroom lists (ES-PE):
+	 * {@code "Apellido [Materno], Nombres"}. Matches the sort key
+	 * {@code lastName, firstName, secondLastName}.
+	 */
+	public String listDisplayName() {
+		StringBuilder lasts = new StringBuilder();
+		if (lastName != null && !lastName.isBlank()) {
+			lasts.append(lastName.trim());
+		}
+		if (secondLastName != null && !secondLastName.isBlank()) {
+			if (!lasts.isEmpty()) {
+				lasts.append(' ');
+			}
+			lasts.append(secondLastName.trim());
+		}
+		String first = firstName == null ? "" : firstName.trim();
+		if (lasts.isEmpty()) {
+			return first;
+		}
+		if (first.isEmpty()) {
+			return lasts.toString();
+		}
+		return lasts + ", " + first;
+	}
 }

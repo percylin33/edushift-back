@@ -1,16 +1,21 @@
 package com.edushift.modules.notifications.controller;
 
+import com.edushift.modules.auth.entity.UserRole;
 import com.edushift.modules.notifications.dto.AnnouncementResponse;
+import com.edushift.modules.notifications.dto.AudiencePreviewRequest;
+import com.edushift.modules.notifications.dto.AudiencePreviewResponse;
 import com.edushift.modules.notifications.dto.CreateAnnouncementRequest;
+import com.edushift.modules.notifications.dto.TeachingScopeResponse;
+import com.edushift.modules.notifications.entity.Announcement.Status;
 import com.edushift.modules.notifications.service.AnnouncementService;
 import com.edushift.shared.api.ApiResponse;
+import com.edushift.shared.exception.ForbiddenException;
 import com.edushift.shared.exception.UnauthorizedException;
 import com.edushift.shared.security.CurrentUserProvider;
+import com.edushift.shared.security.LmsAuthorities;
 import jakarta.validation.Valid;
-import java.util.List;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
-import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -25,31 +30,19 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * Announcement REST controller (Sprint 9 / BE-9.4).
- *
- * <p>Mounted at {@code /api/v1/announcements}. Two surfaces:</p>
- * <ul>
- *   <li><b>User</b> ({@code isAuthenticated()}): list recent published,
- *       get one, mark read.</li>
- *   <li><b>Admin</b> ({@code LMS_ANNOUNCEMENTS_CREATE}): create, update,
- *       publish, delete.</li>
- * </ul>
+ * Announcements. Readers list and open what their audience includes.
+ * Authors (tenant admin, or a teacher limited to their own sections and
+ * courses) create, schedule, publish and archive. A student never authors,
+ * even if a tenant override granted the authority.
  */
 @RestController
-// DEBT-FK-BUGS-2 / routing: WebConfiguration#configurePathMatch adds "/v1"
-// to every controller in com.edushift.modules.*controller.* (the
-// global /v1 prefix). If we ALSO declare @RequestMapping("/v1/announcements")
-// here, Spring ends up registering the handler under "/v1/v1/announcements"
-// (the prefix is unconditionally prepended) and the route never resolves —
-// every request falls through to the static-resource handler as a 404.
-// Correct pattern: declare only the post-prefix segment here ("/announcements")
-// and let the path-prefix configurer add "/v1". Method-level
-// @GetMapping("/{publicUuid}") then resolves to "/v1/announcements/{publicUuid}",
-// which matches the @RequestMapping used by the test (and by the rest of
-// the EduShift controllers: Attendance, GradeRecord, etc.).
 @RequestMapping("/announcements")
 @RequiredArgsConstructor
 public class AnnouncementController {
+
+    private static final String CAN_AUTHOR =
+            "hasAnyAuthority('" + LmsAuthorities.LMS_ANNOUNCEMENTS_CREATE + "','"
+                    + LmsAuthorities.LMS_ANNOUNCEMENTS_CREATE_OWN + "')";
 
     private final AnnouncementService service;
     private final CurrentUserProvider currentUserProvider;
@@ -59,27 +52,55 @@ public class AnnouncementController {
                 .orElseThrow(() -> new UnauthorizedException("Authentication required"));
     }
 
-    // ---------------- User surface ----------------
+    private void rejectStudentCaller() {
+        if (currentUserProvider.currentUserRole().orElse(null) == UserRole.STUDENT) {
+            throw new ForbiddenException(
+                    "STUDENT_CANNOT_PUBLISH_ANNOUNCEMENTS",
+                    "Students cannot create or publish announcements");
+        }
+    }
 
     @GetMapping
     @PreAuthorize("isAuthenticated()")
-    public ApiResponse<List<AnnouncementResponse>> listPublished(
+    public ApiResponse<java.util.List<AnnouncementResponse>> listPublished(
             @RequestParam(defaultValue = "20") int limit) {
         int safe = Math.min(Math.max(limit, 1), 100);
-        // DEBT-STUDENT-PRIVACY (Fase 0.1): el listado ahora se filtra por
-        // audiencia. Anteriormente devolvía todos los PUBLISHED del tenant,
-        // lo que exponía anuncios ROLE=TEACHER a STUDENT/PARENT.
-        UUID actor = me();
-        List<AnnouncementResponse> data = service.listPublishedForUser(actor, safe).stream()
-                .map(AnnouncementResponse::from)
-                .toList();
-        return ApiResponse.ok(data);
+        return ApiResponse.ok(service.listPublishedForUser(me(), safe));
+    }
+
+    @GetMapping("/admin")
+    @PreAuthorize(CAN_AUTHOR)
+    public ApiResponse<java.util.List<AnnouncementResponse>> listForAdmin(
+            @RequestParam(required = false) Status status,
+            Pageable pageable) {
+        rejectStudentCaller();
+        var page = service.listForAdmin(status, null, pageable);
+        return ApiResponse.ok(
+                page.getContent().stream().map(AnnouncementResponse::from).toList(),
+                ApiResponse.Meta.of(page));
+    }
+
+    @GetMapping("/teaching-scope")
+    @PreAuthorize(CAN_AUTHOR)
+    public ApiResponse<TeachingScopeResponse> teachingScope() {
+        rejectStudentCaller();
+        return ApiResponse.ok(service.teachingScope(me()));
+    }
+
+    @PostMapping("/preview-audience")
+    @PreAuthorize(CAN_AUTHOR)
+    public ApiResponse<AudiencePreviewResponse> preview(@Valid @RequestBody AudiencePreviewRequest req) {
+        rejectStudentCaller();
+        return ApiResponse.ok(service.preview(
+                req.audienceType(),
+                req.audienceIds(),
+                Boolean.TRUE.equals(req.includeGuardians())));
     }
 
     @GetMapping("/{publicUuid}")
     @PreAuthorize("isAuthenticated()")
     public ApiResponse<AnnouncementResponse> get(@PathVariable UUID publicUuid) {
-        return ApiResponse.ok(AnnouncementResponse.from(service.get(publicUuid)));
+        return ApiResponse.ok(AnnouncementResponse.from(service.getForCaller(publicUuid, me())));
     }
 
     @PostMapping("/{publicUuid}/read")
@@ -91,48 +112,48 @@ public class AnnouncementController {
                 : ResponseEntity.notFound().build();
     }
 
-    // ---------------- Admin surface ----------------
-
     @PostMapping
-    @PreAuthorize("hasAuthority('" + com.edushift.shared.security.LmsAuthorities.LMS_ANNOUNCEMENTS_CREATE + "')")
-    public ApiResponse<AnnouncementResponse> create(
-            @Valid @RequestBody CreateAnnouncementRequest req) {
+    @PreAuthorize(CAN_AUTHOR)
+    public ApiResponse<AnnouncementResponse> create(@Valid @RequestBody CreateAnnouncementRequest req) {
+        rejectStudentCaller();
         var a = service.create(me(), req.title(), req.bodyHtml(),
                 req.audienceType(), req.audienceIds(),
-                req.pinned(), req.publishAt());
+                req.pinned(), req.publishAt(),
+                Boolean.TRUE.equals(req.includeGuardians()));
         return ApiResponse.ok(AnnouncementResponse.from(a));
     }
 
     @PatchMapping("/{publicUuid}")
-    @PreAuthorize("hasAuthority('" + com.edushift.shared.security.LmsAuthorities.LMS_ANNOUNCEMENTS_CREATE + "')")
+    @PreAuthorize(CAN_AUTHOR)
     public ApiResponse<AnnouncementResponse> update(
             @PathVariable UUID publicUuid,
             @Valid @RequestBody CreateAnnouncementRequest req) {
+        rejectStudentCaller();
         var a = service.update(publicUuid, req.title(), req.bodyHtml(),
-                req.audienceType(), req.audienceIds(), req.pinned());
+                req.audienceType(), req.audienceIds(), req.pinned(), req.publishAt(),
+                Boolean.TRUE.equals(req.includeGuardians()));
         return ApiResponse.ok(AnnouncementResponse.from(a));
     }
 
     @PostMapping("/{publicUuid}/publish")
-    @PreAuthorize("hasAuthority('" + com.edushift.shared.security.LmsAuthorities.LMS_ANNOUNCEMENTS_CREATE + "')")
+    @PreAuthorize(CAN_AUTHOR)
     public ApiResponse<AnnouncementResponse> publish(@PathVariable UUID publicUuid) {
+        rejectStudentCaller();
         return ApiResponse.ok(AnnouncementResponse.from(service.publish(publicUuid)));
     }
 
-    @DeleteMapping("/{publicUuid}")
-    @PreAuthorize("hasAuthority('" + com.edushift.shared.security.LmsAuthorities.LMS_ANNOUNCEMENTS_CREATE + "')")
-    public ResponseEntity<ApiResponse<Void>> delete(@PathVariable UUID publicUuid) {
-        service.delete(publicUuid);
-        return ResponseEntity.noContent().build();
+    @PostMapping("/{publicUuid}/archive")
+    @PreAuthorize(CAN_AUTHOR)
+    public ApiResponse<AnnouncementResponse> archive(@PathVariable UUID publicUuid) {
+        rejectStudentCaller();
+        return ApiResponse.ok(AnnouncementResponse.from(service.archive(publicUuid)));
     }
 
-    @GetMapping("/admin")
-    @PreAuthorize("hasAuthority('" + com.edushift.shared.security.LmsAuthorities.LMS_ANNOUNCEMENTS_CREATE + "')")
-    public ApiResponse<List<AnnouncementResponse>> listForAdmin(Pageable pageable) {
-        Page<com.edushift.modules.notifications.entity.Announcement> page =
-                service.listForAdmin(pageable);
-        return ApiResponse.ok(
-                page.getContent().stream().map(AnnouncementResponse::from).toList(),
-                ApiResponse.Meta.of(page));
+    @DeleteMapping("/{publicUuid}")
+    @PreAuthorize(CAN_AUTHOR)
+    public ResponseEntity<ApiResponse<Void>> delete(@PathVariable UUID publicUuid) {
+        rejectStudentCaller();
+        service.delete(publicUuid);
+        return ResponseEntity.noContent().build();
     }
 }

@@ -15,7 +15,7 @@ import java.util.UUID;
  * Properties relevant for EduShift:
  * <ul>
  *   <li><strong>Microservice-ready</strong>: globally unique without coordination</li>
- *   <li><strong>Index-friendly</strong>: monotonic per millisecond → good B-tree locality</li>
+ *   <li><strong>Index-friendly</strong>: ordered by milliseconds; values within one millisecond are random</li>
  *   <li><strong>Embedded timestamp</strong>: creation time recoverable via
  *       {@link #extractTimestamp(UUID)}</li>
  *   <li><strong>Safe to expose</strong>: cannot be enumerated like sequential ids</li>

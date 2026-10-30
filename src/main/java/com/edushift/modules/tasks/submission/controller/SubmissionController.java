@@ -10,9 +10,9 @@ import com.edushift.shared.security.CurrentUserProvider;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
+import java.util.List;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
-import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.web.PageableDefault;
 import org.springframework.http.HttpStatus;
@@ -78,10 +78,11 @@ public class SubmissionController {
 	@GetMapping("/tasks/{taskPublicUuid}/submissions")
 	@PreAuthorize("hasAuthority('LMS_TASK_GRADE')")
 	@Operation(summary = "List submissions of a task (teacher / admin)")
-	public Page<SubmissionSummary> list(
+	public ApiResponse<List<SubmissionSummary>> list(
 			@PathVariable UUID taskPublicUuid,
-			@PageableDefault(size = 20) Pageable pageable) {
-		return submissionService.listByTask(taskPublicUuid, pageable);
+			@PageableDefault(size = 100) Pageable pageable) {
+		return ApiResponse.ok(
+				submissionService.listByTask(taskPublicUuid, pageable).getContent());
 	}
 
 	@GetMapping("/tasks/{taskPublicUuid}/submissions/me")

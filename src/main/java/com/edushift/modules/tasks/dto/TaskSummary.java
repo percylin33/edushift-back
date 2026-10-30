@@ -10,6 +10,7 @@ import java.util.UUID;
  *
  * <p>{@code status} was added as part of BUG-2026-07-31-04 so the FE
  * can decide whether to show publish/archive actions.
+ * Assignment fields added in V105 for course-scoped LMS.
  */
 public record TaskSummary(
 		UUID publicUuid,
@@ -17,7 +18,14 @@ public record TaskSummary(
 		Instant dueAt,
 		boolean hasAttachment,
 		UUID ownerPublicUuid,
+		int maxScore,
 		TaskStatus status,
-		Instant createdAt
+		Instant createdAt,
+		UUID teacherAssignmentPublicUuid,
+		UUID coursePublicUuid,
+		String courseName,
+		String periodLabel,
+		int submissionsCount,
+		int gradedSubmissionsCount
 ) {
 }

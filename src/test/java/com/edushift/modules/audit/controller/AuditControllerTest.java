@@ -18,13 +18,15 @@ import org.springframework.test.web.servlet.MockMvc;
 @WebMvcTest(AuditController.class)
 @Import({com.edushift.test.EdushiftWebMvcTestConfig.class, com.edushift.test.TestSecurityConfig.class})
 class AuditControllerTest extends AbstractControllerTest {
+    @org.springframework.test.context.bean.override.mockito.MockitoBean
+    com.edushift.modules.audit.repository.AuditDirectoryRepository auditDirectoryRepository;
 
     @Autowired MockMvc mockMvc;
     @MockitoBean AuditLogRepository auditLogRepository;
 
     @Test
     void search_returnsOk_whenSuperAdmin() throws Exception {
-        given(auditLogRepository.search(any(), any(), any(), any(), any(), any(), any()))
+        given(auditLogRepository.search(any(), any(), any(), any(), any(), any(), any(), any(), any()))
                 .willReturn(new PageImpl<>(java.util.List.of()));
 
         mockMvc.perform(get("/v1/admin/audit").with(auth(superAdmin())))

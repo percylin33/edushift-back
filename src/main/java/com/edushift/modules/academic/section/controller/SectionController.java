@@ -6,6 +6,7 @@ import com.edushift.modules.academic.section.dto.SectionResponse;
 import com.edushift.modules.academic.section.dto.UpdateSectionRequest;
 import com.edushift.modules.academic.section.service.SectionService;
 import com.edushift.shared.api.ApiResponse;
+import com.edushift.shared.security.LmsAuthorities;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
@@ -37,7 +38,7 @@ import org.springframework.web.bind.annotation.RestController;
  *   <caption>Section endpoints</caption>
  *   <tr><th>Method</th><th>Path</th><th>Auth</th><th>Returns</th></tr>
  *   <tr><td>GET   </td><td>/                                       </td>
- *       <td>TENANT_ADMIN, TEACHER</td><td>{@code List<}{@link SectionListItem}{@code >}</td></tr>
+	 *       <td>TENANT_ADMIN, TEACHER, PAYMENTS:ISSUE</td><td>{@code List<}{@link SectionListItem}{@code >}</td></tr>
  *   <tr><td>GET   </td><td>/{publicUuid}                           </td>
  *       <td>TENANT_ADMIN, TEACHER</td><td>{@link SectionResponse}</td></tr>
  *   <tr><td>POST  </td><td>/                                       </td>
@@ -60,14 +61,15 @@ public class SectionController {
 
 	@GetMapping
 	@SecurityRequirement(name = "bearerAuth")
-	@PreAuthorize("hasAnyRole('TENANT_ADMIN','TEACHER')")
+	@PreAuthorize("hasAnyRole('TENANT_ADMIN','TEACHER') or hasAuthority('"
+			+ LmsAuthorities.PAYMENTS_ISSUE + "')")
 	@Operation(
 			summary = "List sections",
 			description = "Default scope: ACTIVE academic year. Optional filters: "
 					+ "?academicYearId, ?gradeId, ?levelId. If both gradeId and "
 					+ "levelId are supplied, gradeId takes precedence (stricter scope). "
-					+ "Readable by TEACHER so the attendance manual-fallback picker "
-					+ "can cascade Grade -> Section (BE-6.8)."
+					+ "Readable by TEACHER for attendance and by PAYMENTS:ISSUE holders "
+					+ "for read-only bulk invoice targeting."
 	)
 	public ResponseEntity<List<SectionListItem>> list(
 			@Parameter(description = "Filter by academic year publicUuid (default = ACTIVE year)")

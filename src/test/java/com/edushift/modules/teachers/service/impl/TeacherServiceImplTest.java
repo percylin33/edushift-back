@@ -30,6 +30,7 @@ import com.edushift.modules.users.service.UserInvitationService;
 import com.edushift.shared.exception.BusinessException;
 import com.edushift.shared.exception.ConflictException;
 import com.edushift.shared.exception.ResourceNotFoundException;
+import com.edushift.shared.security.CurrentUserProvider;
 import java.lang.reflect.Field;
 import java.time.Instant;
 import java.util.List;
@@ -56,6 +57,7 @@ class TeacherServiceImplTest {
 	@Mock private UserInvitationService invitationService;
 	@Mock private TeacherAssignmentRepository assignmentRepository;
 	@Mock private TeacherMapper mapper;
+	@Mock private CurrentUserProvider currentUserProvider;
 
 	@InjectMocks private TeacherServiceImpl service;
 
@@ -63,6 +65,44 @@ class TeacherServiceImplTest {
 	private static final UUID TEACHER_INTERNAL = UUID.fromString("aaaaaaaa-2222-2222-2222-222222222222");
 	private static final UUID USER_PUBLIC = UUID.fromString("bbbbbbbb-1111-1111-1111-111111111111");
 	private static final UUID USER_INTERNAL = UUID.fromString("bbbbbbbb-2222-2222-2222-222222222222");
+
+	// =========================================================================
+	// getCurrentTeacher
+	// =========================================================================
+
+	@Nested
+	@DisplayName("getCurrentTeacher")
+	class GetCurrentTeacher {
+
+		@Test
+		@DisplayName("returns the teacher linked to the authenticated user")
+		void happyPath() {
+			Teacher teacher = teacher("Ada", "Lovelace", "12345678", "ada@acme.test", USER_PUBLIC);
+			when(currentUserProvider.currentUserId()).thenReturn(Optional.of(USER_PUBLIC));
+			when(teacherRepository.findByUserId(USER_PUBLIC)).thenReturn(Optional.of(teacher));
+			when(mapper.toResponse(teacher)).thenReturn(
+					new com.edushift.modules.teachers.dto.TeacherResponse(
+							TEACHER_PUBLIC, DocumentType.DNI, "12345678",
+							"Ada", "Lovelace", null, null, Gender.FEMALE,
+							"ada@acme.test", null, "Mg.", List.of("Matematica"),
+							null, EmploymentStatus.ACTIVE, USER_PUBLIC,
+							Map.of(), Instant.now(), Instant.now()));
+
+			var result = service.getCurrentTeacher();
+
+			assertThat(result.publicUuid()).isEqualTo(TEACHER_PUBLIC);
+		}
+
+		@Test
+		@DisplayName("404 when caller has no linked teacher row")
+		void notLinked() {
+			when(currentUserProvider.currentUserId()).thenReturn(Optional.of(USER_PUBLIC));
+			when(teacherRepository.findByUserId(USER_PUBLIC)).thenReturn(Optional.empty());
+
+			assertThatThrownBy(() -> service.getCurrentTeacher())
+					.isInstanceOf(ResourceNotFoundException.class);
+		}
+	}
 
 	// =========================================================================
 	// createTeacher
@@ -223,7 +263,7 @@ class TeacherServiceImplTest {
 		void happyPath() {
 			Teacher t = teacher("A", "B", "1", "a@x.test", null);
 			withId(t, TEACHER_INTERNAL);
-			User u = makeUser(USER_INTERNAL, USER_PUBLIC, "a@x.test", Set.of(UserRole.TEACHER));
+			User u = makeUser(USER_INTERNAL, USER_PUBLIC, "a@x.test", Set.of(UserRole.STAFF));
 
 			when(teacherRepository.findByPublicUuid(TEACHER_PUBLIC)).thenReturn(Optional.of(t));
 			when(userRepository.findByPublicUuid(USER_PUBLIC)).thenReturn(Optional.of(u));
@@ -237,6 +277,8 @@ class TeacherServiceImplTest {
 			ArgumentCaptor<Teacher> captor = ArgumentCaptor.forClass(Teacher.class);
 			verify(teacherRepository).saveAndFlush(captor.capture());
 			assertThat(captor.getValue().getUserId()).isEqualTo(USER_PUBLIC);
+			assertThat(u.getRoleSet()).containsExactlyInAnyOrder(UserRole.STAFF, UserRole.TEACHER);
+			verify(userRepository).save(u);
 		}
 
 		@Test
@@ -265,17 +307,19 @@ class TeacherServiceImplTest {
 		}
 
 		@Test
-		@DisplayName("user lacks TEACHER role → 409 USER_NOT_TEACHER_ROLE")
-		void userNotTeacherRole() {
+		@DisplayName("linking a staff account also grants TEACHER")
+		void grantsTeacherRoleWhenLinking() {
 			Teacher t = teacher("A", "B", "1", null, null);
-			User u = makeUser(USER_INTERNAL, USER_PUBLIC, "a@x.test", Set.of(UserRole.STUDENT));
+			User u = makeUser(USER_INTERNAL, USER_PUBLIC, "a@x.test", Set.of(UserRole.STAFF));
 			when(teacherRepository.findByPublicUuid(TEACHER_PUBLIC)).thenReturn(Optional.of(t));
 			when(userRepository.findByPublicUuid(USER_PUBLIC)).thenReturn(Optional.of(u));
+			when(teacherRepository.findByUserId(USER_PUBLIC)).thenReturn(Optional.empty());
+			when(teacherRepository.saveAndFlush(any(Teacher.class))).thenAnswer(inv -> inv.getArgument(0));
 
-			assertThatThrownBy(() ->
-					service.linkUser(TEACHER_PUBLIC, new LinkTeacherUserRequest(USER_PUBLIC)))
-					.isInstanceOfSatisfying(ConflictException.class,
-							ex -> assertThat(ex.getCode()).isEqualTo("USER_NOT_TEACHER_ROLE"));
+			service.linkUser(TEACHER_PUBLIC, new LinkTeacherUserRequest(USER_PUBLIC));
+
+			assertThat(u.getRoleSet()).containsExactlyInAnyOrder(UserRole.STAFF, UserRole.TEACHER);
+			verify(userRepository).save(u);
 		}
 
 		@Test

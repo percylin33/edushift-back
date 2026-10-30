@@ -8,14 +8,14 @@ import org.junit.jupiter.api.Test;
 class EvaluationScaleTest {
 
     @Test
-    @DisplayName("all four scales are declared")
+    @DisplayName("all supported scales are declared")
     void allScalesDeclared() {
         assertThat(EvaluationScale.values())
                 .containsExactly(
                         EvaluationScale.SCORE_0_20,
                         EvaluationScale.LITERAL_AD,
                         EvaluationScale.LITERAL_NA,
-                        EvaluationScale.LITERAL_A_B_C_D);
+                        EvaluationScale.LITERAL_A_B_C_D, EvaluationScale.LITERAL_CNEB);
     }
 
     @Test

@@ -1,11 +1,14 @@
 package com.edushift.modules.notifications.service;
 
 import com.edushift.modules.ai.safety.PiiSafetyFilter;
+import com.edushift.modules.notifications.email.EmailLayoutRenderer;
 import com.edushift.modules.notifications.entity.Notification.Category;
+import com.edushift.shared.branding.PlatformBrandAssets;
 import com.edushift.modules.notifications.entity.Notification.Channel;
 import com.edushift.modules.notifications.security.UnsubscribeTokenSigner;
 import jakarta.mail.MessagingException;
 import jakarta.mail.internet.MimeMessage;
+import jakarta.mail.util.ByteArrayDataSource;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -65,8 +68,11 @@ public class EmailSender {
     private final PiiSafetyFilter piiFilter;
     private final UnsubscribeTokenSigner unsubscribeSigner;
 
-    @Value("${app.notifications.email.from:noreply@edushift.local}")
+    @Value("${app.notifications.email.from:noreply@edushift.pe}")
     private String fromAddress;
+
+    @Value("${edushift.contact.support-email:soporte@edushift.pe}")
+    private String replyToAddress;
 
     @Value("${app.notifications.email.enabled:false}")
     private boolean enabled;
@@ -113,15 +119,37 @@ public class EmailSender {
             MimeMessage msg = mailSender.createMimeMessage();
             MimeMessageHelper helper = new MimeMessageHelper(msg, true, "UTF-8");
             helper.setFrom(fromAddress);
+            helper.setReplyTo(replyToAddress);
             helper.setTo(to);
             helper.setSubject(safeSubject);
             helper.setText(safeBody, true);
+            attachPlatformWordmark(helper, safeBody);
             mailSender.send(msg);
         } catch (MessagingException e) {
             throw new EmailSendException("Failed to render email: " + e.getMessage(), e);
         } catch (Exception e) {
             throw new EmailSendException("SMTP send failed: " + e.getMessage(), e);
         }
+    }
+
+    /**
+     * Inline the white EduShift wordmark when the HTML references
+     * {@code cid:edushift-wordmark}. Mail clients cannot load the front's
+     * {@code /branding} files.
+     */
+    private static void attachPlatformWordmark(MimeMessageHelper helper, String body)
+            throws MessagingException {
+        String cid = "cid:" + EmailLayoutRenderer.PLATFORM_WORDMARK_CID;
+        if (body == null || !body.contains(cid)) {
+            return;
+        }
+        byte[] png = PlatformBrandAssets.read(PlatformBrandAssets.LOGO_ON_DARK);
+        if (png == null || png.length == 0) {
+            return;
+        }
+        helper.addInline(
+                EmailLayoutRenderer.PLATFORM_WORDMARK_CID,
+                new ByteArrayDataSource(png, "image/png"));
     }
 
     /**

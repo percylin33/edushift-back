@@ -29,4 +29,8 @@ public record AdminMfaRequiredResponse(
 	public static AdminMfaRequiredResponse onboarding(String token, long ttlSec) {
 		return new AdminMfaRequiredResponse(token, ttlSec, "Bearer", "MFA_ENROLMENT_REQUIRED");
 	}
+
+	public static AdminMfaRequiredResponse passwordChange(String token, long ttlSec) {
+		return new AdminMfaRequiredResponse(token, ttlSec, "Bearer", "PASSWORD_CHANGE_REQUIRED");
+	}
 }

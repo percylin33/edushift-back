@@ -34,6 +34,7 @@ import com.edushift.modules.students.entity.DocumentType;
 import com.edushift.modules.students.entity.Student;
 import com.edushift.modules.students.repository.StudentRepository;
 import com.edushift.modules.tenants.entity.Tenant;
+import com.edushift.modules.tenants.entity.TenantPlan;
 import com.edushift.modules.tenants.entity.TenantStatus;
 import com.edushift.modules.tenants.repository.TenantRepository;
 import com.edushift.shared.multitenancy.TenantContext;
@@ -55,6 +56,7 @@ import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
@@ -131,6 +133,7 @@ class QuizPlayerAndGradingIT extends IntegrationTest {
 	@Autowired private QuizAttemptRepository attemptRepository;
 	@Autowired private JwtService jwtService;
 	@Autowired private PlatformTransactionManager txManager;
+	@Autowired private JdbcTemplate jdbcTemplate;
 	@Autowired private ObjectMapper objectMapper;
 
 	private TransactionTemplate tx;
@@ -159,7 +162,9 @@ class QuizPlayerAndGradingIT extends IntegrationTest {
 					bearer,
 					"");
 
-			assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+			assertThat(response.getStatusCode())
+					.as(response.getBody())
+					.isEqualTo(HttpStatus.CREATED);
 			JsonNode body = objectMapper.readTree(response.getBody());
 			JsonNode data = body.get("data");
 			assertThat(data.get("status").asText()).isEqualTo("IN_PROGRESS");
@@ -299,7 +304,9 @@ class QuizPlayerAndGradingIT extends IntegrationTest {
 					"");
 
 			// Service throws AttemptsExhaustedException → mapped to 409.
-			assertThat(second.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+			assertThat(second.getStatusCode())
+					.as(second.getBody())
+					.isEqualTo(HttpStatus.CONFLICT);
 		}
 
 		@Test
@@ -498,14 +505,14 @@ class QuizPlayerAndGradingIT extends IntegrationTest {
 		// Tenant A: student + enrollment + published quiz with 3 questions.
 		User studentA = createUser(tenantA, "student@quizplayer-isolation.test",
 				"PassStudA-1!", "STUDENT");
-		Student studentEntityA = createStudent(tenantA, studentA.getId(), "a");
+		Student studentEntityA = createStudent(tenantA, studentA.getPublicUuid(), "a");
 		enrollStudent(studentEntityA, sectionA, yearA);
 
 		PublishedQuiz pqA = createPublishedQuizWithMixedQuestions(tenantA, sectionA, teacherA);
 		// Tenant B: mirror for the cross-tenant probes.
 		User studentB = createUser(tenantB, "student-b@quizplayer-isolation.test",
 				"PassStudB-2!", "STUDENT");
-		Student studentEntityB = createStudent(tenantB, studentB.getId(), "b");
+		Student studentEntityB = createStudent(tenantB, studentB.getPublicUuid(), "b");
 		enrollStudent(studentEntityB, sectionB, yearB);
 		PublishedQuiz pqB = createPublishedQuizWithMixedQuestions(tenantB, sectionB, teacherB);
 
@@ -528,7 +535,9 @@ class QuizPlayerAndGradingIT extends IntegrationTest {
 				QUIZZES_BASE + "/" + fixture.quizA().getPublicUuid() + "/attempts",
 				bearer,
 				"");
-		assertThat(startResp.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+		assertThat(startResp.getStatusCode())
+				.as(startResp.getBody())
+				.isEqualTo(HttpStatus.CREATED);
 		String attemptUuid = objectMapper.readTree(startResp.getBody())
 				.get("data").get("publicUuid").asText();
 
@@ -580,10 +589,14 @@ class QuizPlayerAndGradingIT extends IntegrationTest {
 	}
 
 	private Tenant createTenant(String slugPrefix) {
-		Tenant t = new Tenant();
+		Tenant t = newTestTenant();
 		t.setSlug(slugPrefix + UUID.randomUUID().toString().substring(0, 8));
 		t.setName("IT Tenant " + t.getSlug());
 		t.setStatus(TenantStatus.ACTIVE);
+		t.setPlan(TenantPlan.BASIC);
+		t.setPlanId(jdbcTemplate.queryForObject(
+				"select id from edushift.platform_plans where code = ?",
+				UUID.class, "BASIC"));
 		return tx().execute(s -> tenantRepository.saveAndFlush(t));
 	}
 

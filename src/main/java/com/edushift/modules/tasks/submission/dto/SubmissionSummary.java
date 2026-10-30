@@ -11,9 +11,11 @@ import java.util.UUID;
 public record SubmissionSummary(
 		UUID publicUuid,
 		UUID studentPublicUuid,
+		String studentFullName,
 		SubmissionStatus status,
 		Integer grade,
 		boolean hasAttachment,
-		Instant createdAt
+		SubmissionAttachmentResponse attachment,
+		Instant submittedAt
 ) {
 }

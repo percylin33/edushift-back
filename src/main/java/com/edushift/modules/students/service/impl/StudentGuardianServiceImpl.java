@@ -1,11 +1,13 @@
 package com.edushift.modules.students.service.impl;
 
+import com.edushift.modules.students.provision.PortalEmailResolver;
 import com.edushift.modules.auth.entity.User;
 import com.edushift.modules.auth.entity.UserRole;
 import com.edushift.modules.auth.repository.UserRepository;
 import com.edushift.modules.students.dto.AddGuardianRequest;
 import com.edushift.modules.students.dto.GuardianProfileResponse;
 import com.edushift.modules.students.dto.GuardianResponse;
+import com.edushift.modules.students.dto.GuardianPortalAccessResponse;
 import com.edushift.modules.students.dto.InviteGuardianResponse;
 import com.edushift.modules.students.dto.LinkGuardianUserRequest;
 import com.edushift.modules.students.dto.UpdateGuardianLinkRequest;
@@ -21,6 +23,7 @@ import com.edushift.modules.students.service.StudentGuardianService;
 import com.edushift.modules.users.dto.CreateInvitationRequest;
 import com.edushift.modules.users.dto.InvitationResponse;
 import com.edushift.modules.users.service.UserInvitationService;
+import com.edushift.modules.payments.service.SubscriptionService;
 import com.edushift.shared.exception.BusinessException;
 import com.edushift.shared.exception.ConflictException;
 import com.edushift.shared.exception.ForbiddenException;
@@ -46,6 +49,8 @@ public class StudentGuardianServiceImpl implements StudentGuardianService {
 	private final StudentGuardianMapper mapper;
 	private final UserRepository userRepository;
 	private final UserInvitationService invitationService;
+	private final PortalEmailResolver portalEmailResolver;
+	private final SubscriptionService subscriptionService;
 
 	/** Convention key carried in {@code user_invitations.metadata}. */
 	public static final String METADATA_GUARDIAN_ID_KEY = "guardianId";
@@ -106,6 +111,9 @@ public class StudentGuardianServiceImpl implements StudentGuardianService {
 		link.setCanPickupStudent(request.canPickupStudent());
 
 		StudentGuardian saved = linkRepository.save(link);
+		if (guardian.getUserId() != null) {
+			subscriptionService.synchronizeStudentForBillingRules(student.getPublicUuid());
+		}
 		log.info("[guardians] linked -- student={} guardian={} primary={} pickup={}",
 				student.getPublicUuid(), guardian.getPublicUuid(),
 				saved.isPrimaryContact(), saved.isCanPickupStudent());
@@ -195,18 +203,16 @@ public class StudentGuardianServiceImpl implements StudentGuardianService {
 		User user = userRepository.findByPublicUuid(request.userPublicUuid())
 				.orElseThrow(() -> new ResourceNotFoundException("User", request.userPublicUuid()));
 
-		if (!user.hasRole(UserRole.PARENT)) {
-			throw new ConflictException("USER_NOT_PARENT_ROLE",
-					"Cannot link user '" + user.getEmail() + "': missing PARENT role");
-		}
-
 		guardianRepository.findByUserId(user.getPublicUuid()).ifPresent(other -> {
 			throw new ConflictException("USER_ALREADY_LINKED_TO_GUARDIAN",
 					"User '" + user.getEmail() + "' is already linked to another guardian");
 		});
 
+		user.addRole(UserRole.PARENT);
+		userRepository.save(user);
 		guardian.setUserId(user.getPublicUuid());
 		guardianRepository.saveAndFlush(guardian);
+		subscriptionService.synchronizeGuardianForBillingRules(guardian.getId());
 		log.info("[guardians] link-user -- guardian={} user={}",
 				guardian.getPublicUuid(), user.getPublicUuid());
 		return mapper.toResponse(loadLink(student, guardian));
@@ -224,9 +230,10 @@ public class StudentGuardianServiceImpl implements StudentGuardianService {
 					"Guardian '" + guardian.fullName() + "' already has a linked user");
 		}
 		if (guardian.getEmail() == null || guardian.getEmail().isBlank()) {
-			throw new BusinessException("GUARDIAN_EMAIL_REQUIRED",
-					"Guardian '" + guardian.fullName() + "' needs an email to be invited");
-		}
+            guardian.setEmail(portalEmailResolver.resolve(guardian.getEmail(),
+                    guardian.getFirstName(), guardian.getLastName(), guardian.getDocumentNumber()));
+            guardianRepository.save(guardian);
+        }
 
 		Map<String, Object> metadata = new HashMap<>();
 		metadata.put(METADATA_GUARDIAN_ID_KEY, guardian.getId().toString());
@@ -241,8 +248,8 @@ public class StudentGuardianServiceImpl implements StudentGuardianService {
 						guardian.getDocumentNumber(),
 						metadata));
 
-		log.info("[guardians] invited -- guardian={} email='{}' invitationId={}",
-				guardian.getPublicUuid(), guardian.getEmail(), response.publicUuid());
+		log.info("[guardians] invited -- guardian={} invitationId={}",
+				guardian.getPublicUuid(), response.publicUuid());
 
 		return new InviteGuardianResponse(
 				response.publicUuid(),
@@ -251,6 +258,45 @@ public class StudentGuardianServiceImpl implements StudentGuardianService {
 				guardian.getPublicUuid(),
 				student.getPublicUuid(),
 				guardian.getEmail());
+	}
+
+	@Override
+	@Transactional
+	public GuardianPortalAccessResponse ensurePortalAccess(UUID studentPublicUuid) {
+		Student student = loadStudent(studentPublicUuid);
+		StudentGuardian primaryLink = linkRepository.findActiveByStudentId(student.getId()).stream()
+				.filter(StudentGuardian::isPrimaryContact).findFirst()
+				.orElseGet(() -> linkRepository.findActiveByStudentId(student.getId()).stream().findFirst().orElse(null));
+		if (primaryLink == null) return new GuardianPortalAccessResponse(GuardianPortalAccessResponse.Status.PENDING);
+		Guardian guardian = primaryLink.getGuardian();
+		if (guardian.getUserId() != null) {
+			return new GuardianPortalAccessResponse(GuardianPortalAccessResponse.Status.LINKED);
+		}
+		if (guardian.getEmail() == null || guardian.getEmail().isBlank()) {
+			return new GuardianPortalAccessResponse(GuardianPortalAccessResponse.Status.PENDING);
+		}
+
+		User matchingUser = userRepository.findByEmail(guardian.getEmail().trim().toLowerCase()).orElse(null);
+		if (matchingUser != null) {
+			if (!matchingUser.hasRole(UserRole.PARENT)
+					|| guardianRepository.findByUserId(matchingUser.getPublicUuid()).isPresent()) {
+				return new GuardianPortalAccessResponse(GuardianPortalAccessResponse.Status.REVIEW_REQUIRED);
+			}
+			guardian.setUserId(matchingUser.getPublicUuid());
+			guardianRepository.saveAndFlush(guardian);
+			subscriptionService.synchronizeGuardianForBillingRules(guardian.getId());
+			return new GuardianPortalAccessResponse(GuardianPortalAccessResponse.Status.LINKED);
+		}
+
+		try {
+			invite(studentPublicUuid, guardian.getPublicUuid());
+			return new GuardianPortalAccessResponse(GuardianPortalAccessResponse.Status.INVITATION_SENT);
+		}
+		catch (RuntimeException exception) {
+			log.warn("[guardians] portal invitation deferred for student={} guardian={} reason={}",
+					student.getPublicUuid(), guardian.getPublicUuid(), exception.getClass().getSimpleName());
+			return new GuardianPortalAccessResponse(GuardianPortalAccessResponse.Status.PENDING);
+		}
 	}
 
 	// ==========================================================================

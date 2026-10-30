@@ -56,7 +56,7 @@ public class Payment extends TenantAwareEntity {
     @Column(name = "invoice_id", nullable = false)
     private UUID invoiceId;
 
-    @Column(name = "guardian_user_id", nullable = false)
+    @Column(name = "guardian_user_id")
     private UUID guardianUserId;
 
     @Enumerated(EnumType.STRING)

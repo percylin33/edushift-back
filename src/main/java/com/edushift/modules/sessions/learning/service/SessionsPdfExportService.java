@@ -4,7 +4,11 @@ import com.edushift.modules.sessions.learning.entity.LearningSession;
 import com.edushift.modules.sessions.learning.entity.SessionContent;
 import com.edushift.modules.sessions.learning.entity.SessionStatus;
 import com.edushift.modules.sessions.learning.repository.LearningSessionRepository;
+import com.edushift.modules.teachers.assignments.support.LmsAssignmentBinder;
+import com.edushift.modules.tenants.branding.CurrentTenantLogoLoader;
 import com.edushift.modules.tenants.service.TenantService;
+import com.edushift.shared.branding.PlatformPdfBrand;
+import com.edushift.shared.exception.ForbiddenException;
 import com.edushift.shared.exception.ResourceNotFoundException;
 import com.lowagie.text.Document;
 import com.lowagie.text.DocumentException;
@@ -39,8 +43,6 @@ public class SessionsPdfExportService {
     private static final DateTimeFormatter DATETIME_FMT =
             DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm", new Locale("es", "PE"));
 
-    private static final Font TITLE_FONT = FontFactory.getFont(
-            FontFactory.HELVETICA_BOLD, 18, Font.BOLD);
     private static final Font SUBTITLE_FONT = FontFactory.getFont(
             FontFactory.HELVETICA, 14, Font.BOLD);
     private static final Font BODY_FONT = FontFactory.getFont(
@@ -52,21 +54,31 @@ public class SessionsPdfExportService {
 
     private final LearningSessionRepository sessionRepository;
     private final TenantService tenantService;
+    private final LmsAssignmentBinder lmsAssignmentBinder;
+    private final CurrentTenantLogoLoader tenantLogoLoader;
 
     @Transactional(readOnly = true)
     public byte[] exportPdf(UUID sessionPublicUuid) {
         LearningSession session = sessionRepository.findByPublicUuid(sessionPublicUuid)
                 .orElseThrow(() -> new ResourceNotFoundException(
                         "LearningSession", sessionPublicUuid));
+        try {
+            lmsAssignmentBinder.assertCallerMayUseAssignment(
+                    session.getTeacherAssignment());
+        }
+        catch (ForbiddenException ex) {
+            throw new ResourceNotFoundException("LearningSession", sessionPublicUuid);
+        }
 
         String tenantName = tenantService.findCurrent().name();
 
         ByteArrayOutputStream baos = new ByteArrayOutputStream(8192);
         Document document = new Document(PageSize.A4, 36, 36, 40, 40);
         try {
-            PdfWriter.getInstance(document, baos);
+            PdfWriter writer = PdfWriter.getInstance(document, baos);
+            PlatformPdfBrand.installFooter(document, writer);
             document.open();
-            buildPdf(document, session, tenantName);
+            buildPdf(document, session, tenantName, tenantLogoLoader.schoolLogoOrNull());
         } catch (DocumentException e) {
             throw new RuntimeException("Error generating session PDF", e);
         } finally {
@@ -75,13 +87,10 @@ public class SessionsPdfExportService {
         return baos.toByteArray();
     }
 
-    private void buildPdf(Document doc, LearningSession session, String tenantName)
+    private void buildPdf(Document doc, LearningSession session, String tenantName, byte[] schoolLogo)
             throws DocumentException {
 
-        // Header — school name + document title
-        Paragraph header = new Paragraph(tenantName, TITLE_FONT);
-        header.setAlignment(Element.ALIGN_CENTER);
-        doc.add(header);
+        PlatformPdfBrand.writeHeader(doc, tenantName, schoolLogo);
 
         Paragraph docTitle = new Paragraph(
                 "Sesión de Aprendizaje", SUBTITLE_FONT);

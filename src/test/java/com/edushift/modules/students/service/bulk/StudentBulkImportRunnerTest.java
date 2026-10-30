@@ -9,11 +9,13 @@ import static org.mockito.Mockito.when;
 
 import com.edushift.modules.students.dto.CreateStudentRequest;
 import com.edushift.modules.students.dto.StudentResponse;
+import com.edushift.modules.students.enrollments.service.StudentEnrollmentService;
 import com.edushift.modules.students.entity.BulkImportJob;
 import com.edushift.modules.students.entity.BulkImportStatus;
 import com.edushift.modules.students.entity.DocumentType;
 import com.edushift.modules.students.entity.Gender;
 import com.edushift.modules.students.repository.BulkImportJobRepository;
+import com.edushift.modules.students.service.StudentGuardianService;
 import com.edushift.modules.students.service.StudentService;
 import com.edushift.shared.exception.ConflictException;
 import com.edushift.shared.multitenancy.TenantContext;
@@ -23,6 +25,7 @@ import jakarta.validation.ValidatorFactory;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.lang.reflect.Field;
+import java.time.LocalDate;
 import java.util.HashMap;
 import java.util.Optional;
 import java.util.UUID;
@@ -49,6 +52,8 @@ import org.mockito.junit.jupiter.MockitoExtension;
 class StudentBulkImportRunnerTest {
 
 	@Mock private StudentService studentService;
+	@Mock private StudentGuardianService guardianService;
+	@Mock private StudentEnrollmentService enrollmentService;
 	@Mock private BulkImportJobRepository jobRepository;
 
 	private StudentBulkImportRunner runner;
@@ -64,6 +69,8 @@ class StudentBulkImportRunnerTest {
 		runner = new StudentBulkImportRunner(
 				new StudentBulkImportParser(),
 				studentService,
+				guardianService,
+				enrollmentService,
 				jobRepository,
 				validator);
 	}
@@ -134,7 +141,7 @@ class StudentBulkImportRunnerTest {
 		runner.processJob(job.getId(), payload);
 
 		assertThat(job.getStatus()).isEqualTo(BulkImportStatus.FAILED);
-		assertThat(job.getFailReason()).contains("documentnumber");
+		assertThat(job.getFailReason()).containsIgnoringCase("documentNumber");
 		verify(studentService, never()).createStudent(any());
 	}
 
@@ -259,6 +266,61 @@ class StudentBulkImportRunnerTest {
 		CreateStudentRequest sent = captor.getValue();
 		assertThat(sent.documentType()).isEqualTo(DocumentType.DNI);
 		assertThat(sent.gender()).isEqualTo(Gender.NOT_SPECIFIED);
+	}
+
+	@Test
+	@DisplayName("with section options — createStudent then createEnrollment")
+	void enrollsIntoSection() throws Exception {
+		BulkImportJob job = newJob();
+		when(jobRepository.findById(job.getId())).thenReturn(Optional.of(job));
+		when(jobRepository.saveAndFlush(any(BulkImportJob.class)))
+				.thenAnswer(inv -> inv.getArgument(0));
+		when(studentService.createStudent(any(CreateStudentRequest.class)))
+				.thenAnswer(inv -> stubStudentResponse());
+
+		UUID sectionId = UUID.randomUUID();
+		UUID yearId = UUID.randomUUID();
+		LocalDate enrolledAt = LocalDate.of(2026, 3, 1);
+		byte[] payload = build(workbook -> {
+			Sheet sheet = workbook.createSheet("Students");
+			writeHeader(sheet,
+					"documentType", "documentNumber", "firstName", "lastName");
+			row(sheet, 1, "DNI", "11111111", "Anna", "Lovelace");
+		});
+
+		runner.processJob(job.getId(), payload,
+				new StudentBulkImportOptions(null, sectionId, yearId, enrolledAt));
+
+		assertThat(job.getErrorRows()).isZero();
+		verify(enrollmentService).createEnrollment(any(UUID.class), any());
+		ArgumentCaptor<CreateStudentRequest> captor =
+				ArgumentCaptor.forClass(CreateStudentRequest.class);
+		verify(studentService).createStudent(captor.capture());
+		assertThat(captor.getValue().enrollmentStatus().name()).isEqualTo("ENROLLED");
+	}
+
+	@Test
+	@DisplayName("incomplete guardian fields — ROW_INVALID, no createStudent")
+	void incompleteGuardianDoesNotCreate() throws Exception {
+		BulkImportJob job = newJob();
+		when(jobRepository.findById(job.getId())).thenReturn(Optional.of(job));
+		when(jobRepository.saveAndFlush(any(BulkImportJob.class)))
+				.thenAnswer(inv -> inv.getArgument(0));
+
+		byte[] payload = build(workbook -> {
+			Sheet sheet = workbook.createSheet("Students");
+			writeHeader(sheet,
+					"documentType", "documentNumber", "firstName", "lastName",
+					"Teléfono apoderado");
+			row(sheet, 1, "DNI", "11111111", "Anna", "Lovelace", "999");
+		});
+
+		runner.processJob(job.getId(), payload);
+
+		assertThat(job.getErrorRows()).isEqualTo(1);
+		assertThat(job.getErrorsView().get(0).code()).isEqualTo("ROW_INVALID");
+		verify(studentService, never()).createStudent(any());
+		verify(guardianService, never()).addGuardian(any(), any());
 	}
 
 	// ---------------------------------------------------------------------------

@@ -34,6 +34,7 @@ class UserDtoTest {
         UUID id = UUID.randomUUID();
         var r = new UserDetailResponse(id, "ana@acme.test", "Ana", "Diaz", "Ana Diaz",
                 "+51 999", null, com.edushift.modules.auth.entity.UserStatus.ACTIVE, true, false,
+                com.edushift.modules.auth.entity.EmailSource.REAL,
                 Set.of("TEACHER"), null, null, null);
         assertThat(r.publicUuid()).isEqualTo(id);
         assertThat(r.phone()).isEqualTo("+51 999");

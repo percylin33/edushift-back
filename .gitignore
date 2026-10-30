@@ -54,3 +54,6 @@ _*.bat
 
 ### Accidental sub-repos / local mounts ###
 /edushift-storage/
+
+# Local database backups must stay out of Git
+.local-backups/

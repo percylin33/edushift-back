@@ -22,6 +22,8 @@ import com.edushift.modules.tenants.exception.TenantNotFoundException;
 import com.edushift.modules.tenants.mapper.TenantMapper;
 import com.edushift.modules.tenants.repository.TenantRepository;
 import com.edushift.modules.tenants.service.TenantService;
+import com.edushift.modules.tenants.service.TenantStatusCache;
+import com.edushift.shared.exception.BadRequestException;
 import com.edushift.shared.exception.ConflictException;
 import com.edushift.shared.exception.UnauthorizedException;
 import com.edushift.shared.multitenancy.TenantContext;
@@ -108,6 +110,8 @@ public class TenantServiceImpl implements TenantService {
 
 	private final SchoolInvitationService schoolInvitationService;
 
+	private final TenantStatusCache tenantStatusCache;
+
 	public TenantServiceImpl(
 			TenantRepository tenantRepository,
 			TenantMapper tenantMapper,
@@ -117,7 +121,8 @@ public class TenantServiceImpl implements TenantService {
 			AcademicSeedService academicSeedService,
 			PlatformPlanRepository platformPlanRepository,
 			SchoolInvitationService schoolInvitationService,
-			PlatformTransactionManager transactionManager) {
+			PlatformTransactionManager transactionManager,
+			TenantStatusCache tenantStatusCache) {
 		this.tenantRepository = tenantRepository;
 		this.tenantMapper = tenantMapper;
 		this.userRepository = userRepository;
@@ -127,6 +132,7 @@ public class TenantServiceImpl implements TenantService {
 		this.platformPlanRepository = platformPlanRepository;
 		this.schoolInvitationService = schoolInvitationService;
 		this.txTemplate = new TransactionTemplate(transactionManager);
+		this.tenantStatusCache = tenantStatusCache;
 	}
 
 	@Override
@@ -146,6 +152,7 @@ public class TenantServiceImpl implements TenantService {
 		}
 
 		Tenant tenant = tenantRepository.findBySlugIgnoreCase(normalized)
+				.or(() -> tenantRepository.findByHostnameAliasIgnoreCase(normalized))
 				.orElseThrow(() -> TenantNotFoundException.forSlug(normalized));
 
 		return tenantMapper.toSummary(tenant);
@@ -164,9 +171,9 @@ public class TenantServiceImpl implements TenantService {
 	static boolean isPlausibleTenantSlug(String slug) {
 		if (slug == null) return false;
 		String lower = slug.trim().toLowerCase();
-		if (lower.isEmpty() || lower.length() > 24) return false;
+		if (lower.isEmpty() || lower.length() > 63) return false;
 		if (lower.contains("--") || lower.startsWith("-") || lower.endsWith("-")) return false;
-		if (!lower.matches("[a-z][a-z0-9-]*")) return false;
+		if (!lower.matches("[a-z0-9][a-z0-9-]*")) return false;
 		String[] parts = lower.split("-");
 		// Reject any slug where the last segment is purely digits and the
 		// total length is < 12. Tenant slugs in EduShift are names, not
@@ -221,6 +228,7 @@ public class TenantServiceImpl implements TenantService {
 
 		tenant.setStatus(TenantStatus.ACTIVE);
 		Tenant saved = tenantRepository.save(tenant);
+		tenantStatusCache.put(saved.getId(), TenantStatus.ACTIVE);
 		log.info("[tenants] activated tenant id={} slug='{}'", saved.getId(), saved.getSlug());
 		return tenantMapper.toResponse(saved);
 	}
@@ -274,14 +282,20 @@ public class TenantServiceImpl implements TenantService {
 	 */
 	@Override
 	public AuthResponse register(RegisterTenantRequest request) {
+		final String slug = request == null || request.tenantSlug() == null
+				? ""
+				: request.tenantSlug().trim().toLowerCase();
+		if (!slug.matches("[a-z0-9]{2,63}")) {
+			throw new BadRequestException("VALIDATION_ERROR",
+					"tenantSlug must contain 2-63 lowercase alphanumeric characters without dashes");
+		}
 		final SchoolInvitation invitation = schoolInvitationService.requirePending(request.inviteToken());
-		final String slug = request.tenantSlug().trim().toLowerCase();
 		final String adminEmail = invitation.getEmail();
 
 		// Pre-check: short-circuit when the slug is obviously taken. We still
 		// catch DataIntegrityViolationException below in case of a TOCTOU
 		// race against a concurrent registration.
-		tenantRepository.findBySlugIgnoreCase(slug).ifPresent(existing -> {
+		tenantRepository.findByHostnameAliasIgnoreCase(slug).ifPresent(existing -> {
 			throw new ConflictException("TENANT_SLUG_TAKEN",
 					"Tenant slug '" + slug + "' is already taken");
 		});

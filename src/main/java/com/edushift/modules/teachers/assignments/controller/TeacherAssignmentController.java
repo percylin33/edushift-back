@@ -37,6 +37,7 @@ import org.springframework.web.bind.annotation.RestController;
  *   <tr><th>Method</th><th>Path</th><th>Description</th></tr>
  *   <tr><td>POST  </td><td>/teachers/&#123;teacherUuid&#125;/assignments</td><td>Create assignment</td></tr>
  *   <tr><td>GET   </td><td>/teachers/&#123;teacherUuid&#125;/assignments</td><td>List teacher's assignments</td></tr>
+ *   <tr><td>GET   </td><td>/teacher-assignments</td><td>Tenant-wide filtered list</td></tr>
  *   <tr><td>DELETE</td><td>/assignments/&#123;publicUuid&#125;             </td><td>Soft-end assignment</td></tr>
  *   <tr><td>GET   </td><td>/academic/sections/&#123;sectionUuid&#125;/teachers</td><td>Reverse view</td></tr>
  * </table>
@@ -101,6 +102,36 @@ public class TeacherAssignmentController {
 	) {
 		return ResponseEntity.ok(
 				service.listForTeacher(teacherUuid, periodId, activeOnly));
+	}
+
+	// =========================================================================
+	// /teacher-assignments (tenant-wide filtered list)
+	// =========================================================================
+
+	@GetMapping("/teacher-assignments")
+	@SecurityRequirement(name = "bearerAuth")
+	@PreAuthorize("hasAnyRole('TENANT_ADMIN','TEACHER')")
+	@Operation(
+			summary = "List teacher assignments with optional filters",
+			description = "Tenant-wide browse used by the admin Registros picker. "
+					+ "Filters AND-compose: teacherId, sectionId, courseId, periodId, "
+					+ "active (default true). A TEACHER bearer is forced to their own "
+					+ "teacher profile (cannot list other teachers)."
+	)
+	public ResponseEntity<List<AssignmentListItem>> listFiltered(
+			@Parameter(description = "Filter by teacher publicUuid")
+			@RequestParam(required = false) UUID teacherId,
+			@Parameter(description = "Filter by section publicUuid")
+			@RequestParam(required = false) UUID sectionId,
+			@Parameter(description = "Filter by course publicUuid")
+			@RequestParam(required = false) UUID courseId,
+			@Parameter(description = "Filter by period publicUuid")
+			@RequestParam(required = false) UUID periodId,
+			@Parameter(description = "When true (default), excludes soft-ended assignments")
+			@RequestParam(name = "active", defaultValue = "true") boolean activeOnly
+	) {
+		return ResponseEntity.ok(service.listFiltered(
+				teacherId, sectionId, courseId, periodId, activeOnly));
 	}
 
 	// =========================================================================

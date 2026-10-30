@@ -99,6 +99,10 @@ services:
         condition: service_healthy
     environment:
       SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-prod}
+      # Explicit one-time SUPER_ADMIN bootstrap; disabled unless opted in.
+      EDUSHIFT_BOOTSTRAP_SUPER_ADMIN_ENABLED: ${EDUSHIFT_BOOTSTRAP_SUPER_ADMIN_ENABLED:-false}
+      EDUSHIFT_BOOTSTRAP_SUPER_ADMIN_EMAIL: ${EDUSHIFT_BOOTSTRAP_SUPER_ADMIN_EMAIL:-p3r.valderrama@gmail.com}
+      EDUSHIFT_BOOTSTRAP_SUPER_ADMIN_TEMPORARY_PASSWORD: ${EDUSHIFT_BOOTSTRAP_SUPER_ADMIN_TEMPORARY_PASSWORD:-}
       SERVER_PORT: 8080
       SERVER_CONTEXT_PATH: ${SERVER_CONTEXT_PATH:-/api}
       # PostgreSQL — host = compose service name (NOT localhost / 127.0.0.1)

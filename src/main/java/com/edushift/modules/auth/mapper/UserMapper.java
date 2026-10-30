@@ -7,7 +7,6 @@ import com.edushift.modules.auth.dto.UserSummary;
 import com.edushift.modules.auth.entity.User;
 import com.edushift.modules.auth.entity.UserStatus;
 import com.edushift.shared.security.LmsRoleAuthorityMapper;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 import org.springframework.stereotype.Component;
@@ -53,17 +52,22 @@ public class UserMapper {
 			return null;
 		}
 		Set<String> roleNames = user.getRoleNames();
-		Set<String> permissions = resolvePermissions(roleNames);
+		Set<String> permissions = resolvePermissions(user);
 		return new UserResponse(
 				user.getPublicUuid(),
 				user.getFirstName(),
 				user.getLastName(),
+				user.getSecondLastName(),
 				user.fullName(),
 				user.getEmail(),
 				user.getPhone(),
 				user.getAvatarUrl(),
 				user.getStatus(),
 				user.isEmailVerified(),
+				user.getEmailSource() == null
+						? com.edushift.modules.auth.entity.EmailSource.REAL
+						: user.getEmailSource(),
+				user.isMustChangePassword(),
 				user.isMfaEnabled(),
 				roleNames,
 				permissions,
@@ -81,34 +85,13 @@ public class UserMapper {
 	 * authorities so the field is omitted from the JSON payload — keeping
 	 * the wire format lean for non-LMS tenants.
 	 */
-	private Set<String> resolvePermissions(Set<String> roleNames) {
-		if (roleNames == null || roleNames.isEmpty()) {
+	private Set<String> resolvePermissions(User user) {
+		if (user == null || user.getRoleSet().isEmpty()) {
 			return null;
 		}
-		Set<String> authorities = new LinkedHashSet<>();
-		roleNames.stream()
-				.map(this::safeRole)
-				.filter(java.util.Objects::nonNull)
-				.forEach(role -> authorities.addAll(lmsRoleAuthorityMapper.mapAuthorities(List.of(role))));
+		Set<String> authorities = lmsRoleAuthorityMapper.resolveFor(
+				user.getTenantId(), user.getId(), user.getRoleSet());
 		return authorities.isEmpty() ? null : authorities;
-	}
-
-	/**
-	 * Map a role name (e.g. {@code "TENANT_ADMIN"}) to the
-	 * {@link com.edushift.modules.auth.entity.UserRole} enum. Returns
-	 * {@code null} for unknown / blank names so the mapper never throws on
-	 * forward-compat role names the server doesn't know yet.
-	 */
-	private com.edushift.modules.auth.entity.UserRole safeRole(String name) {
-		if (name == null || name.isBlank()) {
-			return null;
-		}
-		try {
-			return com.edushift.modules.auth.entity.UserRole.valueOf(name);
-		}
-		catch (IllegalArgumentException e) {
-			return null;
-		}
 	}
 
 	public UserSummary toSummary(User user) {

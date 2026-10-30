@@ -4,15 +4,22 @@ import com.edushift.modules.admin.auth.AdminAuthService;
 import com.edushift.modules.admin.auth.AdminAuthService.LoginOutcome;
 import com.edushift.modules.admin.auth.AdminLoginRequest;
 import com.edushift.modules.admin.auth.AdminLoginResponse;
+import com.edushift.modules.admin.auth.dto.AdminInitialPasswordChangeRequest;
+import com.edushift.modules.admin.auth.dto.AdminMfaRequiredResponse;
+import com.edushift.modules.auth.controller.CookieHelper;
+import com.edushift.modules.auth.dto.RefreshTokenRequest;
 import com.edushift.shared.api.ApiResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.ResponseCookie;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -24,7 +31,10 @@ import org.springframework.web.bind.annotation.RestController;
 @RequiredArgsConstructor
 public class AdminAuthController {
 
+	private static final long REFRESH_COOKIE_MAX_AGE_SEC = 7L * 24 * 60 * 60;
+
 	private final AdminAuthService adminAuthService;
+	private final CookieHelper cookieHelper;
 
 	@PostMapping("/login")
 	@Operation(
@@ -54,16 +64,46 @@ public class AdminAuthController {
 			})
 	public ResponseEntity<LoginOutcome> login(
 			@Valid @RequestBody AdminLoginRequest request,
-			HttpServletRequest httpRequest) {
+			HttpServletRequest httpRequest,
+			HttpServletResponse httpResponse) {
 		String ip = resolveClientIp(httpRequest);
 		LoginOutcome outcome = adminAuthService.login(request, ip);
+		if (outcome instanceof AdminLoginResponse session) {
+			ResponseCookie accessCookie = cookieHelper.createAccessTokenCookie(
+					session.accessToken(), session.expiresInSec());
+			ResponseCookie refreshCookie = cookieHelper.createRefreshTokenCookie(
+					session.refreshToken(), REFRESH_COOKIE_MAX_AGE_SEC);
+			httpResponse.addHeader("Set-Cookie", accessCookie.toString());
+			httpResponse.addHeader("Set-Cookie", refreshCookie.toString());
+		}
 		return ResponseEntity.ok(outcome);
+	}
+
+	@PostMapping("/initial-password")
+	@Operation(summary = "Change the initial password before MFA enrolment",
+			description = "Requires the short-lived onboarding bearer from login and only newPassword.")
+	public ResponseEntity<AdminMfaRequiredResponse> changeInitialPassword(
+			@RequestHeader(value = "Authorization", required = false) String authHeader,
+			@Valid @RequestBody AdminInitialPasswordChangeRequest request,
+			HttpServletRequest httpRequest) {
+		String token = stripBearer(authHeader);
+		return ResponseEntity.ok(adminAuthService.changeInitialPassword(
+				token, request, resolveClientIp(httpRequest)));
 	}
 
 	@PostMapping("/logout")
 	@Operation(summary = "Revoke the admin refresh token")
-	public ApiResponse<Void> logout(@Valid @RequestBody com.edushift.modules.auth.dto.RefreshTokenRequest request) {
-		adminAuthService.logout(request.refreshToken());
+	public ApiResponse<Void> logout(
+			@RequestBody(required = false) RefreshTokenRequest request,
+			HttpServletRequest httpRequest,
+			HttpServletResponse httpResponse) {
+		String refreshToken = CookieHelper.getCookieValue(httpRequest, "edushift_refresh_token");
+		if ((refreshToken == null || refreshToken.isBlank()) && request != null) {
+			refreshToken = request.refreshToken();
+		}
+		adminAuthService.logout(refreshToken);
+		httpResponse.addHeader("Set-Cookie", cookieHelper.clearAccessTokenCookie().toString());
+		httpResponse.addHeader("Set-Cookie", cookieHelper.clearRefreshTokenCookie().toString());
 		return ApiResponse.ok();
 	}
 
@@ -74,5 +114,12 @@ public class AdminAuthController {
 			return comma < 0 ? xff.trim() : xff.substring(0, comma).trim();
 		}
 		return request.getRemoteAddr();
+	}
+
+	private static String stripBearer(String header) {
+		if (header == null) return null;
+		String prefix = "Bearer ";
+		return header.regionMatches(true, 0, prefix, 0, prefix.length())
+				? header.substring(prefix.length()).trim() : header.trim();
 	}
 }

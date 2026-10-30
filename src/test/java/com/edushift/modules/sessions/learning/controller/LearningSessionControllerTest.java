@@ -82,6 +82,9 @@ class LearningSessionControllerTest {
     private LearningSessionService service;
 
     @MockitoBean
+    private com.edushift.modules.sessions.learning.service.ApplicationSheetService applicationSheetService;
+
+    @MockitoBean
     private JwtService jwtService;
 
     @MockitoBean
@@ -107,7 +110,7 @@ class LearningSessionControllerTest {
             new AssignmentRef(assignmentUuid,
                 new TeacherRef(UUID.randomUUID(), "John", "Doe"),
                 new CourseRef(UUID.randomUUID(), "MATH-101", "Algebra"),
-                new SectionRef(UUID.randomUUID(), "A"),
+                new SectionRef(UUID.randomUUID(), "A", "1ro"),
                 new PeriodRef(UUID.randomUUID(), "QUARTER", 1, "Q1",
                     LocalDate.of(2026, 3, 1), LocalDate.of(2026, 5, 31))),
             new UnitRef(unitUuid, "Unit 1", 1),
@@ -118,7 +121,8 @@ class LearningSessionControllerTest {
             List.of(new CapacityRef(UUID.randomUUID(), "CAP1", "Capacity 1", UUID.randomUUID())),
             null, null, null,
             Instant.parse("2026-01-01T00:00:00Z"),
-            Instant.parse("2026-01-01T00:00:00Z")
+            Instant.parse("2026-01-01T00:00:00Z"),
+            false
         );
     }
 
@@ -130,6 +134,14 @@ class LearningSessionControllerTest {
             List.of(new SimpleGrantedAuthority("ROLE_TENANT_ADMIN")));
     }
 
+    private JwtAuthenticationToken authenticatedTeacher() {
+        JwtAuthenticatedPrincipal principal = new JwtAuthenticatedPrincipal(
+            userId, tenantId, "acme", "teacher@acme.test");
+        return new JwtAuthenticationToken(
+            principal, "fake.token",
+            List.of(new SimpleGrantedAuthority("ROLE_TEACHER")));
+    }
+
     private String json(Object value) throws Exception {
         return objectMapper.writeValueAsString(value);
     }
@@ -137,6 +149,16 @@ class LearningSessionControllerTest {
     @Nested
     @DisplayName("GET /learning-sessions")
     class ListSessions {
+
+        @Test
+        @DisplayName("200 — TEACHER puede listar sus sesiones")
+        void teacherCanList() throws Exception {
+            given(service.list(any())).willReturn(List.of());
+
+            mockMvc.perform(get("/v1/learning-sessions")
+                    .with(authentication(authenticatedTeacher())))
+                .andExpect(status().isOk());
+        }
 
         @Test
         @DisplayName("200 — lista sessions con filtros")
@@ -165,6 +187,25 @@ class LearningSessionControllerTest {
     class CreateSession {
 
         @Test
+        @DisplayName("201 — TEACHER puede crear sesión")
+        void teacherCanCreate() throws Exception {
+            given(service.create(any())).willReturn(stubResponse);
+
+            var req = new CreateLearningSessionRequest(
+                assignmentUuid, unitUuid, "Class 1", "Learn X",
+                LocalDate.of(2026, 4, 1), 45,
+                new SessionContentDto("Ctx", List.of("Act"), List.of("Mat"), "Obs"),
+                List.of(), List.of(), null);
+
+            mockMvc.perform(post("/v1/learning-sessions")
+                    .with(authentication(authenticatedTeacher()))
+                    .with(csrf())
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content(json(req)))
+                .andExpect(status().isCreated());
+        }
+
+        @Test
         @DisplayName("201 — crea y retorna response")
         void create() throws Exception {
             given(service.create(any())).willReturn(stubResponse);
@@ -173,8 +214,7 @@ class LearningSessionControllerTest {
                 assignmentUuid, unitUuid, "Class 1", "Learn X",
                 LocalDate.of(2026, 4, 1), 45,
                 new SessionContentDto("Ctx", List.of("Act"), List.of("Mat"), "Obs"),
-                List.of(), List.of()
-            );
+                List.of(), List.of(), null);
 
             mockMvc.perform(post("/v1/learning-sessions")
                     .with(authentication(authenticatedAdmin()))
@@ -211,7 +251,7 @@ class LearningSessionControllerTest {
         void update() throws Exception {
             given(service.update(eq(sessionUuid), any())).willReturn(stubResponse);
 
-            var patch = new UpdateLearningSessionRequest(null, "Updated", null, null, null, null, null, null);
+            var patch = new UpdateLearningSessionRequest(null, "Updated", null, null, null, null, null, null, null);
 
             mockMvc.perform(put("/v1/learning-sessions/{publicUuid}", sessionUuid)
                     .with(authentication(authenticatedAdmin()))

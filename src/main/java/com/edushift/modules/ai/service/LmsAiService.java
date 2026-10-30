@@ -120,6 +120,7 @@ public class LmsAiService {
         // Build the prompt (this also normalises topic / count).
         LlmRequest llmRequest = promptBuilder.build(
                 request.topic(), request.count(), request.questionType(), model);
+        quotaService.reserveForRequest(llmRequest);
 
         // 2. Persist a PENDING audit row BEFORE the call. If the JVM
         //    dies mid-call, we still have a record of the attempt.

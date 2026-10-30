@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -14,10 +15,12 @@ import com.edushift.modules.academic.competency.entity.Competency;
 import com.edushift.modules.academic.competency.repository.CapacityRepository;
 import com.edushift.modules.academic.competency.repository.CompetencyRepository;
 import com.edushift.modules.academic.course.entity.Course;
+import com.edushift.modules.academic.levelgrade.entity.Grade;
 import com.edushift.modules.academic.period.entity.AcademicPeriod;
 import com.edushift.modules.academic.section.entity.Section;
 import com.edushift.modules.academic.unit.entity.Unit;
 import com.edushift.modules.academic.unit.repository.UnitRepository;
+import com.edushift.modules.sessions.learning.dto.CopyLearningSessionRequest;
 import com.edushift.modules.sessions.learning.dto.CreateLearningSessionRequest;
 import com.edushift.modules.sessions.learning.dto.LearningSessionFilters;
 import com.edushift.modules.sessions.learning.dto.LearningSessionListItem;
@@ -26,14 +29,22 @@ import com.edushift.modules.sessions.learning.dto.LifecycleRequest;
 import com.edushift.modules.sessions.learning.dto.SessionContentDto;
 import com.edushift.modules.sessions.learning.dto.UpdateLearningSessionRequest;
 import com.edushift.modules.sessions.learning.entity.LearningSession;
+import com.edushift.modules.sessions.learning.entity.SessionContent;
 import com.edushift.modules.sessions.learning.entity.SessionStatus;
 import com.edushift.modules.sessions.learning.mapper.LearningSessionMapper;
 import com.edushift.modules.sessions.learning.repository.LearningSessionRepository;
+import com.edushift.modules.sessions.learning.service.ApplicationSheetService;
+import com.edushift.modules.sessions.template.service.SessionTemplateService;
+import com.edushift.modules.schedule.daytemplate.service.NonTeachingBlockResolver;
+import com.edushift.modules.schedule.timeslot.repository.TimeSlotRepository;
 import com.edushift.modules.teachers.assignments.entity.TeacherAssignment;
 import com.edushift.modules.teachers.assignments.repository.TeacherAssignmentRepository;
+import com.edushift.modules.teachers.assignments.support.LmsAssignmentBinder;
 import com.edushift.modules.teachers.entity.Teacher;
 import com.edushift.shared.exception.BadRequestException;
 import com.edushift.shared.exception.ConflictException;
+import com.edushift.shared.exception.ForbiddenException;
+import com.edushift.shared.exception.NotFoundException;
 import com.edushift.shared.exception.ResourceNotFoundException;
 import java.lang.reflect.Field;
 import java.time.Instant;
@@ -42,10 +53,12 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.Spy;
@@ -68,9 +81,21 @@ class LearningSessionServiceImplTest {
 	@Mock private UnitRepository unitRepository;
 	@Mock private CompetencyRepository competencyRepository;
 	@Mock private CapacityRepository capacityRepository;
+	@Mock private NonTeachingBlockResolver nonTeachingBlockResolver;
+	@Mock private TimeSlotRepository timeSlotRepository;
+	@Mock private SessionTemplateService sessionTemplateService;
+	@Mock private LmsAssignmentBinder lmsAssignmentBinder;
+	@Mock private ApplicationSheetService applicationSheetService;
 	@Spy private LearningSessionMapper mapper = new LearningSessionMapper();
 
 	@InjectMocks private LearningSessionServiceImpl service;
+
+	@BeforeEach
+	void stubBinderDefaults() {
+		org.mockito.Mockito.lenient()
+				.when(lmsAssignmentBinder.resolveTeacherFilterForList(org.mockito.ArgumentMatchers.any()))
+				.thenAnswer(inv -> inv.getArgument(0));
+	}
 
 	// =========================================================================
 	// createSession
@@ -84,8 +109,8 @@ class LearningSessionServiceImplTest {
 		@DisplayName("happy path — saves with all fields and returns full response")
 		void happyPath() {
 			Fixtures fx = new Fixtures();
-			when(assignmentRepository.findByPublicUuid(fx.assignment.getPublicUuid()))
-					.thenReturn(Optional.of(fx.assignment));
+			when(lmsAssignmentBinder.requireByPublicUuid(fx.assignment.getPublicUuid()))
+					.thenReturn(fx.assignment);
 			when(unitRepository.findByPublicUuid(fx.unit.getPublicUuid()))
 					.thenReturn(Optional.of(fx.unit));
 			when(sessionRepository.saveAndFlush(any(LearningSession.class)))
@@ -100,8 +125,8 @@ class LearningSessionServiceImplTest {
 					60,
 					new SessionContentDto("obj", List.of("a1"), List.of("m1"), null),
 					List.of(),
-					List.of()
-			);
+					List.of(),
+					null);
 
 			LearningSessionResponse response = service.create(req);
 
@@ -118,15 +143,16 @@ class LearningSessionServiceImplTest {
 		@DisplayName("unknown assignment → 404 RESOURCE_NOT_FOUND")
 		void unknownAssignment() {
 			UUID anyUuid = UUID.randomUUID();
-			when(assignmentRepository.findByPublicUuid(anyUuid))
-					.thenReturn(Optional.empty());
+			when(lmsAssignmentBinder.requireByPublicUuid(anyUuid))
+					.thenThrow(new NotFoundException(
+							"TEACHER_ASSIGNMENT_NOT_FOUND", "missing"));
 
 			CreateLearningSessionRequest req = new CreateLearningSessionRequest(
 					anyUuid, UUID.randomUUID(), "x", null,
-					LocalDate.now(), 60, null, null, null);
+					LocalDate.now(), 60, null, null, null, null);
 
 			assertThatThrownBy(() -> service.create(req))
-					.isInstanceOf(ResourceNotFoundException.class);
+					.isInstanceOf(NotFoundException.class);
 			verify(sessionRepository, never()).saveAndFlush(any());
 		}
 
@@ -135,12 +161,12 @@ class LearningSessionServiceImplTest {
 		void softEndedAssignment() {
 			Fixtures fx = new Fixtures();
 			fx.assignment.setUnassignedAt(Instant.now());
-			when(assignmentRepository.findByPublicUuid(fx.assignment.getPublicUuid()))
-					.thenReturn(Optional.of(fx.assignment));
+			when(lmsAssignmentBinder.requireByPublicUuid(fx.assignment.getPublicUuid()))
+					.thenReturn(fx.assignment);
 
 			CreateLearningSessionRequest req = new CreateLearningSessionRequest(
 					fx.assignment.getPublicUuid(), fx.unit.getPublicUuid(), "x",
-					null, LocalDate.of(2026, 4, 10), 60, null, null, null);
+					null, LocalDate.of(2026, 4, 10), 60, null, null, null, null);
 
 			assertThatThrownBy(() -> service.create(req))
 					.isInstanceOf(ConflictException.class)
@@ -153,14 +179,14 @@ class LearningSessionServiceImplTest {
 			Fixtures fx = new Fixtures();
 			Course otherCourse = newCourse("COMU", "Comunicación");
 			Unit alienUnit = newUnit(otherCourse, "Alien", 1);
-			when(assignmentRepository.findByPublicUuid(fx.assignment.getPublicUuid()))
-					.thenReturn(Optional.of(fx.assignment));
+			when(lmsAssignmentBinder.requireByPublicUuid(fx.assignment.getPublicUuid()))
+					.thenReturn(fx.assignment);
 			when(unitRepository.findByPublicUuid(alienUnit.getPublicUuid()))
 					.thenReturn(Optional.of(alienUnit));
 
 			CreateLearningSessionRequest req = new CreateLearningSessionRequest(
 					fx.assignment.getPublicUuid(), alienUnit.getPublicUuid(), "x",
-					null, LocalDate.of(2026, 4, 10), 60, null, null, null);
+					null, LocalDate.of(2026, 4, 10), 60, null, null, null, null);
 
 			assertThatThrownBy(() -> service.create(req))
 					.isInstanceOf(BadRequestException.class)
@@ -171,14 +197,14 @@ class LearningSessionServiceImplTest {
 		@DisplayName("scheduledDate before period start → 400 SESSION_DATE_OUT_OF_PERIOD")
 		void dateBeforePeriodStart() {
 			Fixtures fx = new Fixtures();
-			when(assignmentRepository.findByPublicUuid(fx.assignment.getPublicUuid()))
-					.thenReturn(Optional.of(fx.assignment));
+			when(lmsAssignmentBinder.requireByPublicUuid(fx.assignment.getPublicUuid()))
+					.thenReturn(fx.assignment);
 			when(unitRepository.findByPublicUuid(fx.unit.getPublicUuid()))
 					.thenReturn(Optional.of(fx.unit));
 
 			CreateLearningSessionRequest req = new CreateLearningSessionRequest(
 					fx.assignment.getPublicUuid(), fx.unit.getPublicUuid(), "x",
-					null, LocalDate.of(2026, 1, 1), 60, null, null, null);
+					null, LocalDate.of(2026, 1, 1), 60, null, null, null, null);
 
 			assertThatThrownBy(() -> service.create(req))
 					.isInstanceOf(BadRequestException.class)
@@ -189,14 +215,14 @@ class LearningSessionServiceImplTest {
 		@DisplayName("scheduledDate after period end → 400 SESSION_DATE_OUT_OF_PERIOD")
 		void dateAfterPeriodEnd() {
 			Fixtures fx = new Fixtures();
-			when(assignmentRepository.findByPublicUuid(fx.assignment.getPublicUuid()))
-					.thenReturn(Optional.of(fx.assignment));
+			when(lmsAssignmentBinder.requireByPublicUuid(fx.assignment.getPublicUuid()))
+					.thenReturn(fx.assignment);
 			when(unitRepository.findByPublicUuid(fx.unit.getPublicUuid()))
 					.thenReturn(Optional.of(fx.unit));
 
 			CreateLearningSessionRequest req = new CreateLearningSessionRequest(
 					fx.assignment.getPublicUuid(), fx.unit.getPublicUuid(), "x",
-					null, LocalDate.of(2026, 12, 31), 60, null, null, null);
+					null, LocalDate.of(2026, 12, 31), 60, null, null, null, null);
 
 			assertThatThrownBy(() -> service.create(req))
 					.isInstanceOf(BadRequestException.class)
@@ -209,8 +235,8 @@ class LearningSessionServiceImplTest {
 			Fixtures fx = new Fixtures();
 			Course otherCourse = newCourse("COMU", "Comunicación");
 			Competency alien = newCompetency(otherCourse, "C1", "Alien", 1);
-			when(assignmentRepository.findByPublicUuid(fx.assignment.getPublicUuid()))
-					.thenReturn(Optional.of(fx.assignment));
+			when(lmsAssignmentBinder.requireByPublicUuid(fx.assignment.getPublicUuid()))
+					.thenReturn(fx.assignment);
 			when(unitRepository.findByPublicUuid(fx.unit.getPublicUuid()))
 					.thenReturn(Optional.of(fx.unit));
 			when(competencyRepository.findAllByPublicUuidIn(anyList()))
@@ -219,7 +245,7 @@ class LearningSessionServiceImplTest {
 			CreateLearningSessionRequest req = new CreateLearningSessionRequest(
 					fx.assignment.getPublicUuid(), fx.unit.getPublicUuid(), "x",
 					null, LocalDate.of(2026, 4, 10), 60, null,
-					List.of(alien.getPublicUuid()), null);
+					List.of(alien.getPublicUuid()), null, null);
 
 			assertThatThrownBy(() -> service.create(req))
 					.isInstanceOf(BadRequestException.class)
@@ -230,8 +256,8 @@ class LearningSessionServiceImplTest {
 		@DisplayName("competency UUID does not resolve → 404 RESOURCE_NOT_FOUND")
 		void competencyUnknown() {
 			Fixtures fx = new Fixtures();
-			when(assignmentRepository.findByPublicUuid(fx.assignment.getPublicUuid()))
-					.thenReturn(Optional.of(fx.assignment));
+			when(lmsAssignmentBinder.requireByPublicUuid(fx.assignment.getPublicUuid()))
+					.thenReturn(fx.assignment);
 			when(unitRepository.findByPublicUuid(fx.unit.getPublicUuid()))
 					.thenReturn(Optional.of(fx.unit));
 			when(competencyRepository.findAllByPublicUuidIn(anyList()))
@@ -240,7 +266,7 @@ class LearningSessionServiceImplTest {
 			CreateLearningSessionRequest req = new CreateLearningSessionRequest(
 					fx.assignment.getPublicUuid(), fx.unit.getPublicUuid(), "x",
 					null, LocalDate.of(2026, 4, 10), 60, null,
-					List.of(UUID.randomUUID()), null);
+					List.of(UUID.randomUUID()), null, null);
 
 			assertThatThrownBy(() -> service.create(req))
 					.isInstanceOf(ResourceNotFoundException.class);
@@ -253,8 +279,8 @@ class LearningSessionServiceImplTest {
 			Course otherCourse = newCourse("COMU", "Comunicación");
 			Competency alienComp = newCompetency(otherCourse, "C1", "Alien", 1);
 			Capacity alienCap = newCapacity(alienComp, "C1.1", "Alien Cap", 1);
-			when(assignmentRepository.findByPublicUuid(fx.assignment.getPublicUuid()))
-					.thenReturn(Optional.of(fx.assignment));
+			when(lmsAssignmentBinder.requireByPublicUuid(fx.assignment.getPublicUuid()))
+					.thenReturn(fx.assignment);
 			when(unitRepository.findByPublicUuid(fx.unit.getPublicUuid()))
 					.thenReturn(Optional.of(fx.unit));
 			when(capacityRepository.findAllByPublicUuidIn(anyList()))
@@ -263,7 +289,7 @@ class LearningSessionServiceImplTest {
 			CreateLearningSessionRequest req = new CreateLearningSessionRequest(
 					fx.assignment.getPublicUuid(), fx.unit.getPublicUuid(), "x",
 					null, LocalDate.of(2026, 4, 10), 60, null, null,
-					List.of(alienCap.getPublicUuid()));
+					List.of(alienCap.getPublicUuid()), null);
 
 			assertThatThrownBy(() -> service.create(req))
 					.isInstanceOf(BadRequestException.class)
@@ -300,6 +326,22 @@ class LearningSessionServiceImplTest {
 					.thenReturn(Optional.empty());
 
 			assertThatThrownBy(() -> service.get(anyUuid))
+					.isInstanceOf(ResourceNotFoundException.class);
+		}
+
+		@Test
+		@DisplayName("foreign teacher assignment → 404 (anti-enumeration)")
+		void foreignTeacherAssignment() {
+			Fixtures fx = new Fixtures();
+			LearningSession session = fx.session();
+			when(sessionRepository.findByPublicUuid(session.getPublicUuid()))
+					.thenReturn(Optional.of(session));
+			org.mockito.Mockito.doThrow(new ForbiddenException(
+					"ASSIGNMENT_NOT_OWNED", "not yours"))
+					.when(lmsAssignmentBinder)
+					.assertCallerMayUseAssignment(fx.assignment);
+
+			assertThatThrownBy(() -> service.get(session.getPublicUuid()))
 					.isInstanceOf(ResourceNotFoundException.class);
 		}
 	}
@@ -366,8 +408,8 @@ class LearningSessionServiceImplTest {
 		void byAssignmentHappy() {
 			Fixtures fx = new Fixtures();
 			LearningSession s = fx.session();
-			when(assignmentRepository.findByPublicUuid(fx.assignment.getPublicUuid()))
-					.thenReturn(Optional.of(fx.assignment));
+			when(lmsAssignmentBinder.requireByPublicUuid(fx.assignment.getPublicUuid()))
+					.thenReturn(fx.assignment);
 			when(sessionRepository.findAllByAssignmentOrdered(fx.assignment))
 					.thenReturn(List.of(s));
 
@@ -381,10 +423,11 @@ class LearningSessionServiceImplTest {
 		@DisplayName("listByAssignment unknown → 404")
 		void byAssignmentUnknown() {
 			UUID anyUuid = UUID.randomUUID();
-			when(assignmentRepository.findByPublicUuid(anyUuid))
-					.thenReturn(Optional.empty());
+			when(lmsAssignmentBinder.requireByPublicUuid(anyUuid))
+					.thenThrow(new NotFoundException(
+							"TEACHER_ASSIGNMENT_NOT_FOUND", "missing"));
 			assertThatThrownBy(() -> service.listByAssignment(anyUuid))
-					.isInstanceOf(ResourceNotFoundException.class);
+					.isInstanceOf(NotFoundException.class);
 		}
 
 		@Test
@@ -434,7 +477,7 @@ class LearningSessionServiceImplTest {
 
 			UpdateLearningSessionRequest patch = new UpdateLearningSessionRequest(
 					null, "Nuevo título", null,
-					LocalDate.of(2026, 5, 15), null, null, null, null);
+					LocalDate.of(2026, 5, 15), null, null, null, null, null);
 
 			LearningSessionResponse response = service.update(
 					session.getPublicUuid(), patch);
@@ -452,7 +495,7 @@ class LearningSessionServiceImplTest {
 					.thenReturn(Optional.of(session));
 
 			UpdateLearningSessionRequest patch = new UpdateLearningSessionRequest(
-					null, null, null, null, null, null, null, null);
+					null, null, null, null, null, null, null, null, null);
 
 			service.update(session.getPublicUuid(), patch);
 			verify(sessionRepository, never()).saveAndFlush(any());
@@ -468,7 +511,7 @@ class LearningSessionServiceImplTest {
 					.thenReturn(Optional.of(session));
 
 			UpdateLearningSessionRequest patch = new UpdateLearningSessionRequest(
-					null, "x", null, null, null, null, null, null);
+					null, "x", null, null, null, null, null, null, null);
 
 			assertThatThrownBy(() ->
 					service.update(session.getPublicUuid(), patch))
@@ -489,7 +532,7 @@ class LearningSessionServiceImplTest {
 					.thenReturn(Optional.of(alienUnit));
 
 			UpdateLearningSessionRequest patch = new UpdateLearningSessionRequest(
-					alienUnit.getPublicUuid(), null, null, null, null, null, null, null);
+					alienUnit.getPublicUuid(), null, null, null, null, null, null, null, null);
 
 			assertThatThrownBy(() ->
 					service.update(session.getPublicUuid(), patch))
@@ -507,7 +550,7 @@ class LearningSessionServiceImplTest {
 
 			UpdateLearningSessionRequest patch = new UpdateLearningSessionRequest(
 					null, null, null,
-					LocalDate.of(2027, 1, 1), null, null, null, null);
+					LocalDate.of(2027, 1, 1), null, null, null, null, null);
 
 			assertThatThrownBy(() ->
 					service.update(session.getPublicUuid(), patch))
@@ -711,6 +754,144 @@ class LearningSessionServiceImplTest {
 					new LifecycleRequest(0L, null)))
 					.isInstanceOf(ConflictException.class);
 		}
+	}
+
+	// =========================================================================
+	// copy
+	// =========================================================================
+
+	@Nested
+	@DisplayName("copy")
+	class Copy {
+
+		@Test
+		@DisplayName("author copies to another section of the same grade without sharing")
+		void ownerCopiesWithoutShareFlag() {
+			CopyWorld world = new CopyWorld();
+			when(sessionRepository.findByPublicUuid(world.source.getPublicUuid()))
+					.thenReturn(Optional.of(world.source));
+			when(lmsAssignmentBinder.requireByPublicUuid(world.sameGrade.getPublicUuid()))
+					.thenReturn(world.sameGrade);
+			when(unitRepository.findByPublicUuid(world.fx.unit.getPublicUuid()))
+					.thenReturn(Optional.of(world.fx.unit));
+			when(sessionRepository.saveAndFlush(any(LearningSession.class)))
+					.thenAnswer(inv -> inv.getArgument(0));
+
+			LearningSessionResponse response = service.copy(
+					world.source.getPublicUuid(),
+					new CopyLearningSessionRequest(
+							world.sameGrade.getPublicUuid(), LocalDate.of(2026, 4, 12)));
+
+			ArgumentCaptor<LearningSession> saved = ArgumentCaptor.forClass(LearningSession.class);
+			verify(sessionRepository).saveAndFlush(saved.capture());
+			assertThat(saved.getValue().getTeacherAssignment()).isEqualTo(world.sameGrade);
+			assertThat(saved.getValue().isSharedWithGrade()).isFalse();
+			assertThat(saved.getValue().getContent().getObservations()).isNull();
+			assertThat(saved.getValue().getContent().getActivities())
+					.containsExactly("El docente inicia la clase");
+			assertThat(response.title()).isEqualTo("Sesión 1");
+			assertThat(response.status()).isEqualTo(SessionStatus.PLANNED);
+		}
+
+		@Test
+		@DisplayName("colleague of the same grade copies only when the session is shared")
+		void colleagueCopiesWhenShared() {
+			CopyWorld world = new CopyWorld();
+			world.source.setSharedWithGrade(true);
+			doThrow(new ForbiddenException("ASSIGNMENT_NOT_OWNED", "no"))
+					.when(lmsAssignmentBinder)
+					.assertCallerMayUseAssignment(world.source.getTeacherAssignment());
+			when(sessionRepository.findByPublicUuid(world.source.getPublicUuid()))
+					.thenReturn(Optional.of(world.source));
+			when(lmsAssignmentBinder.requireByPublicUuid(world.sameGrade.getPublicUuid()))
+					.thenReturn(world.sameGrade);
+			when(unitRepository.findByPublicUuid(world.fx.unit.getPublicUuid()))
+					.thenReturn(Optional.of(world.fx.unit));
+			when(sessionRepository.saveAndFlush(any(LearningSession.class)))
+					.thenAnswer(inv -> inv.getArgument(0));
+
+			service.copy(world.source.getPublicUuid(), new CopyLearningSessionRequest(
+					world.sameGrade.getPublicUuid(), LocalDate.of(2026, 4, 12)));
+
+			ArgumentCaptor<LearningSession> saved = ArgumentCaptor.forClass(LearningSession.class);
+			verify(sessionRepository).saveAndFlush(saved.capture());
+			assertThat(saved.getValue().getContent().getObservations()).isNull();
+		}
+
+		@Test
+		@DisplayName("colleague without the share flag → 404")
+		void colleagueWithoutFlagIsNotFound() {
+			CopyWorld world = new CopyWorld();
+			doThrow(new ForbiddenException("ASSIGNMENT_NOT_OWNED", "no"))
+					.when(lmsAssignmentBinder)
+					.assertCallerMayUseAssignment(world.source.getTeacherAssignment());
+			when(sessionRepository.findByPublicUuid(world.source.getPublicUuid()))
+					.thenReturn(Optional.of(world.source));
+
+			assertThatThrownBy(() -> service.copy(
+					world.source.getPublicUuid(),
+					new CopyLearningSessionRequest(
+							world.sameGrade.getPublicUuid(), LocalDate.of(2026, 4, 12))))
+					.isInstanceOf(ResourceNotFoundException.class);
+			verify(sessionRepository, never()).saveAndFlush(any());
+		}
+
+		@Test
+		@DisplayName("another grade → 404 even when the session is shared")
+		void otherGradeIsNotFound() {
+			CopyWorld world = new CopyWorld();
+			world.source.setSharedWithGrade(true);
+			doThrow(new ForbiddenException("ASSIGNMENT_NOT_OWNED", "no"))
+					.when(lmsAssignmentBinder)
+					.assertCallerMayUseAssignment(world.source.getTeacherAssignment());
+			when(sessionRepository.findByPublicUuid(world.source.getPublicUuid()))
+					.thenReturn(Optional.of(world.source));
+			when(lmsAssignmentBinder.requireByPublicUuid(world.otherGrade.getPublicUuid()))
+					.thenReturn(world.otherGrade);
+
+			assertThatThrownBy(() -> service.copy(
+					world.source.getPublicUuid(),
+					new CopyLearningSessionRequest(
+							world.otherGrade.getPublicUuid(), LocalDate.of(2026, 4, 12))))
+					.isInstanceOf(ResourceNotFoundException.class);
+			verify(sessionRepository, never()).saveAndFlush(any());
+		}
+	}
+
+	private static final class CopyWorld {
+		final Fixtures fx = new Fixtures();
+		final Grade primero = newGrade("1ro Primaria");
+		final Grade quinto = newGrade("5to Primaria");
+		final TeacherAssignment sameGrade;
+		final TeacherAssignment otherGrade;
+		final LearningSession source;
+
+		CopyWorld() {
+			fx.section.setGrade(primero);
+			Section sibling = newSection("1B");
+			sibling.setGrade(primero);
+			sameGrade = newAssignment(fx.teacher, sibling, fx.course, fx.period);
+
+			Section other = newSection("5A");
+			other.setGrade(quinto);
+			otherGrade = newAssignment(newTeacher("Luis", "Rojas"), other, fx.course, fx.period);
+
+			source = fx.session();
+			SessionContent content = new SessionContent();
+			content.setActivities(List.of("El docente inicia la clase"));
+			content.setMaterials(List.of("Fichas"));
+			content.setObservations("Juan faltó");
+			source.setContent(content);
+			source.setSharedWithGrade(false);
+		}
+	}
+
+	private static Grade newGrade(String name) {
+		Grade grade = new Grade();
+		grade.setName(name);
+		setField(grade, "publicUuid", UUID.randomUUID());
+		setField(grade, "id", UUID.randomUUID());
+		return grade;
 	}
 
 	// =========================================================================

@@ -71,6 +71,10 @@ class PaymentDtoTest {
         assertThat(r.status()).isEqualTo(Invoice.Status.PAID);
         assertThat(r.items()).hasSize(1);
         assertThat(r.items().get(0).description()).isEqualTo("Cuota");
+        assertThat(r.evidenceFilePublicUuid()).isNull();
+        assertThat(r.evidenceRejectionReason()).isNull();
+        assertThat(r.moraCents()).isZero();
+        assertThat(r.moraExempt()).isFalse();
     }
 
     @Test

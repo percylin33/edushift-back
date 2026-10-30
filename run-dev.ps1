@@ -41,23 +41,76 @@ if (-not (Test-Path $envFile)) {
     exit 1
 }
 
-Write-Host "[run-dev] Cargando .env (SMTP/Redis/MiniMax; DB = local fijo)..." -ForegroundColor Cyan
+Write-Host "[run-dev] Cargando .env (SMTP/Redis/MiniMax/Firebase; DB = local fijo)..." -ForegroundColor Cyan
 $loaded = 0
-Get-Content $envFile | ForEach-Object {
-    $line = $_.Trim()
-    if ($line -eq "" -or $line.StartsWith("#")) { return }
-    if ($line -notmatch "=") { return }
-    $name, $value = $line.Split("=", 2)
-    $name = $name.Trim()
-    $value = $value.Trim()
-    if ($value.StartsWith('"') -and $value.EndsWith('"')) { $value = $value.Substring(1, $value.Length - 2) }
-    if ($value.StartsWith("'") -and $value.EndsWith("'")) { $value = $value.Substring(1, $value.Length - 2) }
-    if ($value -match '^\{' -or $value.Length -gt 500) { return }
-    if ($name -match '^DB_') { return }
+$lines = Get-Content -Path $envFile -Encoding UTF8
+$i = 0
+while ($i -lt $lines.Count) {
+    $raw = $lines[$i]
+    $line = $raw.Trim()
+    $i++
+    if ($line -eq "" -or $line.StartsWith("#")) { continue }
+    if ($line -notmatch "=") { continue }
+
+    $eq = $line.IndexOf("=")
+    $name = $line.Substring(0, $eq).Trim()
+    $value = $line.Substring($eq + 1).Trim()
+
+    # Multiline JSON (e.g. STORAGE_FIREBASE_CREDENTIALS_JSON={ ... })
+    if ($value.StartsWith("{") -and -not $value.EndsWith("}")) {
+        $buf = New-Object System.Collections.Generic.List[string]
+        $buf.Add($value)
+        $depth = 0
+        foreach ($ch in $value.ToCharArray()) {
+            if ($ch -eq [char]'{') { $depth++ }
+            elseif ($ch -eq [char]'}') { $depth-- }
+        }
+        while ($i -lt $lines.Count -and $depth -gt 0) {
+            $cont = $lines[$i]
+            $i++
+            $buf.Add($cont)
+            foreach ($ch in $cont.ToCharArray()) {
+                if ($ch -eq [char]'{') { $depth++ }
+                elseif ($ch -eq [char]'}') { $depth-- }
+            }
+        }
+        $value = ($buf -join "`n").Trim()
+    }
+
+    if ($value.StartsWith('"') -and $value.EndsWith('"') -and $value.Length -ge 2) {
+        $value = $value.Substring(1, $value.Length - 2)
+    }
+    if ($value.StartsWith("'") -and $value.EndsWith("'") -and $value.Length -ge 2) {
+        $value = $value.Substring(1, $value.Length - 2)
+    }
+    if ($name -match '^DB_') { continue }
+
     Set-Item -Path "Env:$name" -Value $value
-    $script:loaded++
+    $loaded++
 }
 Write-Host "[run-dev] Variables cargadas: $loaded" -ForegroundColor Gray
+if ($env:MINIMAX_BASE_URL -like "https://openrouter.ai/*") {
+    # Do not send a stored MiniMax credential to OpenRouter by mistake.
+    $openRouterKey = $env:OPENROUTER_API_KEY
+    if ([string]::IsNullOrWhiteSpace($openRouterKey) -and $env:MINIMAX_API_KEY -like "sk-or-*") {
+        # Backward-compatible: the user's existing OpenRouter key may still
+        # be stored under the old MINIMAX_API_KEY setting.
+        $openRouterKey = $env:MINIMAX_API_KEY
+    }
+    $env:MINIMAX_API_KEY = $openRouterKey
+    if ([string]::IsNullOrWhiteSpace($openRouterKey)) {
+        Write-Host "[run-dev] OPENROUTER_API_KEY vacia: se usara MockLlmClient hasta configurarla." -ForegroundColor Yellow
+    }
+}
+if ($env:STORAGE_PROVIDER -eq "FIREBASE") {
+    $jsonLen = if ($env:STORAGE_FIREBASE_CREDENTIALS_JSON) { $env:STORAGE_FIREBASE_CREDENTIALS_JSON.Length } else { 0 }
+    $pathSet = [string]::IsNullOrWhiteSpace($env:STORAGE_FIREBASE_CREDENTIALS_PATH) -eq $false
+    if ($jsonLen -gt 20 -or $pathSet) {
+        Write-Host "[run-dev] Firebase storage: ENABLED (bucket=$($env:STORAGE_FIREBASE_BUCKET); jsonChars=$jsonLen; pathSet=$pathSet)" -ForegroundColor Green
+    } else {
+        Write-Host "[run-dev] Firebase storage: STORAGE_PROVIDER=FIREBASE pero no hay credenciales (JSON/PATH vacios)" -ForegroundColor Red
+    }
+}
 
 # Re-aplicar DB local por si .env u otra cosa la toco (defensa en profundidad).
 $env:DB_HOST = "localhost"
@@ -69,18 +122,34 @@ $env:DB_SCHEMA = "edushift"
 $env:DB_SSL_MODE = "disable"
 
 # ---------------------------------------------------------------------------
-# 2. Validar MiniMax
+# 2. Validar el proveedor LLM.
+#    Perfil dev: Ollama (gemma4:e2b) si OLLAMA_ENABLED no viene en .env.
+#    MiniMax solo gana con OLLAMA_ENABLED=false y MINIMAX_ENABLED=true.
+#    El flag ai_enabled del colegio es aparte: este script no lo toca.
 # ---------------------------------------------------------------------------
-if ($env:MINIMAX_ENABLED -eq "true") {
-    Write-Host "[run-dev] MiniMax: ENABLED" -ForegroundColor Green
+if (-not $env:OLLAMA_ENABLED) {
+    $env:OLLAMA_ENABLED = "true"
+}
+if (-not $env:OLLAMA_BASE_URL) {
+    $env:OLLAMA_BASE_URL = "http://localhost:11434/v1"
+}
+if (-not $env:OLLAMA_DEFAULT_MODEL) {
+    $env:OLLAMA_DEFAULT_MODEL = "gemma4:e2b"
+}
+
+if ($env:OLLAMA_ENABLED -eq "true") {
+    Write-Host "[run-dev] LLM: Ollama ($($env:OLLAMA_DEFAULT_MODEL) @ $($env:OLLAMA_BASE_URL))" -ForegroundColor Green
+    Write-Host "[run-dev]   MiniMax queda apagado mientras Ollama esta activo." -ForegroundColor Gray
+} elseif ($env:MINIMAX_ENABLED -eq "true") {
+    $providerName = if ($env:MINIMAX_BASE_URL -like "https://openrouter.ai/*") { "OpenRouter (adaptador OpenAI-compatible)" } else { "MiniMax" }
+    Write-Host "[run-dev] LLM: $providerName" -ForegroundColor Green
     Write-Host "[run-dev]   base-url: $env:MINIMAX_BASE_URL" -ForegroundColor Gray
     Write-Host "[run-dev]   model:    $env:MINIMAX_DEFAULT_MODEL" -ForegroundColor Gray
     if ($env:MINIMAX_API_KEY) {
-        $keyPreview = $env:MINIMAX_API_KEY.Substring(0, [Math]::Min(20, $env:MINIMAX_API_KEY.Length))
-        Write-Host "[run-dev]   api-key:  ${keyPreview}..." -ForegroundColor Gray
+        Write-Host "[run-dev]   api-key:  configurada" -ForegroundColor Gray
     }
 } else {
-    Write-Host "[run-dev] MiniMax: DISABLED (MockLlmClient activo)" -ForegroundColor Yellow
+    Write-Host "[run-dev] LLM: MockLlmClient (Ollama y MiniMax apagados)" -ForegroundColor Yellow
 }
 
 # ---------------------------------------------------------------------------

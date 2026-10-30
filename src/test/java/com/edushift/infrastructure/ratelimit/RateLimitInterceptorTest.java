@@ -38,7 +38,7 @@ class RateLimitInterceptorTest {
 		RateLimitProperties props = new RateLimitProperties();
 		props.setRules(List.of(tenantsRegisterRule()));
 		interceptor = new RateLimitInterceptor(
-				new ObjectMapper(), props, new SimpleRateLimiter());
+				new ObjectMapper().findAndRegisterModules(), props, new SimpleRateLimiter());
 	}
 
 	private static RateLimitProperties.Rule tenantsRegisterRule() {

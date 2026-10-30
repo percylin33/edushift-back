@@ -64,6 +64,7 @@ class TeacherAssignmentControllerTest {
 	@MockitoBean private com.edushift.shared.security.LmsRoleAuthorityMapper roleAuthorityMapper;
 
 private static final String TEACHERS_BASE = "/v1/teachers";
+	private static final String TEACHER_ASSIGNMENTS_BASE = "/v1/teacher-assignments";
 	private static final String ASSIGNMENTS_BASE = "/v1/assignments";
 	private static final String SECTIONS_BASE = "/v1/academic/sections";
 
@@ -90,8 +91,9 @@ private static final String TEACHERS_BASE = "/v1/teachers";
 		return new AssignmentResponse(
 				publicUuid,
 				teacherUuid, "Ada Lovelace",
-				UUID.randomUUID(), "A",
+				UUID.randomUUID(), "A", "1ro Primaria",
 				UUID.randomUUID(), "MAT", "Matematica",
+				"#3B82F6", "target",
 				UUID.randomUUID(), PeriodType.BIMESTRE, 1, "I Bimestre",
 				UUID.randomUUID(), "2026",
 				Instant.parse("2026-03-01T00:00:00Z"), null, true, null,
@@ -103,8 +105,9 @@ private static final String TEACHERS_BASE = "/v1/teachers";
 		return new AssignmentListItem(
 				UUID.randomUUID(),
 				UUID.randomUUID(), "Ada Lovelace",
-				UUID.randomUUID(), "A",
+				UUID.randomUUID(), "A", "1ro Primaria",
 				UUID.randomUUID(), "MAT", "Matematica",
+				"#3B82F6", "target",
 				UUID.randomUUID(), PeriodType.BIMESTRE, 1,
 				Instant.parse("2026-03-01T00:00:00Z"), null, true);
 	}
@@ -234,6 +237,57 @@ private static final String TEACHERS_BASE = "/v1/teachers";
 									UUID.randomUUID(), UUID.randomUUID(),
 									UUID.randomUUID(), null))))
 					.andExpect(status().isForbidden());
+		}
+	}
+
+	// =========================================================================
+	// GET /v1/teacher-assignments
+	// =========================================================================
+
+	@Nested
+	@DisplayName("GET /v1/teacher-assignments")
+	class ListFiltered {
+
+		@Test
+		@DisplayName("default → activeOnly=true, no filters")
+		void defaultActive() throws Exception {
+			given(service.listFiltered(eq(null), eq(null), eq(null), eq(null), eq(true)))
+					.willReturn(List.of(stubListItem()));
+
+			mockMvc.perform(get(TEACHER_ASSIGNMENTS_BASE)
+							.with(authentication(adminAuth())))
+					.andExpect(status().isOk())
+					.andExpect(jsonPath("$.length()").value(1))
+					.andExpect(jsonPath("$[0].active").value(true));
+		}
+
+		@Test
+		@DisplayName("forwards teacherId/sectionId/courseId/periodId/active")
+		void withFilters() throws Exception {
+			UUID teacherId = UUID.randomUUID();
+			UUID sectionId = UUID.randomUUID();
+			UUID courseId = UUID.randomUUID();
+			UUID periodId = UUID.randomUUID();
+			given(service.listFiltered(
+					eq(teacherId), eq(sectionId), eq(courseId), eq(periodId), eq(false)))
+					.willReturn(List.of(stubListItem()));
+
+			mockMvc.perform(get(TEACHER_ASSIGNMENTS_BASE)
+							.param("teacherId", teacherId.toString())
+							.param("sectionId", sectionId.toString())
+							.param("courseId", courseId.toString())
+							.param("periodId", periodId.toString())
+							.param("active", "false")
+							.with(authentication(adminAuth())))
+					.andExpect(status().isOk())
+					.andExpect(jsonPath("$.length()").value(1));
+		}
+
+		@Test
+		@DisplayName("anonymous → 401")
+		void unauthorized() throws Exception {
+			mockMvc.perform(get(TEACHER_ASSIGNMENTS_BASE))
+					.andExpect(status().isUnauthorized());
 		}
 	}
 

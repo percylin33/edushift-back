@@ -12,6 +12,9 @@ public interface UserDeviceTokenRepository extends JpaRepository<UserDeviceToken
 
 	Optional<UserDeviceToken> findByToken(String token);
 
+	Optional<UserDeviceToken> findByTenantIdAndUserPublicUuidAndToken(
+			UUID tenantId, UUID userPublicUuid, String token);
+
 	List<UserDeviceToken> findByTenantIdAndUserPublicUuidAndActiveTrueOrderByLastSeenAtDesc(
 			UUID tenantId, UUID userPublicUuid);
 

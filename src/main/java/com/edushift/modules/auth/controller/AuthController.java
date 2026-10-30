@@ -1,6 +1,8 @@
 package com.edushift.modules.auth.controller;
 
 import com.edushift.modules.auth.dto.AuthResponse;
+import com.edushift.modules.auth.dto.ChangePasswordRequest;
+import com.edushift.modules.auth.dto.CompleteOnboardingRequest;
 import com.edushift.modules.auth.dto.ForgotPasswordRequest;
 import com.edushift.modules.auth.dto.GoogleLoginRequest;
 import com.edushift.modules.auth.dto.LoginRequest;
@@ -9,11 +11,14 @@ import com.edushift.modules.auth.dto.MfaDisableRequest;
 import com.edushift.modules.auth.dto.MfaEnrollVerifyRequest;
 import com.edushift.modules.auth.dto.MfaRegenerateRequest;
 import com.edushift.modules.auth.dto.MfaResponse;
+import com.edushift.modules.auth.dto.OnboardingMeResponse;
 import com.edushift.modules.auth.dto.RefreshTokenRequest;
 import com.edushift.modules.auth.dto.ResetPasswordRequest;
 import com.edushift.modules.auth.dto.ResetPasswordValidateResponse;
+import com.edushift.modules.auth.dto.UpdateMeRequest;
 import com.edushift.modules.auth.dto.UserResponse;
 import com.edushift.modules.auth.service.AuthService;
+import com.edushift.modules.auth.service.FirstLoginOnboardingService;
 import com.edushift.modules.auth.service.GoogleAuthService;
 import com.edushift.modules.auth.service.MfaService;
 import com.edushift.modules.auth.service.PasswordResetService;
@@ -31,13 +36,16 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.ResponseCookie;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
@@ -107,25 +115,31 @@ public class AuthController {
 	public static final String TENANT_SLUG_HEADER = "X-Tenant-Slug";
 
 	private final AuthService authService;
+	private final FirstLoginOnboardingService firstLoginOnboardingService;
 	private final GoogleAuthService googleAuthService;
 	private final GoogleIdentityProvider googleIdentityProvider;
 	private final TenantRepository tenantRepository;
 	private final PasswordResetService passwordResetService;
 	private final MfaService mfaService;
+	private final CookieHelper cookieHelper;
 
 	public AuthController(
 			AuthService authService,
+			FirstLoginOnboardingService firstLoginOnboardingService,
 			GoogleAuthService googleAuthService,
 			GoogleIdentityProvider googleIdentityProvider,
 			TenantRepository tenantRepository,
 			PasswordResetService passwordResetService,
-			MfaService mfaService) {
+			MfaService mfaService,
+			CookieHelper cookieHelper) {
 		this.authService = authService;
+		this.firstLoginOnboardingService = firstLoginOnboardingService;
 		this.googleAuthService = googleAuthService;
 		this.googleIdentityProvider = googleIdentityProvider;
 		this.tenantRepository = tenantRepository;
 		this.passwordResetService = passwordResetService;
 		this.mfaService = mfaService;
+		this.cookieHelper = cookieHelper;
 	}
 
 	// ---------------------------------------------------------------------------
@@ -175,7 +189,8 @@ public class AuthController {
 			@RequestHeader(value = TENANT_SLUG_HEADER)
 			@NotBlank(message = "X-Tenant-Slug header is required")
 			@Size(max = 64, message = "X-Tenant-Slug must not exceed 64 characters")
-			String tenantSlug) {
+			String tenantSlug,
+			HttpServletResponse response) {
 
 		AuthService.LoginResult result = authService.login(request, tenantSlug);
 		// Sprint 17 / BE-17.2: branch on the result variant. An MFA-enabled
@@ -187,7 +202,20 @@ public class AuthController {
 			return ResponseEntity.ok(mfa.mfaRequiredResponse());
 		}
 		AuthService.LoginResult.Session session = (AuthService.LoginResult.Session) result;
-		return ResponseEntity.ok(session.authResponse());
+		AuthResponse authResponse = session.authResponse();
+
+		// SECURITY FIX: Set tokens as httpOnly cookies instead of returning in body
+		ResponseCookie accessCookie = cookieHelper.createAccessTokenCookie(
+				authResponse.accessToken(), authResponse.expiresInSec());
+		ResponseCookie refreshCookie = cookieHelper.createRefreshTokenCookie(
+				authResponse.refreshToken(), 7 * 24 * 60 * 60); // 7 days
+
+		response.addHeader("Set-Cookie", accessCookie.toString());
+		response.addHeader("Set-Cookie", refreshCookie.toString());
+
+		// Return user info + expiresAt but NOT the tokens
+		return ResponseEntity.ok(new AuthResponse(
+				null, null, "Bearer", authResponse.expiresInSec(), authResponse.user()));
 	}
 
 	// ---------------------------------------------------------------------------
@@ -253,7 +281,8 @@ public class AuthController {
 			@NotBlank(message = "X-Tenant-Slug header is required")
 			@Size(max = 64, message = "X-Tenant-Slug must not exceed 64 characters")
 			String tenantSlug,
-			jakarta.servlet.http.HttpServletRequest httpRequest) {
+			jakarta.servlet.http.HttpServletRequest httpRequest,
+			HttpServletResponse response) {
 
 		// Surface a 404 *before* we hit Google so callers (and the FE tenant
 		// picker) can distinguish "unknown tenant" from "token rejected".
@@ -267,9 +296,20 @@ public class AuthController {
 						"Tenant slug does not exist"));
 
 		GoogleProfile profile = googleIdentityProvider.verifyIdToken(request.idToken());
-		AuthResponse response = googleAuthService.loginWithGoogle(
+		AuthResponse authResponse = googleAuthService.loginWithGoogle(
 				profile, tenantSlug, httpRequest.getRemoteAddr());
-		return ResponseEntity.ok(response);
+
+		// SECURITY FIX: Set tokens as httpOnly cookies
+		ResponseCookie accessCookie = cookieHelper.createAccessTokenCookie(
+				authResponse.accessToken(), authResponse.expiresInSec());
+		ResponseCookie refreshCookie = cookieHelper.createRefreshTokenCookie(
+				authResponse.refreshToken(), 7 * 24 * 60 * 60);
+
+		response.addHeader("Set-Cookie", accessCookie.toString());
+		response.addHeader("Set-Cookie", refreshCookie.toString());
+
+		return ResponseEntity.ok(new AuthResponse(
+				null, null, "Bearer", authResponse.expiresInSec(), authResponse.user()));
 	}
 
 	// ---------------------------------------------------------------------------
@@ -305,9 +345,30 @@ public class AuthController {
 							responseCode = "401",
 							description = "Token unknown, expired, reused, or signed with the wrong key")
 			})
-	public ResponseEntity<AuthResponse> refresh(@Valid @RequestBody RefreshTokenRequest request) {
-		AuthResponse response = authService.refresh(request.refreshToken());
-		return ResponseEntity.ok(response);
+	public ResponseEntity<AuthResponse> refresh(
+			HttpServletRequest httpRequest,
+			HttpServletResponse response) {
+
+		// SECURITY FIX: Read refresh token from httpOnly cookie instead of body
+		String refreshToken = CookieHelper.getCookieValue(httpRequest, "edushift_refresh_token");
+		if (refreshToken == null || refreshToken.isBlank()) {
+			throw new UnauthorizedException("INVALID_TOKEN", "Refresh token cookie is missing");
+		}
+
+		AuthResponse authResponse = authService.refresh(refreshToken);
+
+		// Set new tokens as httpOnly cookies
+		ResponseCookie accessCookie = cookieHelper.createAccessTokenCookie(
+				authResponse.accessToken(), authResponse.expiresInSec());
+		ResponseCookie refreshCookie = cookieHelper.createRefreshTokenCookie(
+				authResponse.refreshToken(), 7 * 24 * 60 * 60);
+
+		response.addHeader("Set-Cookie", accessCookie.toString());
+		response.addHeader("Set-Cookie", refreshCookie.toString());
+
+		// Return user info + expiresAt but NOT the tokens
+		return ResponseEntity.ok(new AuthResponse(
+				null, null, "Bearer", authResponse.expiresInSec(), authResponse.user()));
 	}
 
 	// ---------------------------------------------------------------------------
@@ -334,8 +395,26 @@ public class AuthController {
 							responseCode = "204",
 							description = "Logout accepted (idempotent)")
 			})
-	public void logout(@Valid @RequestBody RefreshTokenRequest request) {
-		authService.logout(request.refreshToken());
+	public void logout(
+			@RequestBody(required = false) RefreshTokenRequest request,
+			HttpServletRequest httpRequest,
+			HttpServletResponse response) {
+
+		// SECURITY FIX: Read refresh token from cookie or body (backward compat)
+		String refreshToken = CookieHelper.getCookieValue(httpRequest, "edushift_refresh_token");
+		if (refreshToken == null && request != null) {
+			refreshToken = request.refreshToken();
+		}
+
+		if (refreshToken != null) {
+			authService.logout(refreshToken);
+		}
+
+		// Clear cookies
+		ResponseCookie clearAccess = cookieHelper.clearAccessTokenCookie();
+		ResponseCookie clearRefresh = cookieHelper.clearRefreshTokenCookie();
+		response.addHeader("Set-Cookie", clearAccess.toString());
+		response.addHeader("Set-Cookie", clearRefresh.toString());
 	}
 
 	// ---------------------------------------------------------------------------
@@ -363,6 +442,49 @@ public class AuthController {
 			})
 	public ApiResponse<UserResponse> me() {
 		return ApiResponse.ok(authService.currentUser());
+	}
+
+	@PatchMapping("/me/password")
+	@Operation(
+			summary = "Change the authenticated user's password",
+			description = "Requires the current password. Clears mustChangePassword (CRED-7).",
+			security = @SecurityRequirement(name = "bearerAuth"))
+	public ApiResponse<UserResponse> changePassword(
+			@Valid @RequestBody ChangePasswordRequest request) {
+		return ApiResponse.ok(authService.changePassword(request));
+	}
+
+	@PatchMapping("/me")
+	@Operation(
+			summary = "Update the authenticated user's profile",
+			description = "Optional firstName/lastName/phone/email. "
+					+ "Replacing email sets emailSource=REAL (CRED-7).",
+			security = @SecurityRequirement(name = "bearerAuth"))
+	public ApiResponse<UserResponse> updateMe(
+			@Valid @RequestBody UpdateMeRequest request) {
+		return ApiResponse.ok(authService.updateMe(request));
+	}
+
+	@GetMapping("/me/onboarding")
+	@Operation(
+			summary = "First-login onboarding status",
+			description = "Returns role-aware required/optional light fields and "
+					+ "current profile values (CRED-7).",
+			security = @SecurityRequirement(name = "bearerAuth"))
+	public ApiResponse<OnboardingMeResponse> getOnboarding() {
+		return ApiResponse.ok(firstLoginOnboardingService.getOnboarding());
+	}
+
+	@PatchMapping("/me/onboarding")
+	@Operation(
+			summary = "Complete first-login onboarding",
+			description = "Uses the authenticated first-login session without repeating the temporary password. "
+					+ "Requires mustChangePassword=true. Changes password, updates User profile, and write-backs "
+					+ "linked Student/Guardian. Real email is optional.",
+			security = @SecurityRequirement(name = "bearerAuth"))
+	public ApiResponse<UserResponse> completeOnboarding(
+			@Valid @RequestBody CompleteOnboardingRequest request) {
+		return ApiResponse.ok(firstLoginOnboardingService.completeOnboarding(request));
 	}
 
 	// ---------------------------------------------------------------------------

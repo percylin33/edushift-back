@@ -95,6 +95,9 @@ public class UserInvitation extends TenantAwareEntity {
 	@Column(name = "last_name", nullable = false, length = 100)
 	private String lastName;
 
+	@Column(name = "second_last_name", length = 100)
+	private String secondLastName;
+
 	@Enumerated(EnumType.STRING)
 	@Column(name = "document_type", length = 20)
 	private DocumentType documentType;

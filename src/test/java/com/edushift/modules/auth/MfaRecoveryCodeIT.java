@@ -58,7 +58,7 @@ class MfaRecoveryCodeIT extends IntegrationTest {
 
 	@BeforeEach
 	void setUp() throws Exception {
-		tenant = new Tenant();
+		tenant = newTestTenant();
 		tenant.setName("MFA Recovery Code Test");
 		tenant.setSlug(tenantSlug);
 		tenant.setStatus(TenantStatus.ACTIVE);
@@ -96,7 +96,7 @@ class MfaRecoveryCodeIT extends IntegrationTest {
 		// Complete enrollment — capture recovery codes.
 		ResponseEntity<String> verifyResp = http.exchange(
 				AUTH_BASE + "/mfa/enroll/verify", HttpMethod.POST,
-				new HttpEntity<>(new MfaEnrollVerifyRequest(secret, String.valueOf(code)), h),
+				new HttpEntity<>(new MfaEnrollVerifyRequest(secret, String.format("%06d", code)), h),
 				String.class);
 		JsonNode data = objectMapper.readTree(verifyResp.getBody()).get("data");
 		recoveryCodes = objectMapper.readValue(
@@ -112,7 +112,7 @@ class MfaRecoveryCodeIT extends IntegrationTest {
 				AUTH_BASE + "/login", HttpMethod.POST,
 				new HttpEntity<>(body, headers), String.class);
 		assertThat(resp.getStatusCode()).isEqualTo(HttpStatus.OK);
-		return objectMapper.readTree(resp.getBody()).get("accessToken").asText();
+		return readSessionResponse(objectMapper, resp).accessToken();
 	}
 
 	@Test

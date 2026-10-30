@@ -22,14 +22,21 @@ import org.springframework.transaction.annotation.Transactional;
  * <h3>Three conflict dimensions</h3>
  * <ol>
  *   <li><b>Teacher conflict</b> — same teacher scheduled at two
- *       overlapping slots on the same day.</li>
+ *       overlapping slots on the same day <em>within the same
+ *       academic period</em>.</li>
  *   <li><b>Classroom conflict</b> — same {@code classroom_id} (or
  *       legacy free-text {@code classroom} label when no FK) double-booked
- *       at overlapping times.</li>
+ *       at overlapping times in the same period.</li>
  *   <li><b>Section conflict</b> — same section gets two slots that
- *       overlap. We resolve the section via the
- *       {@code teacher_assignment.section} association.</li>
+ *       overlap in the same period. Resolved via
+ *       {@code teacher_assignment.section}.</li>
  * </ol>
+ *
+ * <h3>Period scope (ADR-SCH-13)</h3>
+ * TimeSlots hang on period-scoped {@code TeacherAssignment}s. Bimestres
+ * are sequential, so the same weekly pattern across periods is a year
+ * template replica — not a double booking. Conflicts only compare
+ * active assignments in the candidate's academic period.
  *
  * <h3>Time overlap test</h3>
  * Two slots overlap when
@@ -73,10 +80,12 @@ public class ScheduleConflictDetector {
 						"Teacher assignment not found: " + teacherAssignmentUuid));
 		UUID teacherUuid = assignment.getTeacher().getPublicUuid();
 		UUID sectionUuid = assignment.getSection().getPublicUuid();
+		UUID periodUuid = assignment.getAcademicPeriod().getPublicUuid();
 
-		// 1. Teacher conflict: same teacher + same day + overlapping window.
+		// 1. Teacher conflict: same teacher + period + day + overlapping window.
 		List<TimeSlot> teacherSlots = timeSlotRepository
-				.findByTenantIdAndTeacherAndDay(tenantId, teacherUuid, dayOfWeek);
+				.findByTenantIdAndTeacherPeriodAndDay(
+						tenantId, teacherUuid, periodUuid, dayOfWeek);
 		for (TimeSlot existing : teacherSlots) {
 			if (excludeSlotUuid != null && existing.getPublicUuid().equals(excludeSlotUuid)) continue;
 			if (overlaps(existing.getStartTime(), existing.getEndTime(), startTime, endTime)) {
@@ -92,10 +101,11 @@ public class ScheduleConflictDetector {
 			}
 		}
 
-		// 2. Classroom conflict (B4): same classroom_id + overlapping window.
+		// 2. Classroom conflict (B4): same classroom_id + period + overlapping window.
 		if (classroomUuid != null) {
 			List<TimeSlot> classroomSlots = timeSlotRepository
-					.findByTenantIdAndClassroomAndDay(tenantId, classroomUuid, dayOfWeek);
+					.findByTenantIdAndClassroomPeriodAndDay(
+							tenantId, classroomUuid, periodUuid, dayOfWeek);
 			for (TimeSlot existing : classroomSlots) {
 				if (excludeSlotUuid != null && existing.getPublicUuid().equals(excludeSlotUuid)) continue;
 				if (overlaps(existing.getStartTime(), existing.getEndTime(), startTime, endTime)) {
@@ -111,7 +121,8 @@ public class ScheduleConflictDetector {
 		// 2b. Legacy free-text classroom label (pre-B4 slots).
 		if (classroomLabel != null && !classroomLabel.isBlank()) {
 			List<TimeSlot> labelSlots = timeSlotRepository
-					.findByTenantIdAndClassroomLabelAndDay(tenantId, classroomLabel, dayOfWeek);
+					.findByTenantIdAndClassroomLabelPeriodAndDay(
+							tenantId, classroomLabel, periodUuid, dayOfWeek);
 			for (TimeSlot existing : labelSlots) {
 				if (excludeSlotUuid != null && existing.getPublicUuid().equals(excludeSlotUuid)) continue;
 				if (overlaps(existing.getStartTime(), existing.getEndTime(), startTime, endTime)) {
@@ -128,9 +139,10 @@ public class ScheduleConflictDetector {
 			}
 		}
 
-		// 3. Section conflict: same section + overlapping window.
+		// 3. Section conflict: same section + period + overlapping window.
 		List<TimeSlot> sectionSlots = timeSlotRepository
-				.findByTenantIdAndSectionAndDay(tenantId, sectionUuid, dayOfWeek);
+				.findByTenantIdAndSectionPeriodAndDay(
+						tenantId, sectionUuid, periodUuid, dayOfWeek);
 		for (TimeSlot existing : sectionSlots) {
 			if (excludeSlotUuid != null && existing.getPublicUuid().equals(excludeSlotUuid)) continue;
 			if (overlaps(existing.getStartTime(), existing.getEndTime(), startTime, endTime)) {

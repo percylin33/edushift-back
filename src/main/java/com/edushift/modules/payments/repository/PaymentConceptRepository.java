@@ -20,5 +20,10 @@ public interface PaymentConceptRepository extends JpaRepository<PaymentConcept, 
 
 	List<PaymentConcept> findByActiveTrueOrderBySortOrderAscNameAsc();
 
+	List<PaymentConcept> findByActiveTrueAndDeletedFalseOrderBySortOrderAscNameAsc();
+
+	List<PaymentConcept> findByCategoryAndActiveTrueAndDeletedFalseOrderBySortOrderAscNameAsc(
+			PaymentConcept.Category category);
+
 	Page<PaymentConcept> findByDeletedFalseOrderBySortOrderAscNameAsc(Pageable pageable);
 }

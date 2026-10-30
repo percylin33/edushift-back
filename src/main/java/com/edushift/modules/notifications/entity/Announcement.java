@@ -94,6 +94,13 @@ public class Announcement extends TenantAwareEntity {
     @Column(name = "pinned", nullable = false)
     private boolean pinned = false;
 
+    /**
+     * When true, GRADE / SECTION / COURSE resolution also includes
+     * guardians who have a portal account linked to those students.
+     */
+    @Column(name = "include_guardians", nullable = false)
+    private boolean includeGuardians = false;
+
     @PrePersist
     private void onCreate() {
         if (publicUuid == null) publicUuid = UUID.randomUUID();

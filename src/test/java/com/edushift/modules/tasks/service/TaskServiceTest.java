@@ -44,7 +44,8 @@ class TaskServiceTest {
 
         // Reference for compile-time type assertions
         TaskSummary ts = new TaskSummary(UUID.randomUUID(), "t",
-                Instant.now(), false, UUID.randomUUID(), TaskStatus.DRAFT, Instant.now());
+                Instant.now(), false, UUID.randomUUID(), 100, TaskStatus.DRAFT, Instant.now(),
+                null, null, null, null, 0, 0);
         assertThat(ts.title()).isEqualTo("t");
     }
 }

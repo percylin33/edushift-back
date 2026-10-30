@@ -1,6 +1,7 @@
 package com.edushift.infrastructure.multitenancy;
 
 import com.edushift.shared.exception.ForbiddenException;
+import com.edushift.shared.exception.NotFoundException;
 import com.edushift.shared.multitenancy.TenantContext;
 import com.edushift.shared.security.CurrentUserProvider;
 import jakarta.servlet.http.HttpServletRequest;
@@ -14,17 +15,18 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.servlet.HandlerInterceptor;
 
 /**
- * Runs after Spring Security to refine and validate the tenant binding using
- * the authenticated principal (the JWT-claimed tenant is authoritative).
+ * Runs after Spring Security to validate the authenticated tenant against the
+ * tenant selected by the request host and the user's account membership.
  * <p>
  * Behavior:
  * <ul>
- *   <li>If the principal exposes a tenant id and the context is empty,
- *       it is bound here.</li>
- *   <li>If both are present and differ, a {@link ForbiddenException} is raised
- *       to block cross-tenant attempts (header spoofing).</li>
- *   <li>If the principal has no tenant, the existing context (e.g. from header
- *       for public flows) is left untouched.</li>
+ *   <li>A school subdomain is resolved against the tenant catalog; unknown
+ *       school hosts are rejected and login slugs must match the host.</li>
+ *   <li>For tenant-scoped authenticated users, the tenant in the principal
+ *       must match the host tenant and any already-bound context. The explicit
+ *       {@code SUPER_ADMIN} role retains its cross-tenant bypass.</li>
+ *   <li>Public flows may use the resolved host tenant to select a school, but
+ *       the host or slug alone does not authenticate a user.</li>
  * </ul>
  */
 @Component
@@ -34,9 +36,26 @@ public class TenantInterceptor implements HandlerInterceptor {
 	private static final String MDC_TENANT_ID = "tenantId";
 
 	private final CurrentUserProvider currentUserProvider;
+	private final TenantHostResolver tenantHostResolver;
 
 	@Override
 	public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) {
+		Optional<TenantHostResolver.Resolution> hostTenant = tenantHostResolver.resolve(request);
+		if (hostTenant.isPresent()) {
+			TenantHostResolver.Resolution resolution = hostTenant.get();
+			if (!resolution.exists()) {
+				throw new NotFoundException("TENANT_NOT_FOUND", "School subdomain is not registered");
+			}
+
+			if (isLoginRequest(request)) {
+				String loginSlug = request.getHeader("X-Tenant-Slug");
+				if (loginSlug != null && !resolution.canonicalSlug().equalsIgnoreCase(loginSlug.trim())) {
+					throw new ForbiddenException("TENANT_MISMATCH",
+							"Login tenant does not match the school subdomain");
+				}
+			}
+		}
+
 		// Sprint 15 / BE-15.1: SUPER_ADMIN bypasses tenant filtering entirely.
 		// The SUPER_ADMIN can access all tenants; TenantContext is left unset
 		// so no automatic Hibernate @TenantId filter is applied.
@@ -47,6 +66,11 @@ public class TenantInterceptor implements HandlerInterceptor {
 		}
 
 		Optional<UUID> fromPrincipal = currentUserProvider.currentTenantId();
+		if (fromPrincipal.isPresent() && hostTenant.isPresent()
+				&& !fromPrincipal.get().equals(hostTenant.get().tenantId())) {
+			throw new ForbiddenException("TENANT_MISMATCH",
+					"Authenticated tenant does not match the school subdomain");
+		}
 		if (fromPrincipal.isEmpty()) {
 			return true;
 		}
@@ -59,6 +83,11 @@ public class TenantInterceptor implements HandlerInterceptor {
 		TenantContext.set(principalTenant);
 		MDC.put(MDC_TENANT_ID, principalTenant.toString());
 		return true;
+	}
+
+	private static boolean isLoginRequest(HttpServletRequest request) {
+		String uri = request.getRequestURI();
+		return uri.endsWith("/auth/login") || uri.endsWith("/auth/google");
 	}
 
 }

@@ -3,10 +3,12 @@ package com.edushift.modules.quizzes.service.impl;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -29,8 +31,11 @@ import com.edushift.modules.quizzes.exception.SectionNotFoundException;
 import com.edushift.modules.quizzes.mapper.QuizMapper;
 import com.edushift.modules.quizzes.repository.QuizOptionRepository;
 import com.edushift.modules.quizzes.repository.QuizQuestionRepository;
+import com.edushift.modules.quizzes.repository.QuizQuestionTotals;
 import com.edushift.modules.quizzes.repository.QuizRepository;
 import com.edushift.modules.quizzes.service.QuizAttemptService;
+import com.edushift.modules.teachers.assignments.entity.TeacherAssignment;
+import com.edushift.modules.teachers.assignments.support.LmsAssignmentBinder;
 import com.edushift.modules.students.enrollments.repository.StudentEnrollmentRepository;
 import java.time.Instant;
 import java.util.List;
@@ -57,15 +62,25 @@ class QuizServiceImplTest {
     @Mock QuizAttemptService attemptService;
     @Mock StudentEnrollmentRepository studentEnrollmentRepository;
     @Mock ApplicationEventPublisher eventPublisher;
+    @Mock LmsAssignmentBinder lmsAssignmentBinder;
 
     @InjectMocks QuizServiceImpl service;
 
     private Section section;
 
+    private TeacherAssignment assignment;
+    private UUID assignmentUuid;
+
     @BeforeEach
     void setUp() {
         section = new Section();
         section.setPublicUuid(UUID.randomUUID());
+        assignmentUuid = UUID.randomUUID();
+        assignment = new TeacherAssignment();
+        assignment.setPublicUuid(assignmentUuid);
+        assignment.setSection(section);
+        lenient().when(lmsAssignmentBinder.requireForCreate(any(UUID.class), any(Section.class)))
+                .thenReturn(assignment);
         // Default mapper returns so that the happy-path tests can
         // assert `resp.isNotNull()`. lenients to avoid Mockito
         // strict-mode complaints in tests that never call the mapper.
@@ -73,7 +88,8 @@ class QuizServiceImplTest {
                 UUID.randomUUID(), UUID.randomUUID(), "T", null,
                 QuizStatus.DRAFT, null, null, null, null,
                 UUID.randomUUID(), null, null,
-                null, null, 0, 0, true, List.of(), Instant.now(), Instant.now());
+                null, null, 0, 0, true, List.of(), Instant.now(), Instant.now(),
+                null, null, null, null);
         lenient().when(quizMapper.toResponse(any(Quiz.class), org.mockito.ArgumentMatchers.anyBoolean()))
                 .thenReturn(defaultQuizResp);
         var defaultQuestionResp = new com.edushift.modules.quizzes.dto.QuestionResponse(
@@ -91,7 +107,7 @@ class QuizServiceImplTest {
     @DisplayName("create — happy path persists a DRAFT quiz with no questions")
     void create_happyPath() {
         var req = new CreateQuizRequest("T", null, Instant.now().plusSeconds(60),
-                30, 2, 100, null);
+                30, 2, 100, null, assignmentUuid);
         when(sectionRepository.findByPublicUuid(section.getPublicUuid()))
                 .thenReturn(Optional.of(section));
         when(quizRepository.save(any(Quiz.class))).thenAnswer(inv -> inv.getArgument(0));
@@ -111,7 +127,7 @@ class QuizServiceImplTest {
         // would be thrown first.
         when(sectionRepository.findByPublicUuid(any())).thenReturn(Optional.of(section));
         var req = new CreateQuizRequest("T", null, Instant.now().minusSeconds(60),
-                30, 2, 100, null);
+                30, 2, 100, null, assignmentUuid);
         assertThatThrownBy(() -> service.create(section.getPublicUuid(), req, UUID.randomUUID()))
                 .isInstanceOf(com.edushift.shared.exception.BadRequestException.class)
                 .hasMessageContaining("dueAt");
@@ -120,7 +136,7 @@ class QuizServiceImplTest {
     @Test
     @DisplayName("create — missing section → SectionNotFoundException")
     void create_missingSection() {
-        var req = new CreateQuizRequest("T", null, null, 30, 2, 100, null);
+        var req = new CreateQuizRequest("T", null, null, 30, 2, 100, null, assignmentUuid);
         when(sectionRepository.findByPublicUuid(any())).thenReturn(Optional.empty());
         assertThatThrownBy(() -> service.create(UUID.randomUUID(), req, UUID.randomUUID()))
                 .isInstanceOf(SectionNotFoundException.class);
@@ -130,7 +146,7 @@ class QuizServiceImplTest {
     @DisplayName("create — bulk questions block persists each question")
     void create_withQuestions() {
         var req = new CreateQuizRequest("T", null, null, 30, 2, 100,
-                List.of(mcQuestion(2, 1)));
+                List.of(mcQuestion(2, 1)), assignmentUuid);
         when(sectionRepository.findByPublicUuid(any())).thenReturn(Optional.of(section));
         when(quizRepository.save(any(Quiz.class))).thenAnswer(inv -> inv.getArgument(0));
         when(questionRepository.save(any(QuizQuestion.class)))
@@ -491,9 +507,47 @@ class QuizServiceImplTest {
                 .isInstanceOf(SectionNotFoundException.class);
     }
 
+    @Test
+    @DisplayName("listBySection — one aggregation for the page, no per-quiz question load")
+    void listBySection_aggregatesOnce() {
+        var section = new Section();
+        section.setPublicUuid(UUID.randomUUID());
+        var q1 = quizWithId();
+        var q2 = quizWithId();
+        var q3 = quizWithId();
+        when(sectionRepository.findByPublicUuid(section.getPublicUuid()))
+                .thenReturn(Optional.of(section));
+        when(quizRepository.findAllBySectionOrderByDueAtDesc(any(), any()))
+                .thenReturn(new org.springframework.data.domain.PageImpl<>(List.of(q1, q2, q3)));
+        when(questionRepository.aggregateByQuizIds(any())).thenReturn(List.of(
+                new QuizQuestionTotals(q1.getId(), 4, 8),
+                new QuizQuestionTotals(q2.getId(), 4, 8),
+                new QuizQuestionTotals(q3.getId(), 2, 3)));
+        when(quizMapper.toSummary(any(), anyInt(), anyInt()))
+                .thenReturn(mock(com.edushift.modules.quizzes.dto.QuizSummary.class));
+
+        var page = service.listBySection(section.getPublicUuid(),
+                org.springframework.data.domain.PageRequest.of(0, 10));
+
+        assertThat(page.getContent()).hasSize(3);
+        verify(questionRepository, times(1)).aggregateByQuizIds(any());
+        verify(questionRepository, never()).findAllByQuizOrderByPositionAsc(any());
+        verify(quizMapper).toSummary(q1, 4, 8);
+        verify(quizMapper).toSummary(q2, 4, 8);
+        verify(quizMapper).toSummary(q3, 2, 3);
+    }
+
     // ------------------------------------------------------------------
     // helpers
     // ------------------------------------------------------------------
+
+    private static Quiz quizWithId() {
+        var q = new Quiz();
+        q.setId(UUID.randomUUID());
+        q.setPublicUuid(UUID.randomUUID());
+        q.setStatus(QuizStatus.DRAFT);
+        return q;
+    }
 
     private static CreateQuestionRequest mcQuestion(int optionCount, int correctIdx) {
         var opts = new java.util.ArrayList<CreateOptionRequest>();

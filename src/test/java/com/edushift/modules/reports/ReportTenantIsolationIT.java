@@ -95,7 +95,7 @@ class ReportTenantIsolationIT extends IntegrationTest {
 
     private Tenant createTenant(String slug) {
         return tx.execute(s -> {
-            Tenant t = new Tenant();
+            Tenant t = newTestTenant();
             t.setPublicUuid(UUID.randomUUID());
             t.setSlug(slug);
             t.setName("Report-iso " + slug);
@@ -257,7 +257,7 @@ class ReportTenantIsolationIT extends IntegrationTest {
                 AUTH_BASE + "/login", HttpMethod.POST,
                 new HttpEntity<>(body, headers), AuthResponse.class);
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
-        return response.getBody();
+        return readSessionResponse(response);
     }
 
     private ResponseEntity<String> doGet(String path, String token) {

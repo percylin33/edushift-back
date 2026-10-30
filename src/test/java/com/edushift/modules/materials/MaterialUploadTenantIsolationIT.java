@@ -8,6 +8,11 @@ import com.edushift.modules.academic.levelgrade.entity.Grade;
 import com.edushift.modules.academic.levelgrade.repository.AcademicLevelRepository;
 import com.edushift.modules.academic.levelgrade.repository.GradeRepository;
 import com.edushift.modules.academic.levelgrade.service.AcademicSeedService;
+import com.edushift.modules.academic.course.entity.Course;
+import com.edushift.modules.academic.course.repository.CourseRepository;
+import com.edushift.modules.academic.period.entity.AcademicPeriod;
+import com.edushift.modules.academic.period.entity.PeriodType;
+import com.edushift.modules.academic.period.repository.AcademicPeriodRepository;
 import com.edushift.modules.academic.section.entity.Section;
 import com.edushift.modules.academic.section.repository.SectionRepository;
 import com.edushift.modules.academic.year.entity.AcademicYear;
@@ -20,6 +25,12 @@ import com.edushift.modules.auth.entity.User;
 import com.edushift.modules.auth.entity.UserRole;
 import com.edushift.modules.auth.entity.UserStatus;
 import com.edushift.modules.auth.repository.UserRepository;
+import com.edushift.modules.students.entity.DocumentType;
+import com.edushift.modules.teachers.assignments.entity.TeacherAssignment;
+import com.edushift.modules.teachers.assignments.repository.TeacherAssignmentRepository;
+import com.edushift.modules.teachers.entity.EmploymentStatus;
+import com.edushift.modules.teachers.entity.Teacher;
+import com.edushift.modules.teachers.repository.TeacherRepository;
 import com.edushift.modules.tenants.entity.Tenant;
 import com.edushift.modules.tenants.entity.TenantStatus;
 import com.edushift.modules.tenants.repository.TenantRepository;
@@ -75,6 +86,10 @@ class MaterialUploadTenantIsolationIT extends IntegrationTest {
     @Autowired private SectionRepository sectionRepository;
     @Autowired private AcademicSeedService seedService;
     @Autowired private PlatformPlanRepository planRepository;
+    @Autowired private CourseRepository courseRepository;
+    @Autowired private AcademicPeriodRepository periodRepository;
+    @Autowired private TeacherRepository teacherRepository;
+    @Autowired private TeacherAssignmentRepository assignmentRepository;
     @Autowired private PasswordEncoder passwordEncoder;
     @Autowired private PlatformTransactionManager txManager;
     @Autowired private ObjectMapper objectMapper;
@@ -95,7 +110,8 @@ class MaterialUploadTenantIsolationIT extends IntegrationTest {
             AuthResponse adminB = login(b.tenant().getSlug(), ADMIN_B, PWD);
 
             String path = UPLOAD_PATH.replace("{sectionUuid}", a.section().getPublicUuid().toString());
-            ResponseEntity<String> r = multipartPost(path, adminB.accessToken(), "foreign upload");
+            ResponseEntity<String> r = multipartPost(
+                    path, adminB.accessToken(), "foreign upload", a.assignment().getPublicUuid());
             assertThat(r.getStatusCode()).as("body=%s", r.getBody()).isEqualTo(HttpStatus.NOT_FOUND);
         }
 
@@ -106,7 +122,8 @@ class MaterialUploadTenantIsolationIT extends IntegrationTest {
             AuthResponse adminA = login(a.tenant().getSlug(), ADMIN_A, PWD);
 
             String path = UPLOAD_PATH.replace("{sectionUuid}", a.section().getPublicUuid().toString());
-            ResponseEntity<String> r = multipartPost(path, adminA.accessToken(), "own upload");
+            ResponseEntity<String> r = multipartPost(
+                    path, adminA.accessToken(), "own upload", a.assignment().getPublicUuid());
             assertThat(r.getStatusCode()).as("body=%s", r.getBody()).isEqualTo(HttpStatus.CREATED);
         }
 
@@ -117,7 +134,7 @@ class MaterialUploadTenantIsolationIT extends IntegrationTest {
             AuthResponse adminB = login(b.tenant().getSlug(), ADMIN_B, PWD);
 
             String path = UPLOAD_PATH.replace("{sectionUuid}", UUID.randomUUID().toString());
-            ResponseEntity<String> r = multipartPost(path, adminB.accessToken(), "fake");
+            ResponseEntity<String> r = multipartPost(path, adminB.accessToken(), "fake", UUID.randomUUID());
             assertThat(r.getStatusCode()).as("body=%s", r.getBody()).isEqualTo(HttpStatus.NOT_FOUND);
         }
     }
@@ -128,7 +145,8 @@ class MaterialUploadTenantIsolationIT extends IntegrationTest {
      * MultiValueMap doesn't always auto-add the boundary, which makes the
      * controller reject the request as 415 UNSUPPORTED_MEDIA_TYPE.
      */
-    private ResponseEntity<String> multipartPost(String path, String bearer, String title) throws Exception {
+    private ResponseEntity<String> multipartPost(
+            String path, String bearer, String title, UUID assignmentPublicUuid) throws Exception {
         String boundary = "----EduShiftBoundary" + UUID.randomUUID().toString().replace("-", "");
         byte[] fileBytes = tinyPdf();
         StringBuilder sb = new StringBuilder();
@@ -139,7 +157,9 @@ class MaterialUploadTenantIsolationIT extends IntegrationTest {
         sb.append("\r\n--").append(boundary).append("\r\n");
         sb.append("Content-Disposition: form-data; name=\"metadata\"\r\n");
         sb.append("Content-Type: application/json\r\n\r\n");
-        sb.append("{\"title\":\"").append(title).append("\",\"description\":\"x\"}");
+        sb.append("{\"title\":\"").append(title)
+                .append("\",\"description\":\"x\",\"teacherAssignmentPublicUuid\":\"")
+                .append(assignmentPublicUuid).append("\"}");
         sb.append("\r\n--").append(boundary).append("--\r\n");
         byte[] body = sb.toString().getBytes("ISO-8859-1");
 
@@ -169,20 +189,21 @@ class MaterialUploadTenantIsolationIT extends IntegrationTest {
         ResponseEntity<String> r = rest.exchange(AUTH_BASE + "/login", HttpMethod.POST,
                 new HttpEntity<>(body, h), String.class);
         assertThat(r.getStatusCode()).as("login body=%s", r.getBody()).isEqualTo(HttpStatus.OK);
-        return objectMapper.readValue(r.getBody(), AuthResponse.class);
+        return readSessionResponse(objectMapper, r);
     }
 
     // =====================================================================
     // Fixture
     // =====================================================================
 
-    record Fixture(Tenant tenant, Section section) { }
+    record Fixture(Tenant tenant, Section section, TeacherAssignment assignment) { }
+    record AcademicFixture(Section section, TeacherAssignment assignment) { }
 
     private Fixture setupTenant(String slugPrefix) {
         PlatformPlan basicPlan = planRepository.findAll().stream()
                 .filter(p -> "BASIC".equals(p.getCode()))
                 .findFirst().orElseGet(() -> planRepository.findAll().get(0));
-        Tenant t = new Tenant();
+        Tenant t = newTestTenant();
         t.setSlug("matup" + slugPrefix + UUID.randomUUID().toString().substring(0, 8));
         t.setName("MatUp IT " + t.getSlug());
         t.setStatus(TenantStatus.ACTIVE);
@@ -197,7 +218,7 @@ class MaterialUploadTenantIsolationIT extends IntegrationTest {
             return null;
         }));
 
-        Section section = TenantContext.runAs(saved.getId(), () -> tx().execute(s -> {
+        AcademicFixture academicFixture = TenantContext.runAs(saved.getId(), () -> tx().execute(s -> {
             AcademicLevel primaria = levelRepository.findByCodeIgnoreCase("PRIMARIA").orElseThrow();
             Grade grade = gradeRepository.findAllByLevelOrderByOrdinalAsc(primaria).get(0);
 
@@ -206,16 +227,45 @@ class MaterialUploadTenantIsolationIT extends IntegrationTest {
             year.setStartDate(LocalDate.of(2026, 3, 1));
             year.setEndDate(LocalDate.of(2026, 12, 20));
             year.setStatus(AcademicYearStatus.ACTIVE);
-            yearRepository.saveAndFlush(year);
+            AcademicYear savedYear = yearRepository.saveAndFlush(year);
 
             Section sec = new Section();
-            sec.setAcademicYear(year);
+            sec.setAcademicYear(savedYear);
             sec.setGrade(grade);
             sec.setName("1ro A");
-            return sectionRepository.saveAndFlush(sec);
+            Section savedSection = sectionRepository.saveAndFlush(sec);
+
+            AcademicPeriod period = new AcademicPeriod();
+            period.setAcademicYear(savedYear);
+            period.setPeriodType(PeriodType.ANUAL);
+            period.setOrdinal(1);
+            period.setName("Annual");
+            period.setStartDate(savedYear.getStartDate());
+            period.setEndDate(savedYear.getEndDate());
+            AcademicPeriod savedPeriod = periodRepository.saveAndFlush(period);
+
+            Course course = new Course();
+            course.setCode("MATUP_" + saved.getId().toString().substring(0, 8).toUpperCase());
+            course.setName("Materials upload fixture course");
+            Course savedCourse = courseRepository.saveAndFlush(course);
+
+            Teacher teacher = new Teacher();
+            teacher.setDocumentType(DocumentType.DNI);
+            teacher.setDocumentNumber("MU-" + UUID.randomUUID().toString().substring(0, 8));
+            teacher.setFirstName("Upload");
+            teacher.setLastName("Fixture");
+            teacher.setEmploymentStatus(EmploymentStatus.ACTIVE);
+            Teacher savedTeacher = teacherRepository.saveAndFlush(teacher);
+
+            TeacherAssignment assignment = new TeacherAssignment();
+            assignment.setTeacher(savedTeacher);
+            assignment.setSection(savedSection);
+            assignment.setCourse(savedCourse);
+            assignment.setAcademicPeriod(savedPeriod);
+            return new AcademicFixture(savedSection, assignmentRepository.saveAndFlush(assignment));
         }));
 
-        return new Fixture(saved, section);
+        return new Fixture(saved, academicFixture.section(), academicFixture.assignment());
     }
 
     private void createAdmin(Tenant tenant, String email, String pwd) {

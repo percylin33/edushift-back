@@ -19,6 +19,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.ResponseStatus;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
@@ -30,11 +31,18 @@ import org.springframework.web.bind.annotation.RestController;
 public class PlatformPlanController {
 
     private final PlatformPlanService planService;
+    private final PlanAnalyticsService analyticsService;
+
+    @GetMapping("/analytics")
+    @Operation(summary = "Get plan adoption, projected MRR and AI quota usage")
+    public ApiResponse<List<PlanAnalyticsRow>> analytics() {
+        return ApiResponse.ok(analyticsService.list());
+    }
 
     @GetMapping
-    @Operation(summary = "List all active plans")
-    public ApiResponse<List<PlanResponse>> list() {
-        return ApiResponse.ok(planService.listAll());
+    @Operation(summary = "List platform plans")
+    public ApiResponse<List<PlanResponse>> list(@RequestParam(defaultValue = "false") boolean includeInactive) {
+        return ApiResponse.ok(planService.listAll(includeInactive));
     }
 
     @GetMapping("/{uuid}")

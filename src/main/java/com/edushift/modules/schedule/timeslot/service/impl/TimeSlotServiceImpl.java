@@ -134,7 +134,8 @@ public class TimeSlotServiceImpl implements TimeSlotService {
 		validateTimeRange(slot.getStartTime(), slot.getEndTime());
 		ensureNoOverlap(slot.getTeacherAssignment(), slot.getDayOfWeek(),
 				slot.getStartTime(), slot.getEndTime(), slot.getId());
-		assertNoConflicts(slot, slot.getId());
+		// Conflict detector excludes by publicUuid (not internal id).
+		assertNoConflicts(slot, slot.getPublicUuid());
 
 		TimeSlot saved = timeSlotRepository.saveAndFlush(slot);
 		log.info("[schedule.time-slot] updated -- publicUuid={} day={} {}-{}",
@@ -147,8 +148,13 @@ public class TimeSlotServiceImpl implements TimeSlotService {
 	@Transactional
 	public void deleteSlot(UUID slotUuid) {
 		TimeSlot slot = loadSlot(slotUuid);
-		timeSlotRepository.delete(slot);
-		log.info("[schedule.time-slot] deleted -- publicUuid={}", slot.getPublicUuid());
+		UUID publicUuid = slot.getPublicUuid();
+		// Prefer markDeleted+save over repository.delete(@SQLDelete): guarantees
+		// the `deleted` flag is written even when Hibernate soft-delete SQL
+		// binding is flaky, matching the DayScheduleBlock leak class of bugs.
+		slot.markDeleted();
+		timeSlotRepository.saveAndFlush(slot);
+		log.info("[schedule.time-slot] deleted -- publicUuid={}", publicUuid);
 	}
 
 	// =========================================================================
@@ -385,7 +391,7 @@ public class TimeSlotServiceImpl implements TimeSlotService {
 	 * with the offending dimension + slotUuid so the FE can highlight
 	 * the conflicting cell in the schedule grid.
 	 */
-	private void assertNoConflicts(TimeSlot slot, UUID excludeId) {
+	private void assertNoConflicts(TimeSlot slot, UUID excludePublicUuid) {
 		conflictDetector.assertNoConflicts(
 				slot.getTeacherAssignment().getPublicUuid(),
 				slot.getClassroomId(),
@@ -393,6 +399,6 @@ public class TimeSlotServiceImpl implements TimeSlotService {
 				slot.getDayOfWeek(),
 				slot.getStartTime(),
 				slot.getEndTime(),
-				excludeId);
+				excludePublicUuid);
 	}
 }

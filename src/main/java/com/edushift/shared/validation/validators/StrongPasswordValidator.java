@@ -3,6 +3,7 @@ package com.edushift.shared.validation.validators;
 import com.edushift.shared.validation.annotations.StrongPassword;
 import jakarta.validation.ConstraintValidator;
 import jakarta.validation.ConstraintValidatorContext;
+import java.util.Set;
 
 /**
  * Validates the policy declared by {@link StrongPassword}.
@@ -32,6 +33,12 @@ public class StrongPasswordValidator implements ConstraintValidator<StrongPasswo
 		this.requireSpecial = ann.requireSpecial();
 	}
 
+	private static final Set<String> COMMON_PASSWORDS = Set.of(
+		"password", "password1", "password123", "123456", "12345678",
+		"qwerty", "qwerty123", "abc123", "letmein", "welcome1",
+		"admin123", "root123", "pass123", "user123", "test123"
+	);
+
 	@Override
 	public boolean isValid(CharSequence value, ConstraintValidatorContext ctx) {
 		if (value == null) {
@@ -39,6 +46,17 @@ public class StrongPasswordValidator implements ConstraintValidator<StrongPasswo
 		}
 		int length = value.length();
 		if (length < minLength || length > maxLength) {
+			return false;
+		}
+
+		// Rechazar contraseñas comunes
+		String lower = value.toString().toLowerCase();
+		if (COMMON_PASSWORDS.contains(lower)) {
+			return false;
+		}
+
+		// Rechazar secuencias obvias
+		if (isSequential(lower)) {
 			return false;
 		}
 
@@ -76,6 +94,22 @@ public class StrongPasswordValidator implements ConstraintValidator<StrongPasswo
 			return false;
 		}
 		return true;
+	}
+
+	// Detectar secuencias (abc, 123, qwerty)
+	private static boolean isSequential(String value) {
+		for (int i = 0; i < value.length() - 2; i++) {
+			char c1 = value.charAt(i);
+			char c2 = value.charAt(i + 1);
+			char c3 = value.charAt(i + 2);
+			if (c2 == c1 + 1 && c3 == c2 + 1) {
+				return true;  // Secuencia ascendente (abc, 123)
+			}
+			if (c2 == c1 - 1 && c3 == c2 - 1) {
+				return true;  // Secuencia descendente (cba, 321)
+			}
+		}
+		return false;
 	}
 
 }

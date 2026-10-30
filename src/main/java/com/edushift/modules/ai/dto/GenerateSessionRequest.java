@@ -57,6 +57,26 @@ public record GenerateSessionRequest(
 
 	List<UUID> competencyIds,
 
-	List<UUID> capacityIds
+	List<UUID> capacityIds,
+
+	/** Optional tenant session template; drives required phases in the prompt. */
+	UUID templateUuid,
+
+	/**
+	 * Grade of the section the teacher is planning, for example
+	 * "2do Primaria". When present, the prompt uses this instead of the
+	 * first academic level linked to the course.
+	 */
+	@Size(max = 80)
+	String gradeName
 ) {
+	public GenerateSessionRequest(String topic,
+			UUID courseId,
+			UUID unitId,
+			Integer durationMinutes,
+			List<UUID> competencyIds,
+			List<UUID> capacityIds,
+			UUID templateUuid) {
+		this(topic, courseId, unitId, durationMinutes, competencyIds, capacityIds, templateUuid, null);
+	}
 }

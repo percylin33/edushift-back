@@ -19,6 +19,7 @@ import lombok.NoArgsConstructor;
 import lombok.Setter;
 import lombok.ToString;
 import org.hibernate.annotations.SQLDelete;
+import org.hibernate.annotations.SQLRestriction;
 
 /**
  * Weekly recurring time slot tied to a {@link TeacherAssignment}
@@ -58,6 +59,7 @@ import org.hibernate.annotations.SQLDelete;
 @SQLDelete(sql = "UPDATE edushift.time_slots "
 		+ "SET deleted = true, updated_at = NOW() "
 		+ "WHERE id = ?")
+@SQLRestriction("deleted = false")
 public class TimeSlot extends TenantAwareEntity {
 
 	@Column(name = "public_uuid", nullable = false, updatable = false,

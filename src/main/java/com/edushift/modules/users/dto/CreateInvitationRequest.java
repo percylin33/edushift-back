@@ -24,8 +24,9 @@ import java.util.Set;
  *
  * <p>{@code metadata} is an optional free-form jsonb side-channel:
  * domain modules (e.g. teachers) attach ids to be reacted on at accept
- * time. The public {@code POST /v1/users/invitations} controller does
- * NOT bind this field — only internal callers may set it.</p>
+ * time. The public {@code POST /v1/users/invitations} controller discards
+ * this field — only internal callers may set it. Profile-backed roles
+ * require matching metadata and cannot be invited through the generic path.</p>
  *
  * <p>{@code documentType}/{@code documentNumber} are required so the
  * admin commits to a legal identity at invite time — the manual lists
@@ -46,6 +47,9 @@ public record CreateInvitationRequest(
 		@NotBlank(message = "lastName is required")
 		@Size(min = 1, max = 100, message = "lastName must be between 1 and 100 characters")
 		String lastName,
+
+		@Size(max = 100, message = "secondLastName must be at most 100 characters")
+		String secondLastName,
 
 		@NotNull(message = "roles must not be null")
 		@NotEmpty(message = "roles must contain at least one role")
@@ -75,6 +79,13 @@ public record CreateInvitationRequest(
 	public CreateInvitationRequest(String email, String firstName,
 			String lastName, Set<String> roles,
 			DocumentType documentType, String documentNumber) {
-		this(email, firstName, lastName, roles, documentType, documentNumber, null);
+		this(email, firstName, lastName, null, roles, documentType, documentNumber, null);
+	}
+
+	public CreateInvitationRequest(String email, String firstName,
+			String lastName, Set<String> roles,
+			DocumentType documentType, String documentNumber,
+			Map<String, Object> metadata) {
+		this(email, firstName, lastName, null, roles, documentType, documentNumber, metadata);
 	}
 }

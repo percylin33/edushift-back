@@ -14,6 +14,7 @@ import com.edushift.modules.notifications.entity.Notification.Channel;
 import com.edushift.modules.notifications.entity.Notification.Status;
 import com.edushift.modules.notifications.repository.NotificationRepository;
 import com.edushift.modules.tenants.entity.Tenant;
+import com.edushift.modules.tenants.entity.TenantPlan;
 import com.edushift.modules.tenants.entity.TenantStatus;
 import com.edushift.modules.tenants.repository.TenantRepository;
 import com.edushift.shared.multitenancy.TenantContext;
@@ -27,6 +28,7 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.web.client.TestRestTemplate;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
@@ -70,6 +72,7 @@ class NotificationTenantIsolationIT extends IntegrationTest {
     @Autowired private NotificationRepository notificationRepository;
     @Autowired private PasswordEncoder passwordEncoder;
     @Autowired private PlatformTransactionManager txManager;
+    @Autowired private JdbcTemplate jdbcTemplate;
     @Autowired private ObjectMapper objectMapper;
 
     private TransactionTemplate tx;
@@ -103,11 +106,15 @@ class NotificationTenantIsolationIT extends IntegrationTest {
 
     private Tenant createTenant(String slug) {
         return tx().execute(s -> {
-            Tenant t = new Tenant();
+            Tenant t = newTestTenant();
             t.setPublicUuid(UUID.randomUUID());
             t.setSlug(slug);
             t.setName("Notif-iso " + slug);
             t.setStatus(TenantStatus.ACTIVE);
+            t.setPlan(TenantPlan.BASIC);
+            t.setPlanId(jdbcTemplate.queryForObject(
+                    "select id from edushift.platform_plans where code = ?",
+                    UUID.class, "BASIC"));
             return tenantRepository.save(t);
         });
     }
@@ -242,7 +249,7 @@ class NotificationTenantIsolationIT extends IntegrationTest {
                 AUTH_BASE + "/login", HttpMethod.POST,
                 new HttpEntity<>(body, headers), AuthResponse.class);
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
-        return response.getBody();
+        return readSessionResponse(response);
     }
 
     private ResponseEntity<String> doGet(String path, String token) {

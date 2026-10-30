@@ -54,6 +54,26 @@ public record CreateLearningSessionRequest(
 
 		List<UUID> competencyUuids,
 
-		List<UUID> capacityUuids
+		List<UUID> capacityUuids,
+
+		/** Optional tenant/system session template; seeds content when activities empty. */
+		UUID templateUuid,
+
+		/** Reviewed worksheets, one per grade. Null leaves sheets untouched on create. */
+		List<ApplicationSheetWriteRequest> applicationSheets
 ) {
+	public CreateLearningSessionRequest(
+			UUID assignmentUuid,
+			UUID unitUuid,
+			String title,
+			String objective,
+			LocalDate scheduledDate,
+			Integer durationMinutes,
+			SessionContentDto content,
+			List<UUID> competencyUuids,
+			List<UUID> capacityUuids,
+			UUID templateUuid) {
+		this(assignmentUuid, unitUuid, title, objective, scheduledDate, durationMinutes,
+				content, competencyUuids, capacityUuids, templateUuid, null);
+	}
 }

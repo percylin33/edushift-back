@@ -103,7 +103,7 @@ class EvaluationEntityTest {
     }
 
     private static void setField(Object target, String name, Object value) throws Exception {
-        Field f = target.getClass().getSuperclass().getSuperclass().getDeclaredField(name);
+        Field f = org.springframework.util.ReflectionUtils.findField(target.getClass(), name);
         f.setAccessible(true);
         f.set(target, value);
     }

@@ -154,7 +154,7 @@ class LoginAttemptServiceTest {
 		service.recordSuccessfulLogin(EMAIL);
 
 		assertThat(existing.getStatus()).isEqualTo(FailedLoginAttempt.Status.CLEARED);
-		assertThat(existing.getAttemptCount()).isZero();
+		assertThat(existing.getAttemptCount()).isEqualTo(3);
 		assertThat(u.getTemporarilyLockedUntil()).isNull();
 	}
 

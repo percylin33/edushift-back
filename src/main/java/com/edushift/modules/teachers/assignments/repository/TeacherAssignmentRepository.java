@@ -70,6 +70,32 @@ public interface TeacherAssignmentRepository extends JpaRepository<TeacherAssign
 			@Param("activeOnly") boolean activeOnly);
 
 	/**
+	 * Tenant-wide filtered list (admin Registros picker / sessions).
+	 * Every filter is optional and AND-composed. Ordered for UI browsing:
+	 * period → section → course → teacher.
+	 */
+	@Query("""
+			select a from TeacherAssignment a
+			where (:teacher is null or a.teacher = :teacher)
+			  and (:section is null or a.section = :section)
+			  and (:course is null or a.course = :course)
+			  and (:period is null or a.academicPeriod = :period)
+			  and (:activeOnly = false or a.unassignedAt is null)
+			order by a.academicPeriod.periodType asc,
+			         a.academicPeriod.ordinal asc,
+			         a.section.name asc,
+			         a.course.code asc,
+			         a.teacher.lastName asc,
+			         a.teacher.firstName asc
+			""")
+	List<TeacherAssignment> findAllFiltered(
+			@Param("teacher") Teacher teacher,
+			@Param("section") Section section,
+			@Param("course") Course course,
+			@Param("period") AcademicPeriod period,
+			@Param("activeOnly") boolean activeOnly);
+
+	/**
 	 * Section-centric list (reverse view). Always returns active rows
 	 * because the use case ("who teaches in this section?") is forward-
 	 * looking. Optionally narrowed to a single period.
@@ -105,6 +131,21 @@ public interface TeacherAssignmentRepository extends JpaRepository<TeacherAssign
 			where a.course = :course and a.unassignedAt is null
 			""")
 	boolean existsActiveByCourse(@Param("course") Course course);
+
+	/**
+	 * True when {@code userPublicUuid} has at least one active assignment
+	 * on {@code course} (any section, any period). Used to let a teacher
+	 * author competencies only on courses they teach.
+	 */
+	@Query("""
+			select count(a) > 0 from TeacherAssignment a
+			where a.course = :course
+			  and a.unassignedAt is null
+			  and a.teacher.userId = :userPublicUuid
+			""")
+	boolean existsActiveByCourseAndTeacherUserId(
+			@Param("course") Course course,
+			@Param("userPublicUuid") UUID userPublicUuid);
 
 	/**
 	 * Sprint 18 / BE-18.1 — pick the teacher's primary (most recently

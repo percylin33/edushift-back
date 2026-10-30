@@ -15,13 +15,17 @@ class AssignmentDtoTest {
     void assignmentResponse() {
         UUID id = UUID.randomUUID();
         var r = new AssignmentResponse(id, UUID.randomUUID(), "Ana Diaz",
-                UUID.randomUUID(), "Section A", UUID.randomUUID(), "MAT", "Matemática",
+                UUID.randomUUID(), "Section A", "1ro Primaria", UUID.randomUUID(), "MAT", "Matemática",
+                "#3B82F6", "target",
                 UUID.randomUUID(), PeriodType.BIMESTRE, 1, "B1 2026",
                 UUID.randomUUID(), "2026", Instant.now(), null, true, "notes",
                 Instant.now(), Instant.now());
         assertThat(r.publicUuid()).isEqualTo(id);
         assertThat(r.teacherFullName()).isEqualTo("Ana Diaz");
+        assertThat(r.gradeName()).isEqualTo("1ro Primaria");
         assertThat(r.courseCode()).isEqualTo("MAT");
+        assertThat(r.courseColor()).isEqualTo("#3B82F6");
+        assertThat(r.courseIcon()).isEqualTo("target");
         assertThat(r.active()).isTrue();
         assertThat(r.unassignedAt()).isNull();
     }
@@ -30,10 +34,14 @@ class AssignmentDtoTest {
     @DisplayName("AssignmentListItem drops audit timestamps")
     void assignmentListItem() {
         var item = new AssignmentListItem(UUID.randomUUID(), UUID.randomUUID(), "Ana",
-                UUID.randomUUID(), "Section A", UUID.randomUUID(), "MAT", "Matemática",
+                UUID.randomUUID(), "Section A", "1ro Primaria", UUID.randomUUID(), "MAT", "Matemática",
+                null, null,
                 UUID.randomUUID(), PeriodType.BIMESTRE, 1, Instant.now(), null, true);
         assertThat(item.teacherFullName()).isEqualTo("Ana");
+        assertThat(item.gradeName()).isEqualTo("1ro Primaria");
         assertThat(item.courseCode()).isEqualTo("MAT");
+        assertThat(item.courseColor()).isNull();
+        assertThat(item.courseIcon()).isNull();
     }
 
     @Test

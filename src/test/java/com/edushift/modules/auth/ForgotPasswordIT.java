@@ -8,9 +8,7 @@ import com.edushift.modules.auth.entity.User;
 import com.edushift.modules.auth.entity.UserRole;
 import com.edushift.modules.auth.entity.UserStatus;
 import com.edushift.modules.auth.repository.UserRepository;
-import com.edushift.modules.notifications.entity.NotificationTemplate;
-import com.edushift.modules.notifications.repository.EmailOutboxRepository;
-import com.edushift.modules.notifications.repository.NotificationTemplateRepository;
+import com.edushift.modules.auth.repository.PasswordResetTokenRepository;
 import com.edushift.modules.tenants.entity.Tenant;
 import com.edushift.modules.tenants.entity.TenantStatus;
 import com.edushift.modules.tenants.repository.TenantRepository;
@@ -30,8 +28,8 @@ import org.springframework.security.crypto.password.PasswordEncoder;
  * Sprint 17 / BE-17.1 — full-stack IT for {@code POST /auth/forgot-password}.
  *
  * <p>Verifies the anti-enumeration contract: the endpoint always responds
- * 200 OK regardless of whether the email or tenant exists, but only queues
- * an email when the user is found in an ACTIVE tenant with an ACTIVE status.
+ * 200 OK regardless of whether the email or tenant exists, but only persists
+ * a reset token for a user in an ACTIVE tenant with an ACTIVE status.
  */
 @DisplayName("Forgot-password flow (BE-17.1)")
 class ForgotPasswordIT extends IntegrationTest {
@@ -42,8 +40,7 @@ class ForgotPasswordIT extends IntegrationTest {
 	@Autowired private TenantRepository tenantRepository;
 	@Autowired private UserRepository userRepository;
 	@Autowired private PasswordEncoder passwordEncoder;
-	@Autowired private EmailOutboxRepository outboxRepository;
-	@Autowired private NotificationTemplateRepository templateRepository;
+	@Autowired private PasswordResetTokenRepository resetTokenRepository;
 
 	private Tenant tenant;
 	private final String tenantSlug = "forgot-" + UUID.randomUUID().toString().substring(0, 8);
@@ -52,7 +49,7 @@ class ForgotPasswordIT extends IntegrationTest {
 
 	@BeforeEach
 	void setUp() {
-		tenant = new Tenant();
+		tenant = newTestTenant();
 		tenant.setName("Forgot Test Tenant");
 		tenant.setSlug(tenantSlug);
 		tenant.setStatus(TenantStatus.ACTIVE);
@@ -70,25 +67,14 @@ class ForgotPasswordIT extends IntegrationTest {
 			u.setStatus(UserStatus.ACTIVE);
 			u.setEmailVerified(true);
 			u.setPasswordHash(passwordEncoder.encode(RAW_PWD));
-			userRepository.save(u);
+			userRepository.saveAndFlush(u);
 
-			// Seed PASSWORD_RESET template so the email outbox row is created.
-			if (templateRepository.findByKeyAndLocale("PASSWORD_RESET", "es-PE").isEmpty()) {
-				NotificationTemplate tmpl = new NotificationTemplate();
-				tmpl.setTemplateKey("PASSWORD_RESET");
-				tmpl.setLocale("es-PE");
-				tmpl.setSubject("Restablece tu contraseña — {{tenantName}}");
-				tmpl.setBodyHtml("<p>Reset link: {{resetLink}}</p>");
-				tmpl.setSystem(true);
-				tmpl.setVersion(1);
-				templateRepository.save(tmpl);
-			}
 			return null;
 		});
 	}
 
-	private long emailOutboxCount() {
-		return outboxRepository.countPending();
+	private long resetTokenCount() {
+		return TenantContext.runAs(tenant.getId(), resetTokenRepository::count);
 	}
 
 	@Nested
@@ -96,42 +82,42 @@ class ForgotPasswordIT extends IntegrationTest {
 	class AntiEnumeration {
 
 		@Test
-		@DisplayName("happy path — email outbox row created")
+		@DisplayName("happy path — a single-use reset token is persisted")
 		void happyPath() {
 			var body = new ForgotPasswordRequest(EMAIL, tenantSlug);
 			ResponseEntity<String> resp = http.postForEntity(
 					AUTH_BASE + "/forgot-password", body, String.class);
 
 			assertThat(resp.getStatusCode()).isEqualTo(HttpStatus.OK);
-			assertThat(emailOutboxCount()).isPositive();
+			assertThat(resetTokenCount()).isEqualTo(1L);
 		}
 
 		@Test
-		@DisplayName("unknown email returns 200 and no outbox row")
+		@DisplayName("unknown email returns 200 and creates no reset token")
 		void unknownEmail() {
 			var body = new ForgotPasswordRequest("nobody@forgot.test", tenantSlug);
 			ResponseEntity<String> resp = http.postForEntity(
 					AUTH_BASE + "/forgot-password", body, String.class);
 
 			assertThat(resp.getStatusCode()).isEqualTo(HttpStatus.OK);
-			assertThat(emailOutboxCount()).isZero();
+			assertThat(resetTokenCount()).isZero();
 		}
 
 		@Test
-		@DisplayName("unknown tenant returns 200 and no outbox row")
+		@DisplayName("unknown tenant returns 200 and creates no reset token")
 		void unknownTenant() {
 			var body = new ForgotPasswordRequest(EMAIL, "nonexistent-slug");
 			ResponseEntity<String> resp = http.postForEntity(
 					AUTH_BASE + "/forgot-password", body, String.class);
 
 			assertThat(resp.getStatusCode()).isEqualTo(HttpStatus.OK);
-			assertThat(emailOutboxCount()).isZero();
+			assertThat(resetTokenCount()).isZero();
 		}
 
 		@Test
-		@DisplayName("inactive tenant returns 200 and no outbox row")
+		@DisplayName("inactive tenant returns 200 and creates no reset token")
 		void inactiveTenant() {
-			Tenant inactive = new Tenant();
+			Tenant inactive = newTestTenant();
 			inactive.setName("Inactive Tenant");
 			inactive.setSlug("inactive-" + UUID.randomUUID().toString().substring(0, 8));
 			inactive.setStatus(TenantStatus.SUSPENDED);
@@ -142,11 +128,11 @@ class ForgotPasswordIT extends IntegrationTest {
 					AUTH_BASE + "/forgot-password", body, String.class);
 
 			assertThat(resp.getStatusCode()).isEqualTo(HttpStatus.OK);
-			assertThat(emailOutboxCount()).isZero();
+			assertThat(resetTokenCount()).isZero();
 		}
 
 		@Test
-		@DisplayName("locked user returns 200 and no outbox row")
+		@DisplayName("locked user returns 200 and creates no reset token")
 		void lockedUser() {
 			TenantContext.runAs(tenant.getId(), () -> {
 				User locked = new User();
@@ -167,7 +153,7 @@ class ForgotPasswordIT extends IntegrationTest {
 					AUTH_BASE + "/forgot-password", body, String.class);
 
 			assertThat(resp.getStatusCode()).isEqualTo(HttpStatus.OK);
-			assertThat(emailOutboxCount()).isZero();
+			assertThat(resetTokenCount()).isZero();
 		}
 	}
 }

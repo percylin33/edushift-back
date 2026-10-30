@@ -126,4 +126,17 @@ public interface AuthService {
 	 */
 	com.edushift.modules.auth.repository.UserRepository userRepository();
 
+	/**
+	 * Authenticated password change. Clears {@code mustChangePassword}.
+	 * When {@code mustChangePassword} is already true, {@code currentPassword}
+	 * is still verified against the temporary hash (CRED-7 first login).
+	 */
+	UserResponse changePassword(com.edushift.modules.auth.dto.ChangePasswordRequest request);
+
+	/**
+	 * Authenticated self-service profile / email update (CRED-7 onboarding).
+	 * Promoting email to a new address sets {@code emailSource=REAL}.
+	 */
+	UserResponse updateMe(com.edushift.modules.auth.dto.UpdateMeRequest request);
+
 }

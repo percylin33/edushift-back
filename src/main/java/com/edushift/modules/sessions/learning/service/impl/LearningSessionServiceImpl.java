@@ -11,25 +11,37 @@ import com.edushift.modules.academic.unit.repository.UnitRepository;
 import com.edushift.modules.schedule.daytemplate.service.NonTeachingBlockResolver;
 import com.edushift.modules.schedule.timeslot.entity.TimeSlot;
 import com.edushift.modules.schedule.timeslot.repository.TimeSlotRepository;
+import com.edushift.modules.academic.levelgrade.entity.Grade;
+import com.edushift.modules.sessions.learning.dto.CopyLearningSessionRequest;
 import com.edushift.modules.sessions.learning.dto.CreateLearningSessionRequest;
 import com.edushift.modules.sessions.learning.dto.LearningSessionFilters;
 import com.edushift.modules.sessions.learning.dto.LearningSessionListItem;
 import com.edushift.modules.sessions.learning.dto.LearningSessionResponse;
 import com.edushift.modules.sessions.learning.dto.LifecycleRequest;
+import com.edushift.modules.sessions.learning.dto.SessionContentDto;
+import com.edushift.modules.sessions.learning.dto.SharedLearningSessionResponse;
 import com.edushift.modules.sessions.learning.dto.UpdateLearningSessionRequest;
+import com.edushift.modules.academic.section.entity.Section;
 import com.edushift.modules.sessions.learning.entity.LearningSession;
+import com.edushift.modules.sessions.learning.entity.SessionContent;
 import com.edushift.modules.sessions.learning.entity.SessionStatus;
 import com.edushift.modules.sessions.learning.mapper.LearningSessionMapper;
 import com.edushift.modules.sessions.learning.repository.LearningSessionRepository;
+import com.edushift.modules.sessions.learning.service.ApplicationSheetService;
 import com.edushift.modules.sessions.learning.service.LearningSessionService;
+import com.edushift.modules.sessions.template.entity.SessionTemplate;
+import com.edushift.modules.sessions.template.service.SessionTemplateService;
 import com.edushift.modules.teachers.assignments.entity.TeacherAssignment;
 import com.edushift.modules.teachers.assignments.repository.TeacherAssignmentRepository;
+import com.edushift.modules.teachers.assignments.support.LmsAssignmentBinder;
 import com.edushift.shared.exception.BadRequestException;
 import com.edushift.shared.exception.ConflictException;
+import com.edushift.shared.exception.ForbiddenException;
 import com.edushift.shared.exception.ResourceNotFoundException;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalTime;
+import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
@@ -68,6 +80,9 @@ public class LearningSessionServiceImpl implements LearningSessionService {
 	private final LearningSessionMapper mapper;
 	private final NonTeachingBlockResolver nonTeachingBlockResolver;
 	private final TimeSlotRepository timeSlotRepository;
+	private final SessionTemplateService sessionTemplateService;
+	private final LmsAssignmentBinder lmsAssignmentBinder;
+	private final ApplicationSheetService applicationSheetService;
 
 	// =========================================================================
 	// CRUD
@@ -76,7 +91,8 @@ public class LearningSessionServiceImpl implements LearningSessionService {
 	@Override
 	@Transactional
 	public LearningSessionResponse create(CreateLearningSessionRequest request) {
-		TeacherAssignment assignment = loadAssignment(request.assignmentUuid());
+		TeacherAssignment assignment = lmsAssignmentBinder.requireByPublicUuid(
+				request.assignmentUuid());
 		ensureAssignmentActive(assignment);
 
 		Unit unit = loadUnit(request.unitUuid());
@@ -92,11 +108,16 @@ public class LearningSessionServiceImpl implements LearningSessionService {
 		Set<Capacity> capacities = resolveCapacities(
 				request.capacityUuids(), assignment.getCourse());
 
-		LearningSession session = mapper.fromCreate(request, assignment, unit);
+		CreateLearningSessionRequest effective = applyTemplateSeed(request);
+
+		LearningSession session = mapper.fromCreate(effective, assignment, unit);
 		session.setCompetencies(competencies);
 		session.setCapacities(capacities);
 
 		LearningSession saved = sessionRepository.saveAndFlush(session);
+		if (request.applicationSheets() != null) {
+			applicationSheetService.replace(saved, request.applicationSheets());
+		}
 
 		log.info("[learning-session] created -- publicUuid={} assignment={} unit={} date={} competencies={} capacities={}",
 				saved.getPublicUuid(), assignment.getPublicUuid(),
@@ -109,7 +130,7 @@ public class LearningSessionServiceImpl implements LearningSessionService {
 	@Override
 	@Transactional(readOnly = true)
 	public LearningSessionResponse get(UUID publicUuid) {
-		return mapper.toResponse(loadSession(publicUuid));
+		return mapper.toResponse(loadSessionForCaller(publicUuid));
 	}
 
 	@Override
@@ -120,11 +141,14 @@ public class LearningSessionServiceImpl implements LearningSessionService {
 				: filters;
 		validateDateRange(effective.dateFrom(), effective.dateTo());
 
+		UUID scopedTeacherUuid = lmsAssignmentBinder.resolveTeacherFilterForList(
+				effective.teacherUuid());
+
 		// JPQL navigates the path a.teacher.publicUuid etc., so we feed
 		// the public UUIDs directly. Hibernate auto-applies the tenant
 		// filter on top of every joined entity.
 		return sessionRepository.findFiltered(
-						effective.teacherUuid(),
+						scopedTeacherUuid,
 						effective.sectionUuid(),
 						effective.periodUuid(),
 						effective.unitUuid(),
@@ -137,13 +161,84 @@ public class LearningSessionServiceImpl implements LearningSessionService {
 	}
 
 	@Override
+	@Transactional(readOnly = true)
+	public List<SharedLearningSessionResponse> listShared() {
+		List<LearningSession> rows = lmsAssignmentBinder.isCurrentUserTenantAdmin()
+				? sessionRepository.findSharedForAdmin()
+				: sessionRepository.findSharedForTeacher(
+						lmsAssignmentBinder.resolveTeacherFilterForList(null));
+		return rows.stream().map(mapper::toShared).toList();
+	}
+
+	@Override
+	@Transactional
+	public LearningSessionResponse copy(UUID publicUuid, CopyLearningSessionRequest request) {
+		LearningSession source = loadSession(publicUuid);
+		if (!callerMayCopySource(source)) {
+			throw new ResourceNotFoundException("LearningSession", publicUuid);
+		}
+		if (source.getStatus() == SessionStatus.CANCELLED) {
+			throw new ConflictException("SESSION_NOT_COPYABLE",
+					"Cancelled sessions cannot be copied");
+		}
+
+		TeacherAssignment target = lmsAssignmentBinder.requireByPublicUuid(
+				request.assignmentUuid());
+		ensureAssignmentActive(target);
+		if (!sameGradeCoursePeriod(source.getTeacherAssignment(), target)) {
+			throw new ResourceNotFoundException("LearningSession", publicUuid);
+		}
+
+		SessionContent content = source.getContent();
+		SessionContentDto plan = content == null
+				? null
+				: new SessionContentDto(
+						content.getObjective(),
+						content.getActivities(),
+						content.getMaterials(),
+						null);
+		List<UUID> competencyUuids = source.getCompetencies() == null
+				? List.of()
+				: source.getCompetencies().stream().map(Competency::getPublicUuid).toList();
+		List<UUID> capacityUuids = source.getCapacities() == null
+				? List.of()
+				: source.getCapacities().stream().map(Capacity::getPublicUuid).toList();
+
+		return create(new CreateLearningSessionRequest(
+				target.getPublicUuid(),
+				source.getUnit().getPublicUuid(),
+				source.getTitle(),
+				source.getObjective(),
+				request.scheduledDate(),
+				source.getDurationMinutes(),
+				plan,
+				competencyUuids,
+				capacityUuids,
+				null));
+	}
+
+	@Override
 	@Transactional
 	public LearningSessionResponse update(UUID publicUuid,
 			UpdateLearningSessionRequest request) {
-		LearningSession session = loadSession(publicUuid);
+		LearningSession session = loadSessionForCaller(publicUuid);
+		if (request != null && request.applicationSheets() != null) {
+			applicationSheetService.replace(session, request.applicationSheets());
+		}
 
 		if (request == null || request.isEmpty()) {
 			return mapper.toResponse(session);
+		}
+
+		if (request.sharedWithGrade() != null) {
+			if (session.getStatus() == SessionStatus.CANCELLED) {
+				ensureMutable(session);
+			}
+			session.setSharedWithGrade(request.sharedWithGrade());
+		}
+		if (!request.hasPlanChanges()) {
+			LearningSession saved = sessionRepository.saveAndFlush(session);
+			return mapper.toResponse(saved);
 		}
 
 		ensureMutable(session);
@@ -189,7 +284,7 @@ public class LearningSessionServiceImpl implements LearningSessionService {
 	@Override
 	@Transactional
 	public void delete(UUID publicUuid) {
-		LearningSession session = loadSession(publicUuid);
+		LearningSession session = loadSessionForCaller(publicUuid);
 
 		// Placeholder for future attendance integration (Sprint 6).
 		// The error code is reserved here so the FE can rely on it
@@ -210,7 +305,7 @@ public class LearningSessionServiceImpl implements LearningSessionService {
 	@Override
 	@Transactional(readOnly = true)
 	public List<LearningSessionListItem> listByAssignment(UUID assignmentUuid) {
-		TeacherAssignment assignment = loadAssignment(assignmentUuid);
+		TeacherAssignment assignment = lmsAssignmentBinder.requireByPublicUuid(assignmentUuid);
 		return sessionRepository.findAllByAssignmentOrdered(assignment).stream()
 				.map(mapper::toListItem)
 				.toList();
@@ -220,7 +315,10 @@ public class LearningSessionServiceImpl implements LearningSessionService {
 	@Transactional(readOnly = true)
 	public List<LearningSessionListItem> listByUnit(UUID unitUuid) {
 		Unit unit = loadUnit(unitUuid);
+		UUID scopedTeacherUuid = lmsAssignmentBinder.resolveTeacherFilterForList(null);
 		return sessionRepository.findAllByUnitOrdered(unit).stream()
+				.filter(session -> scopedTeacherUuid == null
+						|| belongsToTeacher(session, scopedTeacherUuid))
 				.map(mapper::toListItem)
 				.toList();
 	}
@@ -232,7 +330,7 @@ public class LearningSessionServiceImpl implements LearningSessionService {
 	@Override
 	@Transactional
 	public LearningSessionResponse start(UUID publicUuid, LifecycleRequest request) {
-		LearningSession session = loadSession(publicUuid);
+		LearningSession session = loadSessionForCaller(publicUuid);
 		ensureVersion(session, request);
 		ensureTransition(session, SessionStatus.IN_PROGRESS);
 
@@ -247,7 +345,7 @@ public class LearningSessionServiceImpl implements LearningSessionService {
 	@Override
 	@Transactional
 	public LearningSessionResponse complete(UUID publicUuid, LifecycleRequest request) {
-		LearningSession session = loadSession(publicUuid);
+		LearningSession session = loadSessionForCaller(publicUuid);
 		ensureVersion(session, request);
 		ensureTransition(session, SessionStatus.COMPLETED);
 
@@ -268,7 +366,7 @@ public class LearningSessionServiceImpl implements LearningSessionService {
 	@Override
 	@Transactional
 	public LearningSessionResponse cancel(UUID publicUuid, LifecycleRequest request) {
-		LearningSession session = loadSession(publicUuid);
+		LearningSession session = loadSessionForCaller(publicUuid);
 		ensureVersion(session, request);
 		ensureTransition(session, SessionStatus.CANCELLED);
 
@@ -299,6 +397,126 @@ public class LearningSessionServiceImpl implements LearningSessionService {
 		return sessionRepository.findByPublicUuid(publicUuid)
 				.orElseThrow(() -> new ResourceNotFoundException(
 						"LearningSession", publicUuid));
+	}
+
+	/**
+	 * Loads a session and enforces TEACHER self-scope. Cross-teacher access
+	 * is surfaced as 404 (anti-enumeration), not 403.
+	 */
+	private LearningSession loadSessionForCaller(UUID publicUuid) {
+		LearningSession session = loadSession(publicUuid);
+		try {
+			lmsAssignmentBinder.assertCallerMayUseAssignment(
+					session.getTeacherAssignment());
+		}
+		catch (ForbiddenException ex) {
+			throw new ResourceNotFoundException("LearningSession", publicUuid);
+		}
+		return session;
+	}
+
+	/**
+	 * The author (or an admin) can always copy. A colleague can copy only
+	 * when the session is marked shared with the grade. Anyone else gets
+	 * the same 404 as a missing session.
+	 */
+	private boolean callerMayCopySource(LearningSession source) {
+		try {
+			lmsAssignmentBinder.assertCallerMayUseAssignment(source.getTeacherAssignment());
+			return true;
+		}
+		catch (ForbiddenException ex) {
+			return source.isSharedWithGrade();
+		}
+	}
+
+	private static boolean sameGradeCoursePeriod(TeacherAssignment source,
+			TeacherAssignment target) {
+		if (source == null || target == null) {
+			return false;
+		}
+		Course sourceCourse = source.getCourse();
+		Course targetCourse = target.getCourse();
+		AcademicPeriod sourcePeriod = source.getAcademicPeriod();
+		AcademicPeriod targetPeriod = target.getAcademicPeriod();
+		Grade sourceGrade = gradeOf(source.getSection());
+		Grade targetGrade = gradeOf(target.getSection());
+		return sourceCourse != null && targetCourse != null
+				&& Objects.equals(sourceCourse.getId(), targetCourse.getId())
+				&& sourcePeriod != null && targetPeriod != null
+				&& Objects.equals(sourcePeriod.getId(), targetPeriod.getId())
+				&& sourceGrade != null && targetGrade != null
+				&& Objects.equals(sourceGrade.getId(), targetGrade.getId());
+	}
+
+	private static Grade gradeOf(Section section) {
+		return section == null ? null : section.getGrade();
+	}
+
+	private static boolean belongsToTeacher(LearningSession session,
+			UUID teacherPublicUuid) {
+		TeacherAssignment assignment = session.getTeacherAssignment();
+		if (assignment == null || assignment.getTeacher() == null) {
+			return false;
+		}
+		return teacherPublicUuid.equals(assignment.getTeacher().getPublicUuid());
+	}
+
+	/**
+	 * When {@code templateUuid} (or tenant default) is set and content activities
+	 * are empty, seed activities/materials from the template schema.
+	 */
+	private CreateLearningSessionRequest applyTemplateSeed(CreateLearningSessionRequest request) {
+		SessionContentDto content = request.content();
+		boolean activitiesEmpty = content == null
+				|| content.activities() == null
+				|| content.activities().isEmpty();
+		if (!activitiesEmpty) {
+			return request;
+		}
+
+		SessionTemplate template = null;
+		if (request.templateUuid() != null) {
+			template = sessionTemplateService.requireTenantOrSystem(request.templateUuid());
+		} else {
+			template = sessionTemplateService.findDefaultForTenant().orElse(null);
+		}
+		if (template == null) {
+			return request;
+		}
+
+		List<String> activities = SessionTemplateService.seedActivitiesFromSchema(template.getSchema());
+		List<String> materials = SessionTemplateService.seedMaterialsFromSchema(template.getSchema());
+		if (activities.isEmpty() && materials.isEmpty()) {
+			return request;
+		}
+
+		String objective = content != null ? content.objective() : null;
+		List<String> existingMaterials = content != null && content.materials() != null
+				? content.materials()
+				: List.of();
+		List<String> mergedMaterials = existingMaterials.isEmpty() ? materials : existingMaterials;
+		String observations = content != null ? content.observations() : null;
+
+		SessionContentDto seeded = new SessionContentDto(
+				objective,
+				activities.isEmpty() ? List.of() : activities,
+				mergedMaterials,
+				observations
+		);
+
+		return new CreateLearningSessionRequest(
+				request.assignmentUuid(),
+				request.unitUuid(),
+				request.title(),
+				request.objective(),
+				request.scheduledDate(),
+				request.durationMinutes(),
+				seeded,
+				request.competencyUuids(),
+				request.capacityUuids(),
+				request.templateUuid() != null ? request.templateUuid() : template.getPublicUuid()
+		);
 	}
 
 	private TeacherAssignment loadAssignment(UUID publicUuid) {

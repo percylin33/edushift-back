@@ -4,6 +4,7 @@ import com.edushift.infrastructure.multitenancy.TenantIdResolver;
 import com.edushift.infrastructure.ratelimit.SimpleRateLimiter;
 import com.edushift.modules.admin.auth.AdminLoginResponse.AdminUserSummary;
 import com.edushift.modules.admin.auth.dto.AdminMfaRequiredResponse;
+import com.edushift.modules.admin.auth.dto.AdminInitialPasswordChangeRequest;
 import com.edushift.modules.audit.events.AuditAction;
 import com.edushift.modules.audit.service.AuditLogger;
 import com.edushift.modules.auth.entity.User;
@@ -125,8 +126,13 @@ public class AdminAuthService {
 				sentinelTenant.setSlug("edushift-system");
 				sentinelTenant.setName("edushift-system");
 
-				user.recordSuccessfulLogin();
-				userRepository.saveAndFlush(user);
+				if (user.isMustChangePassword()) {
+					String onboardingToken = jwtService.issueOnboardingToken(user, sentinelTenant);
+					auditLogger.log(AuditAction.LOGIN, "admin", user.getPublicUuid(),
+							"SUPER_ADMIN temporary password accepted; password change required");
+					return AdminMfaRequiredResponse.passwordChange(
+							onboardingToken, jwtService.onboardingTokenTtlSeconds());
+				}
 
 				// ============================================================
 				// Sprint 15 / F-02 / H-02: MFA is mandatory for SUPER_ADMIN.
@@ -147,31 +153,59 @@ public class AdminAuthService {
 							onboardingToken, jwtService.onboardingTokenTtlSeconds());
 				}
 
-				String accessToken = jwtService.issueAccessToken(
-						user, sentinelTenant, user.getRoleNames());
-				String refreshToken = jwtService.issueRefreshToken(user, sentinelTenant);
-
-				AdminUserSummary summary = new AdminUserSummary(
-						user.getPublicUuid().toString(),
-						user.getEmail(),
-						user.getFirstName(),
-						user.getLastName(),
-						buildFullName(user),
-						new java.util.ArrayList<>(user.getRoleNames())
-				);
-
+				String mfaToken = jwtService.issueMfaToken(user, sentinelTenant);
 				auditLogger.log(AuditAction.LOGIN, "admin", user.getPublicUuid(),
-						"SUPER_ADMIN login: " + normalizedEmail + " from " + clientIp);
-
-				log.info("[admin-auth] SUPER_ADMIN login OK: email={}, ip={}",
+						"SUPER_ADMIN password accepted; MFA challenge issued for "
+								+ normalizedEmail + " from " + clientIp);
+				log.info("[admin-auth] SUPER_ADMIN MFA challenge issued: email={}, ip={}",
 						normalizedEmail, clientIp);
-
-				return AdminLoginResponse.bearer(
-						accessToken, refreshToken,
-						jwtService.accessTokenTtlSeconds(), summary);
+				return AdminMfaChallengeRequiredResponse.bearer(
+						mfaToken, jwtService.mfaTokenTtlSeconds());
 			});
 			return result;
 		});
+	}
+
+	/** Changes the bootstrap credential using only a short-lived onboarding token. */
+	public AdminMfaRequiredResponse changeInitialPassword(
+			String onboardingToken, AdminInitialPasswordChangeRequest request, String clientIp) {
+		JwtClaims claims = jwtService.parseAndValidate(onboardingToken);
+		if (claims.type() != JwtService.TokenType.ONBOARDING
+				|| !TenantIdResolver.SUPER_ADMIN_SENTINEL.equals(claims.tenantId())) {
+			throw new UnauthorizedException("ONBOARDING_TOKEN_INVALID",
+					"A valid SUPER_ADMIN onboarding token is required");
+		}
+
+		return TenantContext.runAs(TenantIdResolver.SUPER_ADMIN_SENTINEL, () ->
+				new TransactionTemplate(txManager).execute(status -> {
+					UUID userUuid;
+					try {
+						userUuid = UUID.fromString(claims.subject());
+					}
+					catch (RuntimeException ex) {
+						throw new UnauthorizedException("ONBOARDING_TOKEN_INVALID",
+								"A valid SUPER_ADMIN onboarding token is required");
+					}
+					User user = userRepository.findByPublicUuid(userUuid)
+							.orElseThrow(() -> new UnauthorizedException("USER_NOT_FOUND", "User not found"));
+					if (!user.hasRole(UserRole.SUPER_ADMIN)
+							|| user.getStatus() != com.edushift.modules.auth.entity.UserStatus.ACTIVE
+							|| !user.isMustChangePassword()) {
+						throw new UnauthorizedException("PASSWORD_CHANGE_NOT_REQUIRED",
+								"This account cannot use the initial password change flow");
+					}
+					if (passwordEncoder.matches(request.newPassword(), user.getPasswordHash())) {
+						throw new com.edushift.shared.exception.BadRequestException(
+								"PASSWORD_UNCHANGED", "New password must differ from the temporary password");
+					}
+					user.setPasswordHash(passwordEncoder.encode(request.newPassword()));
+					user.setMustChangePassword(false);
+					userRepository.saveAndFlush(user);
+					auditLogger.log(AuditAction.UPDATE, "admin", user.getPublicUuid(),
+							"SUPER_ADMIN bootstrap password changed", java.util.Map.of("clientIp", clientIp));
+					return AdminMfaRequiredResponse.onboarding(
+							onboardingToken, jwtService.onboardingTokenTtlSeconds());
+				}));
 	}
 
 	private static String buildFullName(User user) {

@@ -1,5 +1,6 @@
 package com.edushift.modules.users.dto;
 
+import com.edushift.modules.auth.entity.EmailSource;
 import com.edushift.modules.auth.entity.UserStatus;
 import java.time.Instant;
 import java.util.Set;
@@ -21,15 +22,26 @@ public record UserDetailResponse(
 		String email,
 		String firstName,
 		String lastName,
+		String secondLastName,
 		String fullName,
 		String phone,
 		String avatarUrl,
 		UserStatus status,
 		boolean emailVerified,
 		boolean mfaEnabled,
+		EmailSource emailSource,
 		Set<String> roles,
 		Instant lastLoginAt,
 		Instant createdAt,
 		Instant updatedAt
 ) {
+	public UserDetailResponse(UUID publicUuid, String email, String firstName,
+			String lastName, String fullName, String phone, String avatarUrl,
+			UserStatus status, boolean emailVerified, boolean mfaEnabled,
+			EmailSource emailSource, Set<String> roles, Instant lastLoginAt,
+			Instant createdAt, Instant updatedAt) {
+		this(publicUuid, email, firstName, lastName, null, fullName, phone, avatarUrl,
+				status, emailVerified, mfaEnabled, emailSource, roles, lastLoginAt,
+				createdAt, updatedAt);
+	}
 }

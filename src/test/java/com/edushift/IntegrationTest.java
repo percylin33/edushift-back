@@ -66,6 +66,83 @@ import org.testcontainers.containers.PostgreSQLContainer;
 @Import(TestMailConfig.class)
 public abstract class IntegrationTest {
 
+	private static final java.util.concurrent.atomic.AtomicInteger TEST_CLIENT_IDS =
+			new java.util.concurrent.atomic.AtomicInteger();
+
+	@org.springframework.beans.factory.annotation.Autowired
+	private org.springframework.boot.test.web.client.TestRestTemplate fixtureHttpClient;
+
+	@org.junit.jupiter.api.BeforeEach
+	void isolateHttpClientRateLimitBucket() {
+		var interceptors = fixtureHttpClient.getRestTemplate().getInterceptors();
+		interceptors.removeIf(value -> value instanceof TestClientAddress);
+		int client = TEST_CLIENT_IDS.incrementAndGet();
+		interceptors.add(new TestClientAddress("198.18." + ((client >>> 8) & 255) + "." + (client & 255)));
+	}
+
+	/** Each test is a separate client; requests within one test still share the real limit. */
+	private record TestClientAddress(String ip) implements org.springframework.http.client.ClientHttpRequestInterceptor {
+		@Override
+		public org.springframework.http.client.ClientHttpResponse intercept(
+				org.springframework.http.HttpRequest request, byte[] body,
+				org.springframework.http.client.ClientHttpRequestExecution execution) throws java.io.IOException {
+			if (!request.getHeaders().containsKey("X-Forwarded-For")) {
+				request.getHeaders().set("X-Forwarded-For", ip);
+			}
+			return execution.execute(request, body);
+		}
+	}
+
+	@org.springframework.beans.factory.annotation.Autowired
+	private com.edushift.modules.admin.plans.PlatformPlanRepository fixturePlans;
+
+	/** Creates an unsaved school with the required catalog plan, using actual migrated data. */
+	protected com.edushift.modules.tenants.entity.Tenant newTestTenant() {
+		var tenant = new com.edushift.modules.tenants.entity.Tenant();
+		tenant.setPlan(com.edushift.modules.tenants.entity.TenantPlan.BASIC);
+		tenant.setPlanId(fixturePlans.findByCode("BASIC").orElseThrow().getId());
+		return tenant;
+	}
+
+	protected static String sessionCookie(org.springframework.http.ResponseEntity<?> response, String name) {
+		var cookies = response.getHeaders().getOrEmpty(org.springframework.http.HttpHeaders.SET_COOKIE)
+				.stream().flatMap(header -> java.net.HttpCookie.parse(header).stream()).toList();
+		return sessionCookie(cookies, name);
+	}
+
+	protected static com.edushift.modules.auth.dto.AuthResponse readSessionResponse(
+			org.springframework.http.ResponseEntity<com.edushift.modules.auth.dto.AuthResponse> response) {
+		var body = java.util.Objects.requireNonNull(response.getBody());
+		org.assertj.core.api.Assertions.assertThat(body.accessToken()).isNull();
+		org.assertj.core.api.Assertions.assertThat(body.refreshToken()).isNull();
+		return new com.edushift.modules.auth.dto.AuthResponse(
+				sessionCookie(response, "edushift_access_token"), sessionCookie(response, "edushift_refresh_token"),
+				body.tokenType(), body.expiresInSec(), body.user());
+	}
+
+	/** Reads the browser session from HttpOnly response cookies for bearer-based isolation checks. */
+	protected static com.edushift.modules.auth.dto.AuthResponse readSessionResponse(
+			com.fasterxml.jackson.databind.ObjectMapper mapper,
+			org.springframework.http.ResponseEntity<String> response) throws java.io.IOException {
+		var body = mapper.readValue(response.getBody(), com.edushift.modules.auth.dto.AuthResponse.class);
+		org.assertj.core.api.Assertions.assertThat(body.accessToken()).isNull();
+		org.assertj.core.api.Assertions.assertThat(body.refreshToken()).isNull();
+		var cookies = response.getHeaders().getOrEmpty(org.springframework.http.HttpHeaders.SET_COOKIE)
+				.stream().flatMap(header -> java.net.HttpCookie.parse(header).stream()).toList();
+		String access = sessionCookie(cookies, "edushift_access_token");
+		String refresh = sessionCookie(cookies, "edushift_refresh_token");
+		return new com.edushift.modules.auth.dto.AuthResponse(
+				access, refresh, body.tokenType(), body.expiresInSec(), body.user());
+	}
+
+	private static String sessionCookie(java.util.List<java.net.HttpCookie> cookies, String name) {
+		var cookie = cookies.stream().filter(value -> value.getName().equals(name)).findFirst().orElseThrow(
+				() -> new AssertionError("Missing session cookie: " + name));
+		org.assertj.core.api.Assertions.assertThat(cookie.isHttpOnly()).as(name + " must be HttpOnly").isTrue();
+		org.assertj.core.api.Assertions.assertThat(cookie.getValue()).as(name + " must not be blank").isNotBlank();
+		return cookie.getValue();
+	}
+
 	/**
 	 * Postgres container, started once per JVM and shared across all
 	 * integration test classes. Tag pinned for reproducibility; Alpine image
@@ -84,6 +161,9 @@ public abstract class IntegrationTest {
 
 	@DynamicPropertySource
 	static void registerPostgresProperties(DynamicPropertyRegistry registry) {
+		String paymentKey = java.util.Base64.getEncoder().encodeToString(
+				new java.security.SecureRandom().generateSeed(32));
+		registry.add("payment.encryption.key", () -> paymentKey);
 		registry.add("spring.datasource.url", POSTGRES::getJdbcUrl);
 		registry.add("spring.datasource.username", POSTGRES::getUsername);
 		registry.add("spring.datasource.password", POSTGRES::getPassword);

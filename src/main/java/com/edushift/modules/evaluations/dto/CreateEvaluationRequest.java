@@ -64,6 +64,9 @@ public record CreateEvaluationRequest(
 		@ValidUuid(message = "learningSessionPublicUuid must be a valid UUID")
 		String learningSessionPublicUuid,
 
+		@ValidUuid(message = "categoryPublicUuid must be a valid UUID")
+		String categoryPublicUuid,
+
 		Boolean isActive
 ) {
 }

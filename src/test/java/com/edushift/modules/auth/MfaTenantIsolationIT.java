@@ -67,7 +67,7 @@ class MfaTenantIsolationIT extends IntegrationTest {
 	}
 
 	private Tenant createTenant(String name, String slug) {
-		Tenant t = new Tenant();
+		Tenant t = newTestTenant();
 		t.setName(name);
 		t.setSlug(slug);
 		t.setStatus(TenantStatus.ACTIVE);
@@ -96,9 +96,9 @@ class MfaTenantIsolationIT extends IntegrationTest {
 		loginHeaders.setContentType(MediaType.APPLICATION_JSON);
 		loginHeaders.add("X-Tenant-Slug", t.getSlug());
 		String loginBody = String.format("{\"email\":\"%s\",\"password\":\"%s\"}", email, RAW_PWD);
-		String loginJson = http.exchange(AUTH_BASE + "/login", HttpMethod.POST,
-				new HttpEntity<>(loginBody, loginHeaders), String.class).getBody();
-		String token = objectMapper.readTree(loginJson).get("accessToken").asText();
+		var loginResponse = http.exchange(AUTH_BASE + "/login", HttpMethod.POST,
+				new HttpEntity<>(loginBody, loginHeaders), String.class);
+		String token = readSessionResponse(objectMapper, loginResponse).accessToken();
 
 		// Enroll MFA.
 		HttpHeaders enrollHeaders = new HttpHeaders();
@@ -111,7 +111,7 @@ class MfaTenantIsolationIT extends IntegrationTest {
 		int code = totp.getTotpPassword(secret);
 
 		http.exchange(AUTH_BASE + "/mfa/enroll/verify", HttpMethod.POST,
-				new HttpEntity<>(new MfaEnrollVerifyRequest(secret, String.valueOf(code)),
+				new HttpEntity<>(new MfaEnrollVerifyRequest(secret, String.format("%06d", code)),
 						enrollHeaders), String.class);
 		return secret;
 	}

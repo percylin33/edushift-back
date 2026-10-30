@@ -39,6 +39,7 @@ import com.edushift.shared.web.FrontendLinks;
 import java.lang.reflect.Field;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
@@ -106,7 +107,7 @@ class UserInvitationServiceImplTest {
 
 			CreateInvitationRequest request = new CreateInvitationRequest(
 					"  Teach@acme.test  ", "Teach", "Doe", Set.of("TEACHER"),
-					DocumentType.DNI, "87654321");
+					DocumentType.DNI, "87654321", Map.of("teacherId", UUID.randomUUID().toString()));
 
 			InvitationResponse response = service.createInvitation(request);
 
@@ -133,7 +134,7 @@ class UserInvitationServiceImplTest {
 					.thenReturn(Optional.of(existing));
 
 			CreateInvitationRequest request = new CreateInvitationRequest(
-					"dup@acme.test", "Dup", "User", Set.of("TEACHER"),
+					"dup@acme.test", "Dup", "User", Set.of("STAFF"),
 					DocumentType.DNI, "87654321");
 
 			assertThatThrownBy(() -> service.createInvitation(request))
@@ -156,6 +157,22 @@ class UserInvitationServiceImplTest {
 			assertThatThrownBy(() -> service.createInvitation(request))
 					.isInstanceOfSatisfying(BusinessException.class,
 							ex -> assertThat(ex.getCode()).isEqualTo("INVALID_ROLE"));
+
+			verify(invitationRepository, never()).save(any());
+			verify(invitationRepository, never())
+					.findActivePendingByEmail(anyString(), any(Instant.class));
+		}
+
+		@Test
+		@DisplayName("generic teacher invitation without profile metadata is rejected")
+		void profileRoleRequiresMetadata() {
+			CreateInvitationRequest request = new CreateInvitationRequest(
+					"teacher@acme.test", "Teacher", "User", Set.of("TEACHER"),
+					DocumentType.DNI, "87654321");
+
+			assertThatThrownBy(() -> service.createInvitation(request))
+					.isInstanceOfSatisfying(BusinessException.class,
+							ex -> assertThat(ex.getCode()).isEqualTo("PROFILE_ROLE_REQUIRES_PROFILE"));
 
 			verify(invitationRepository, never()).save(any());
 			verify(invitationRepository, never())
@@ -388,6 +405,42 @@ class UserInvitationServiceImplTest {
 		}
 
 		@Test
+		@DisplayName("happy path â€” creates user with invited roles + marks invitation accepted + issues session")
+		void syntheticAccountIsNotVerifiedMailbox() {
+			UUID invitationId = UUID.randomUUID();
+			UserInvitation invitation = newPendingInvitation("teach.doe.12345678.abcdef@school.com");
+			setIdViaReflection(invitation, invitationId);
+			Tenant tenant = newTenant("Acme Corp");
+			when(invitationRepository.findActiveByToken("tok")).thenReturn(Optional.of(invitation));
+			when(tenantRepository.findById(invitation.getTenantId())).thenReturn(Optional.of(tenant));
+			when(invitationRepository.findById(invitationId)).thenReturn(Optional.of(invitation));
+			when(passwordEncoder.encode("Sup3rSecret!")).thenReturn("hashed-pw");
+			when(userRepository.saveAndFlush(any(User.class))).thenAnswer(inv -> inv.getArgument(0));
+			when(invitationRepository.save(any(UserInvitation.class))).thenAnswer(inv -> inv.getArgument(0));
+
+			AuthResponse expected = new AuthResponse(
+					"access", "refresh", "Bearer", 900L,
+					new UserSummary(UUID.randomUUID(), "Teach Doe",
+							"teach.doe.12345678.abcdef@school.com", null, UserStatus.ACTIVE));
+			when(authService.issueSession(any(User.class), eq(tenant))).thenReturn(expected);
+
+			AuthResponse session = service.acceptInvitation(
+					new AcceptInvitationRequest("tok", "Sup3rSecret!"));
+
+			assertThat(session).isSameAs(expected);
+			assertThat(invitation.isAccepted()).isTrue();
+
+			ArgumentCaptor<User> userCaptor = ArgumentCaptor.forClass(User.class);
+			verify(userRepository, times(1)).saveAndFlush(userCaptor.capture());
+			User created = userCaptor.getValue();
+			assertThat(created.getEmail()).isEqualTo("teach.doe.12345678.abcdef@school.com");
+			assertThat(created.getStatus()).isEqualTo(UserStatus.ACTIVE);
+			assertThat(created.isEmailVerified()).isFalse();
+            assertThat(created.getEmailSource()).isEqualTo(com.edushift.modules.auth.entity.EmailSource.SYNTHETIC);
+			assertThat(created.getRoleNames()).containsExactly("TEACHER");
+		}
+
+		@Test
 		@DisplayName("expired token â†’ GoneException, no user created")
 		void expiredTokenRejected() {
 			UserInvitation invitation = newPendingInvitation("teach@acme.test");
@@ -430,6 +483,25 @@ class UserInvitationServiceImplTest {
 			verify(userRepository, never()).saveAndFlush(any(User.class));
 			verify(authService, never()).issueSession(any(), any());
 		}
+
+		@Test
+		@DisplayName("legacy domain-role invitation without profile metadata cannot create an account")
+		void legacyProfileInvitationWithoutMetadataRejected() {
+			UserInvitation invitation = newPendingInvitation("teach@acme.test");
+			invitation.setMetadata(null);
+			Tenant tenant = newTenant("Acme Corp");
+			when(invitationRepository.findActiveByToken("tok")).thenReturn(Optional.of(invitation));
+			when(tenantRepository.findById(invitation.getTenantId())).thenReturn(Optional.of(tenant));
+
+			assertThatThrownBy(() -> service.acceptInvitation(
+					new AcceptInvitationRequest("tok", "Sup3rSecret!")))
+					.isInstanceOfSatisfying(BusinessException.class,
+							ex -> assertThat(ex.getCode()).isEqualTo("PROFILE_ROLE_REQUIRES_PROFILE"));
+
+			verify(userRepository, never()).saveAndFlush(any(User.class));
+			verify(passwordEncoder, never()).encode(anyString());
+			verify(authService, never()).issueSession(any(), any());
+		}
 	}
 
 	// ===========================================================================
@@ -445,6 +517,7 @@ class UserInvitationServiceImplTest {
 		inv.setFirstName("Ada");
 		inv.setLastName("Lovelace");
 		inv.setRoleNames(Set.of("TEACHER"));
+		inv.setMetadata(Map.of("teacherId", UUID.randomUUID().toString()));
 		inv.setToken("token-" + UUID.randomUUID());
 		inv.setExpiresAt(Instant.now().plusSeconds(60 * 60));
 		return inv;

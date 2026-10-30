@@ -23,6 +23,9 @@ public record UpdateUserRequest(
 		@Size(min = 1, max = 100, message = "lastName must be between 1 and 100 characters")
 		String lastName,
 
+		@Size(max = 100, message = "secondLastName must be at most 100 characters")
+		String secondLastName,
+
 		@Pattern(
 				regexp = "^[+0-9\\s\\-()]{6,32}$",
 				message = "phone must contain only digits, spaces, dashes, parentheses, and an optional leading +"
@@ -33,11 +36,16 @@ public record UpdateUserRequest(
 		@Size(max = 512, message = "avatarUrl must be at most 512 characters")
 		String avatarUrl
 ) {
+	public UpdateUserRequest(String firstName, String lastName, String phone, String avatarUrl) {
+		this(firstName, lastName, null, phone, avatarUrl);
+	}
+
 	/**
 	 * Convenience guard so callers can short-circuit when there's nothing
 	 * to merge. Returns true when every field is null.
 	 */
 	public boolean isEmpty() {
-		return firstName == null && lastName == null && phone == null && avatarUrl == null;
+		return firstName == null && lastName == null && secondLastName == null
+				&& phone == null && avatarUrl == null;
 	}
 }

@@ -29,6 +29,7 @@ import com.edushift.modules.academic.section.entity.Section;
 import com.edushift.modules.academic.section.repository.SectionRepository;
 import com.edushift.modules.students.enrollments.repository.StudentEnrollmentRepository;
 import com.edushift.modules.auth.repository.UserRepository;
+import com.edushift.modules.teachers.assignments.support.LmsAssignmentBinder;
 import java.lang.reflect.Field;
 import java.time.Instant;
 import java.util.List;
@@ -66,6 +67,7 @@ class QuizServiceValidationTest {
 	private ApplicationEventPublisher eventPublisher;
 	private StudentEnrollmentRepository enrollmentRepository;
 	private UserRepository userRepository;
+	private LmsAssignmentBinder lmsAssignmentBinder;
 	private QuizServiceImpl service;
 
 	@BeforeEach
@@ -79,10 +81,12 @@ class QuizServiceValidationTest {
 		eventPublisher = mock(ApplicationEventPublisher.class);
 		enrollmentRepository = mock(StudentEnrollmentRepository.class);
 		userRepository = mock(UserRepository.class);
+		lmsAssignmentBinder = mock(LmsAssignmentBinder.class);
 		service = new QuizServiceImpl(
 				quizRepository, questionRepository, optionRepository,
 				sectionRepository, quizMapper, attemptService,
-				eventPublisher, enrollmentRepository, userRepository);
+				eventPublisher, enrollmentRepository, userRepository,
+				lmsAssignmentBinder);
 	}
 
 	// ------------------------------------------------------------------
@@ -296,7 +300,7 @@ class QuizServiceValidationTest {
 			when(sectionRepository.findByPublicUuid(id)).thenReturn(Optional.empty());
 
 			CreateQuizRequest r = new CreateQuizRequest(
-					"new", null, null, 30, 1, 100, null);
+					"new", null, null, 30, 1, 100, null, UUID.randomUUID());
 
 			assertThatThrownBy(() -> service.create(id, r, UUID.randomUUID()))
 					.isInstanceOf(SectionNotFoundException.class);

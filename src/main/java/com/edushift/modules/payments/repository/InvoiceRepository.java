@@ -5,15 +5,22 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import jakarta.persistence.LockModeType;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 public interface InvoiceRepository extends JpaRepository<Invoice, Long> {
 
     Optional<Invoice> findByPublicUuid(UUID publicUuid);
+
+    /** Locks a tenant-scoped invoice while recording a manual payment transition. */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT i FROM Invoice i WHERE i.publicUuid = :publicUuid")
+    Optional<Invoice> findByPublicUuidForUpdate(@Param("publicUuid") UUID publicUuid);
 
     /**
      * Internal-id lookup. Used by the admin service when walking
@@ -79,4 +86,70 @@ public interface InvoiceRepository extends JpaRepository<Invoice, Long> {
               AND i.dueAt < :now
             """)
     List<Invoice> findOverduePending(@Param("now") Instant now, Pageable pageable);
+
+    @Query("""
+            SELECT i FROM Invoice i
+            WHERE i.status = com.edushift.modules.payments.entity.Invoice$Status.PENDING
+              AND i.dueAt >= :from
+              AND i.dueAt < :to
+            """)
+    List<Invoice> findPendingDueBetween(
+            @Param("from") Instant from,
+            @Param("to") Instant to,
+            Pageable pageable);
+
+    @Query("""
+            SELECT i FROM Invoice i
+            WHERE i.studentId = :studentPublicUuid
+              AND i.status = com.edushift.modules.payments.entity.Invoice$Status.OVERDUE
+            """)
+    List<Invoice> findOverdueForStudent(@Param("studentPublicUuid") UUID studentPublicUuid);
+
+    Page<Invoice> findByStatusOrderByEvidenceSubmittedAtDesc(
+            Invoice.Status status, Pageable pageable);
+
+    Page<Invoice> findByStatusOrderByIssuedAtDesc(Invoice.Status status, Pageable pageable);
+
+    Page<Invoice> findAllByOrderByIssuedAtDesc(Pageable pageable);
+
+                @Query(value = """
+                                                SELECT CASE
+                                                                                 WHEN due_at >= :cutoff30 THEN 'd0_30'
+                                                                                 WHEN due_at >= :cutoff60 THEN 'd31_60'
+                                                                                 WHEN due_at >= :cutoff90 THEN 'd61_90'
+                                                                                 ELSE 'd90_plus'
+                                                                         END AS bucket,
+                                                                         COUNT(*) AS invoice_count,
+                                                                         COALESCE(SUM(total_cents), 0) AS amount_cents,
+                                                                         COUNT(DISTINCT student_id) AS student_count
+                                                FROM edushift.invoices
+                                                WHERE tenant_id = :tenantId
+                                                        AND deleted = false
+                                                        AND status = 'OVERDUE'
+                                                        AND due_at < :now
+                                                GROUP BY 1
+                                                """, nativeQuery = true)
+                List<AgingBucketProjection> aggregateOverdueByAge(
+                                                @Param("tenantId") UUID tenantId,
+                                                @Param("now") Instant now,
+                                                @Param("cutoff30") Instant cutoff30,
+                                                @Param("cutoff60") Instant cutoff60,
+                                                @Param("cutoff90") Instant cutoff90);
+
+                                            @Query(value = """
+                                                    SELECT COUNT(DISTINCT student_id)
+                                                    FROM edushift.invoices
+                                                    WHERE tenant_id = :tenantId
+                                                      AND deleted = false
+                                                      AND status = 'OVERDUE'
+                                                      AND due_at < :now
+                                                    """, nativeQuery = true)
+                                            long countOverdueStudents(@Param("tenantId") UUID tenantId, @Param("now") Instant now);
+
+                interface AgingBucketProjection {
+                                String getBucket();
+                                Long getInvoiceCount();
+                                Long getAmountCents();
+                                Long getStudentCount();
+                }
 }

@@ -13,6 +13,7 @@ import com.edushift.modules.academic.course.repository.CourseRepository;
 import com.edushift.modules.academic.course.service.CourseService;
 import com.edushift.modules.academic.levelgrade.entity.AcademicLevel;
 import com.edushift.modules.academic.levelgrade.repository.AcademicLevelRepository;
+import com.edushift.modules.academic.unit.service.UnitSeedService;
 import com.edushift.modules.teachers.assignments.repository.TeacherAssignmentRepository;
 import com.edushift.shared.exception.BusinessException;
 import com.edushift.shared.exception.ConflictException;
@@ -49,6 +50,7 @@ public class CourseServiceImpl implements CourseService {
 	private final AcademicLevelRepository levelRepository;
 	private final TeacherAssignmentRepository teacherAssignmentRepository;
 	private final CourseMapper mapper;
+	private final UnitSeedService unitSeedService;
 
 	// =========================================================================
 	// Reads
@@ -116,6 +118,14 @@ public class CourseServiceImpl implements CourseService {
 		}
 
 		List<CourseLevel> persistedLinks = persistLinks(persistedCourse, levels);
+
+		try {
+			unitSeedService.seedForCourse(persistedCourse.getPublicUuid(), null, false);
+		}
+		catch (RuntimeException ex) {
+			log.warn("[academic.course] unit seed failed after create -- publicUuid={} cause={}",
+					persistedCourse.getPublicUuid(), ex.getMessage());
+		}
 
 		log.info("[academic.course] created -- publicUuid={} code={} levels={}",
 				persistedCourse.getPublicUuid(), persistedCourse.getCode(),

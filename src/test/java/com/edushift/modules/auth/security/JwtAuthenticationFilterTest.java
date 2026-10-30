@@ -1,7 +1,9 @@
 package com.edushift.modules.auth.security;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -11,6 +13,8 @@ import static org.mockito.Mockito.when;
 import com.edushift.modules.auth.service.JwtService;
 import com.edushift.modules.auth.service.JwtService.JwtClaims;
 import com.edushift.modules.auth.service.JwtService.TokenType;
+import com.edushift.modules.auth.entity.User;
+import com.edushift.modules.auth.entity.UserStatus;
 import com.edushift.shared.exception.UnauthorizedException;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.http.HttpServletRequest;
@@ -18,6 +22,7 @@ import jakarta.servlet.http.HttpServletResponse;
 import java.time.Instant;
 import java.util.Set;
 import java.util.UUID;
+import java.util.Optional;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -63,7 +68,10 @@ class JwtAuthenticationFilterTest {
 	private com.edushift.shared.security.LmsRoleAuthorityMapper authorityMapper;
 
 	@Mock
-	private com.edushift.modules.tenants.repository.TenantRepository tenantRepository;
+	private com.edushift.modules.tenants.service.TenantStatusCache tenantStatusCache;
+
+	@Mock
+	private com.edushift.modules.auth.repository.UserRepository userRepository;
 
 	@InjectMocks
 	private JwtAuthenticationFilter filter;
@@ -77,6 +85,9 @@ class JwtAuthenticationFilterTest {
 		request = new MockHttpServletRequest("GET", "/v1/auth/me");
 		response = new MockHttpServletResponse();
 		SecurityContextHolder.clearContext();
+		// Default: tenant is ACTIVE so happy-path tests authenticate.
+		lenient().when(tenantStatusCache.getStatus(any(UUID.class)))
+				.thenReturn(com.edushift.modules.tenants.entity.TenantStatus.ACTIVE);
 	}
 
 	@AfterEach
@@ -238,6 +249,7 @@ class JwtAuthenticationFilterTest {
 			when(jwtService.parseAndValidate("good.access.jwt"))
 					.thenReturn(claims(publicUuid.toString(), TokenType.ACCESS,
 							tenantId, "demo", Set.of()));
+			stubUser(publicUuid, tenantId);
 
 			filter.doFilter(request, response, chain);
 
@@ -249,8 +261,8 @@ class JwtAuthenticationFilterTest {
 					.as("getName() must be the publicUuid string for AuthService.currentUser()")
 					.isEqualTo(publicUuid.toString());
 			assertThat(auth.getCredentials())
-					.as("raw bearer kept as credentials for downstream propagation")
-					.isEqualTo("good.access.jwt");
+					.as("raw bearer is not retained in the authenticated context")
+					.isNull();
 			assertThat(auth.getAuthorities()).isEmpty();
 
 			JwtAuthenticatedPrincipal principal = (JwtAuthenticatedPrincipal) auth.getPrincipal();
@@ -270,6 +282,7 @@ class JwtAuthenticationFilterTest {
 			when(jwtService.parseAndValidate("good.jwt"))
 					.thenReturn(claims(publicUuid.toString(), TokenType.ACCESS,
 							tenantId, "demo", Set.of("ADMIN", "TEACHER")));
+			stubUser(publicUuid, tenantId);
 
 			filter.doFilter(request, response, chain);
 
@@ -289,6 +302,7 @@ class JwtAuthenticationFilterTest {
 			when(jwtService.parseAndValidate("good.jwt"))
 					.thenReturn(claims(publicUuid.toString(), TokenType.ACCESS,
 							tenantId, "demo", Set.of("ROLE_ADMIN")));
+			stubUser(publicUuid, tenantId);
 
 			filter.doFilter(request, response, chain);
 
@@ -306,8 +320,13 @@ class JwtAuthenticationFilterTest {
 			com.edushift.shared.security.LmsRoleAuthorityMapper realMapper =
 					new com.edushift.shared.security.LmsRoleAuthorityMapper(
 							mock(com.edushift.modules.tenants.service.PermissionOverrideService.class));
+			com.edushift.modules.tenants.service.TenantStatusCache statusCache =
+					mock(com.edushift.modules.tenants.service.TenantStatusCache.class);
+			when(statusCache.getStatus(any(UUID.class)))
+					.thenReturn(com.edushift.modules.tenants.entity.TenantStatus.ACTIVE);
 			JwtAuthenticationFilter realFilter =
-					new JwtAuthenticationFilter(jwtService, realMapper, mock(com.edushift.modules.tenants.repository.TenantRepository.class));
+					new JwtAuthenticationFilter(jwtService, realMapper, statusCache,
+							userRepository);
 
 			UUID publicUuid = UUID.randomUUID();
 			UUID tenantId = UUID.randomUUID();
@@ -315,6 +334,7 @@ class JwtAuthenticationFilterTest {
 			when(jwtService.parseAndValidate("good.jwt"))
 					.thenReturn(claims(publicUuid.toString(), TokenType.ACCESS,
 							tenantId, "demo", Set.of("TENANT_ADMIN")));
+			stubUser(publicUuid, tenantId);
 
 			realFilter.doFilter(request, response, chain);
 
@@ -330,17 +350,72 @@ class JwtAuthenticationFilterTest {
 					.contains("LMS_AI_GENERATE", "LMS_QUIZ_CREATE", "LMS_TASK_READ");
 		}
 
+		@Test
+		@DisplayName("a signed tenant claim cannot authenticate a user from another tenant")
+		void rejectsTokenWhoseTenantDoesNotOwnTheUser() throws Exception {
+			UUID publicUuid = UUID.randomUUID();
+			UUID tokenTenantId = UUID.randomUUID();
+			UUID userTenantId = UUID.randomUUID();
+			request.addHeader(HttpHeaders.AUTHORIZATION, "Bearer foreign.tenant.jwt");
+			when(jwtService.parseAndValidate("foreign.tenant.jwt"))
+					.thenReturn(claims(publicUuid.toString(), TokenType.ACCESS,
+							tokenTenantId, "other-school", Set.of("TENANT_ADMIN")));
+			stubUser(publicUuid, userTenantId);
+
+			filter.doFilter(request, response, chain);
+
+			assertNoAuthSet();
+			verify(chain, times(1)).doFilter(request, response);
+	}
+
 	}
 
 	// ===========================================================================
 	// Helpers
 	// ===========================================================================
 
+	@Test
+	void mfaTokenAuthenticatesOnlyTheChallengeWithoutGrantingApplicationAuthorities() throws Exception {
+		UUID user = UUID.randomUUID();
+		UUID tenant = UUID.randomUUID();
+		request = new MockHttpServletRequest("POST", "/api/v1/auth/mfa/challenge");
+		request.setContextPath("/api");
+		request.addHeader(HttpHeaders.AUTHORIZATION, "Bearer challenge.jwt");
+		JwtClaims verified = claims(user.toString(), TokenType.MFA, tenant, "school", Set.of("TENANT_ADMIN"));
+		when(jwtService.parseAndValidate("challenge.jwt")).thenReturn(verified);
+		stubUser(user, tenant);
+		filter.doFilter(request, response, chain);
+		Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+		assertThat(auth).isNotNull();
+		assertThat(auth.getAuthorities()).isEmpty();
+		assertThat(auth.getCredentials()).isNull();
+		assertThat(auth.getDetails()).isSameAs(verified);
+	}
+
+	@org.junit.jupiter.params.ParameterizedTest
+	@org.junit.jupiter.params.provider.CsvSource({"GET,/v1/auth/me", "GET,/v1/auth/mfa/challenge", "POST,/v1/tasks"})
+	void mfaTokenCannotAuthenticateOtherRoutes(String method, String path) throws Exception {
+		request = new MockHttpServletRequest(method, path);
+		request.addHeader(HttpHeaders.AUTHORIZATION, "Bearer challenge.jwt");
+		when(jwtService.parseAndValidate("challenge.jwt")).thenReturn(
+				claims(UUID.randomUUID().toString(), TokenType.MFA, UUID.randomUUID(), "school", Set.of()));
+		filter.doFilter(request, response, chain);
+		assertNoAuthSet();
+	}
+
 	private static JwtClaims claims(String subject, TokenType type, UUID tenantId,
 	                                 String tenantSlug, Set<String> roles) {
 		Instant now = Instant.now();
 		return new JwtClaims(subject, tenantId, tenantSlug, roles, type, UUID.randomUUID(), now,
-				now.plusSeconds(900));
+				now.plusSeconds(900), null);
+	}
+
+	private void stubUser(UUID publicUuid, UUID tenantId) {
+		User user = new User();
+		user.setPublicUuid(publicUuid);
+		user.setTenantId(tenantId);
+		user.setStatus(UserStatus.ACTIVE);
+		when(userRepository.findByPublicUuid(publicUuid)).thenReturn(Optional.of(user));
 	}
 
 	private static void assertNoAuthSet() {

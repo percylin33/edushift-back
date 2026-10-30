@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://edushift.com/schemas/ai/session-generator.v1.json",
+  "$id": "https://edushift.pe/schemas/ai/session-generator.v1.json",
   "title": "SessionGeneratorOutput",
   "description": "Strict JSON contract for the BE-8.1 'POST /v1/ai/generate-session' LLM output. Aligned to the MINEDU Perú lesson template (INICIO / DESARROLLO / CIERRE). The shape mirrors GenerateSessionResponse 1:1 so the parser is a straight Jackson deserialisation after validation.",
   "type": "object",
@@ -58,7 +58,7 @@
       "properties": {
         "phase": {
           "type": "string",
-          "enum": ["INICIO", "DESARROLLO", "CIERRE"]
+          "minLength": 2, "maxLength": 60
         },
         "name": {
           "type": "string",

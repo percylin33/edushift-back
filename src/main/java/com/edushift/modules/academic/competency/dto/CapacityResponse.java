@@ -1,5 +1,6 @@
 package com.edushift.modules.academic.competency.dto;
 
+import com.edushift.modules.academic.competency.entity.CurriculumSourceContentStatus;
 import java.time.Instant;
 import java.util.UUID;
 
@@ -21,8 +22,17 @@ public record CapacityResponse(
 		Integer displayOrder,
 		Boolean isActive,
 		Instant createdAt,
-		Instant updatedAt
+		Instant updatedAt,
+	String sourceCatalogVersion,
+	String sourceCatalogCode,
+	CurriculumSourceContentStatus sourceContentStatus
 ) {
+	public CapacityResponse(UUID publicUuid, CompetencyRef competency, String code,
+			String name, String description, Integer displayOrder, Boolean isActive,
+			Instant createdAt, Instant updatedAt) {
+		this(publicUuid, competency, code, name, description, displayOrder, isActive,
+				createdAt, updatedAt, null, null, null);
+	}
 
 	public record CompetencyRef(
 			UUID publicUuid,

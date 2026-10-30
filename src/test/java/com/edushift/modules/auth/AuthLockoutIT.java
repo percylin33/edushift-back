@@ -17,7 +17,6 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.web.client.TestRestTemplate;
 import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
@@ -26,6 +25,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.web.client.HttpStatusCodeException;
 
 /**
  * Sprint 14 (MVP Closure) / DEBT-AUTH-7 — full-stack IT.
@@ -45,7 +45,6 @@ class AuthLockoutIT extends IntegrationTest {
 
 	@LocalServerPort private int port;
 
-	@Autowired private TestRestTemplate http;
 	@Autowired private TenantRepository tenantRepository;
 	@Autowired private UserRepository userRepository;
 	@Autowired private FailedLoginAttemptRepository attemptRepository;
@@ -54,17 +53,22 @@ class AuthLockoutIT extends IntegrationTest {
 	private Tenant tenant;
 	private User student;
 	private final String tenantSlug = "lockout-" + UUID.randomUUID().toString().substring(0, 8);
+	private final org.springframework.web.client.RestTemplate http =
+			new org.springframework.web.client.RestTemplate(
+					new org.springframework.http.client.SimpleClientHttpRequestFactory());
+	private int requestNumber;
 
 	private static final String EMAIL = "victim@lockout.test";
 	private static final String RAW_PWD = "EduShift2026!";
 
 	@BeforeEach
 	void setUp() {
-		tenant = new Tenant();
+		tenant = newTestTenant();
 		tenant.setName("Lockout Test Tenant");
 		tenant.setSlug(tenantSlug);
 		tenant.setStatus(TenantStatus.ACTIVE);
-		tenant = tenantRepository.save(tenant);
+		tenant = tenantRepository.saveAndFlush(tenant);
+		com.edushift.shared.multitenancy.TenantContext.set(tenant.getId());
 
 		student = new User();
 		student.setPublicUuid(UUID.randomUUID());
@@ -75,21 +79,36 @@ class AuthLockoutIT extends IntegrationTest {
 		student.setStatus(UserStatus.ACTIVE);
 		student.setEmailVerified(true);
 		student.setPasswordHash(passwordEncoder.encode(RAW_PWD));
-		student = userRepository.save(student);
+		student = com.edushift.shared.multitenancy.TenantContext.runAs(
+				tenant.getId(), () -> userRepository.saveAndFlush(student));
+	}
+
+	@org.junit.jupiter.api.AfterEach
+	void clearTenant() {
+		com.edushift.shared.multitenancy.TenantContext.clear();
 	}
 
 	private ResponseEntity<String> attemptLogin(String password) {
 		HttpHeaders headers = new HttpHeaders();
 		headers.setContentType(MediaType.APPLICATION_JSON);
 		headers.set("X-Tenant-Slug", tenantSlug);
+		// Keep this test focused on per-account lockout. The application also
+		// rate-limits by IP, so each simulated source uses its own address.
+		headers.set("X-Forwarded-For", "198.19.0." + (++requestNumber));
 
 		String body = "{\"email\":\"" + EMAIL + "\",\"password\":\"" + password + "\"}";
 		HttpEntity<String> req = new HttpEntity<>(body, headers);
-		return http.exchange(
-				"http://localhost:" + port + "/v1/auth/login",
-				HttpMethod.POST,
-				req,
-				String.class);
+		try {
+			return http.exchange(
+					"http://localhost:" + port + "/api/v1/auth/login",
+					HttpMethod.POST,
+					req,
+					String.class);
+		}
+		catch (HttpStatusCodeException e) {
+			return new ResponseEntity<>(e.getResponseBodyAsString(),
+					e.getResponseHeaders(), e.getStatusCode());
+		}
 	}
 
 	@Test
@@ -127,8 +146,7 @@ class AuthLockoutIT extends IntegrationTest {
 		// Actually: with 4 failures, the 5th attempt is the threshold. If wrong → lock.
 		// If RIGHT → success + clear.
 
-		assertThat(r.getStatusCode().value()).isIn(
-				HttpStatus.OK.value(), HttpStatus.TOO_MANY_REQUESTS.value());
-		// (Both are acceptable outcomes given the test wiring — see DoD note.)
+		assertThat(r.getStatusCode()).isEqualTo(HttpStatus.OK);
+		assertThat(attemptLogin(RAW_PWD).getStatusCode()).isEqualTo(HttpStatus.OK);
 	}
 }

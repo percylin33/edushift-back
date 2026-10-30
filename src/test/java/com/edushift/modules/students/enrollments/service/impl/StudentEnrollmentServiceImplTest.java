@@ -59,6 +59,7 @@ class StudentEnrollmentServiceImplTest {
 	@Mock private StudentRepository studentRepository;
 	@Mock private SectionRepository sectionRepository;
 	@Mock private AcademicYearRepository yearRepository;
+	@Mock private com.edushift.modules.payments.service.SubscriptionService subscriptionService;
 	@Spy private StudentEnrollmentMapper mapper = new StudentEnrollmentMapper();
 
 	@InjectMocks private StudentEnrollmentServiceImpl service;
@@ -108,6 +109,7 @@ class StudentEnrollmentServiceImplTest {
 			assertThat(response.studentPublicUuid()).isEqualTo(student.getPublicUuid());
 			assertThat(response.notes()).isNull();
 			assertThat(response.status()).isEqualTo(StudentEnrollmentStatus.ACTIVE);
+			verify(subscriptionService).synchronizeStudentForBillingRules(student.getPublicUuid());
 			ArgumentCaptor<StudentEnrollment> captor = ArgumentCaptor.forClass(StudentEnrollment.class);
 			verify(enrollmentRepository).saveAndFlush(captor.capture());
 			StudentEnrollment saved = captor.getValue();
@@ -157,7 +159,7 @@ class StudentEnrollmentServiceImplTest {
 					.thenReturn(Optional.of(student));
 			when(sectionRepository.findByPublicUuid(eq(section.getPublicUuid())))
 					.thenReturn(Optional.of(section));
-			when(yearRepository.findByPublicUuid(eq(year.getPublicUuid())))
+			when(yearRepository.findByPublicUuidForUpdate(eq(year.getPublicUuid())))
 					.thenReturn(Optional.empty());
 
 			assertThatThrownBy(() -> service.createEnrollment(student.getPublicUuid(),
@@ -177,7 +179,7 @@ class StudentEnrollmentServiceImplTest {
 					.thenReturn(Optional.of(student));
 			when(sectionRepository.findByPublicUuid(eq(section.getPublicUuid())))
 					.thenReturn(Optional.of(section));
-			when(yearRepository.findByPublicUuid(eq(otherYear.getPublicUuid())))
+			when(yearRepository.findByPublicUuidForUpdate(eq(otherYear.getPublicUuid())))
 					.thenReturn(Optional.of(otherYear));
 
 			assertThatThrownBy(() -> service.createEnrollment(student.getPublicUuid(),
@@ -372,7 +374,7 @@ class StudentEnrollmentServiceImplTest {
 				.thenReturn(Optional.of(student));
 		when(sectionRepository.findByPublicUuid(eq(section.getPublicUuid())))
 				.thenReturn(Optional.of(section));
-		when(yearRepository.findByPublicUuid(eq(year.getPublicUuid())))
+		when(yearRepository.findByPublicUuidForUpdate(eq(year.getPublicUuid())))
 				.thenReturn(Optional.of(year));
 	}
 

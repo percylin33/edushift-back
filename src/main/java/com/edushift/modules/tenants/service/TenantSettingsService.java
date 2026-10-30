@@ -28,6 +28,14 @@ import java.util.UUID;
  */
 public interface TenantSettingsService {
 
+	int DEFAULT_UNIT_COUNT = 8;
+	int MIN_UNIT_COUNT = 1;
+	int MAX_UNIT_COUNT = 20;
+
+	static int clampUnitCount(int count) {
+		return Math.max(MIN_UNIT_COUNT, Math.min(MAX_UNIT_COUNT, count));
+	}
+
 	/**
 	 * Resolve the {@code lateAfterMinutes} attendance setting for a
 	 * tenant. Always non-negative.
@@ -39,4 +47,17 @@ public interface TenantSettingsService {
 	 *         did not set it (or the value is malformed).
 	 */
 	int getLateAfterMinutes(UUID tenantId);
+
+	/**
+	 * Resolve {@code settings.academic.defaultUnitCount} for a tenant.
+	 * Clamped to 1..20; falls back to {@code 8} when missing or invalid.
+	 */
+	int getDefaultUnitCount(UUID tenantId);
+
+	/**
+	 * Persist {@code settings.academic.defaultUnitCount} (merge into the
+	 * nested {@code academic} map; does not replace unrelated settings).
+	 * Clamps to 1..20.
+	 */
+	void setDefaultUnitCount(UUID tenantId, int count);
 }

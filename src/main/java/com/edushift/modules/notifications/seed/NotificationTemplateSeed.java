@@ -23,6 +23,8 @@ import java.util.List;
  *       finishes grading their submission (AI_FEEDBACK category).</li>
  *   <li><b>TASK_RETURNED</b> — to the student when the teacher
  *       returns a graded task (TASK category).</li>
+ *   <li><b>TASK_PUBLISHED</b> — to enrolled students when a task
+ *       goes DRAFT → PUBLISHED (TASK category).</li>
  *   <li><b>QUIZ_PUBLISHED</b> — to the section when a new quiz goes
  *       live (QUIZ category).</li>
  *   <li><b>PAYMENT_DUE</b> — to the parent when a tuition invoice
@@ -88,12 +90,21 @@ public final class NotificationTemplateSeed {
                         <p style="margin:0 0 8px;font-size:16px;color:#0f172a"><strong>Nota:</strong> {{grade}} / {{maxGrade}}</p>
                         <p style="margin:0;font-size:14px;color:#64748b">Comentario: {{teacherComment}}</p>
                         """),
+                build("TASK_PUBLISHED", "TASK",
+                        "Nueva tarea disponible — {{taskTitle}}",
+                        """
+                        <h1 style="margin:0 0 16px;font-size:20px;color:#0f172a">Nueva tarea publicada</h1>
+                        <p style="margin:0 0 12px;font-size:15px;line-height:1.55;color:#334155">Hola <strong>{{studentName}}</strong>,</p>
+                        <p style="margin:0 0 12px;font-size:15px;line-height:1.55;color:#334155">Hay una nueva tarea en
+                           <strong>{{courseName}}</strong>: <strong>{{taskTitle}}</strong>.</p>
+                        <p style="margin:0;font-size:14px;color:#64748b">Fecha límite: <strong>{{dueDate}}</strong></p>
+                        """),
                 build("QUIZ_PUBLISHED", "QUIZ",
-                                "Nuevo quiz disponible — {{quizTitle}}",
+                                "Nueva práctica disponible — {{quizTitle}}",
                                 """
-                                <h1 style="margin:0 0 16px;font-size:20px;color:#0f172a">Nuevo quiz publicado</h1>
+                                <h1 style="margin:0 0 16px;font-size:20px;color:#0f172a">Nueva práctica publicada</h1>
                                 <p style="margin:0 0 12px;font-size:15px;line-height:1.55;color:#334155">Hola <strong>{{studentName}}</strong>,</p>
-                                <p style="margin:0 0 12px;font-size:15px;line-height:1.55;color:#334155">Hay un nuevo quiz en
+                                <p style="margin:0 0 12px;font-size:15px;line-height:1.55;color:#334155">Hay una nueva práctica en
                                    <strong>{{courseName}}</strong>: <strong>{{quizTitle}}</strong>.</p>
                                 <p style="margin:0;font-size:14px;color:#64748b">Fecha límite: <strong>{{dueDate}}</strong></p>
                                 """),
@@ -106,12 +117,62 @@ public final class NotificationTemplateSeed {
                                    <strong>{{concept}}</strong> vence el <strong>{{dueDate}}</strong>.</p>
                                 <p style="margin:0;font-size:16px;color:#0f172a"><strong>Monto:</strong> {{amount}}</p>
                                 """),
+                build("PAYMENT_EVIDENCE_SUBMITTED", "PAYMENT",
+                                "Voucher recibido — {{invoiceNumber}}",
+                                """
+                                <h1 style="margin:0 0 16px;font-size:20px;color:#0f172a">Voucher de pago por revisar</h1>
+                                <p style="margin:0 0 12px;font-size:15px;line-height:1.55;color:#334155">Se envió un comprobante para la cuota
+                                   <strong>{{invoiceNumber}}</strong> de <strong>{{studentName}}</strong>.</p>
+                                <p style="margin:0 0 8px;font-size:15px;color:#0f172a"><strong>Monto:</strong> {{amount}}</p>
+                                <p style="margin:0;font-size:14px;color:#64748b">Nota: {{notes}}</p>
+                                """),
+                build("PAYMENT_EVIDENCE_REJECTED", "PAYMENT",
+                                "Voucher rechazado — {{invoiceNumber}}",
+                                """
+                                <h1 style="margin:0 0 16px;font-size:20px;color:#0f172a">Voucher rechazado</h1>
+                                <p style="margin:0 0 12px;font-size:15px;line-height:1.55;color:#334155">Estimado/a <strong>{{parentName}}</strong>,</p>
+                                <p style="margin:0 0 12px;font-size:15px;line-height:1.55;color:#334155">El comprobante de la cuota
+                                   <strong>{{invoiceNumber}}</strong> fue rechazado.</p>
+                                <p style="margin:0;font-size:14px;color:#64748b">Motivo: {{reason}}</p>
+                                """),
+                build("PAYMENT_RECEIVED", "PAYMENT",
+                                "Pago registrado — {{invoiceNumber}}",
+                                """
+                                <h1 style="margin:0 0 16px;font-size:20px;color:#0f172a">Pago registrado</h1>
+                                <p style="margin:0 0 12px;font-size:15px;line-height:1.55;color:#334155">Estimado/a <strong>{{parentName}}</strong>,</p>
+                                <p style="margin:0 0 12px;font-size:15px;line-height:1.55;color:#334155">Confirmamos el pago de la cuota
+                                   <strong>{{invoiceNumber}}</strong> por <strong>{{amount}}</strong>
+                                   ({{studentName}}).</p>
+                                """),
+                build("PAYMENT_OVERDUE", "PAYMENT",
+                                "Cuota vencida — {{invoiceNumber}}",
+                                """
+                                <h1 style="margin:0 0 16px;font-size:20px;color:#0f172a">Cuota vencida</h1>
+                                <p style="margin:0 0 12px;font-size:15px;line-height:1.55;color:#334155">Estimado/a <strong>{{parentName}}</strong>,</p>
+                                <p style="margin:0 0 12px;font-size:15px;line-height:1.55;color:#334155">La cuota <strong>{{invoiceNumber}}</strong>
+                                   de <strong>{{studentName}}</strong> está vencida. Monto: <strong>{{amount}}</strong>.</p>
+                                """),
+                build("PAYMENT_REMINDER", "PAYMENT",
+                                "Recordatorio de pago — {{invoiceNumber}}",
+                                """
+                                <h1 style="margin:0 0 16px;font-size:20px;color:#0f172a">Recordatorio de pago</h1>
+                                <p style="margin:0 0 12px;font-size:15px;line-height:1.55;color:#334155">Estimado/a <strong>{{parentName}}</strong>,</p>
+                                <p style="margin:0 0 12px;font-size:15px;line-height:1.55;color:#334155">La cuota <strong>{{invoiceNumber}}</strong>
+                                   vence el <strong>{{dueDate}}</strong>. Monto: <strong>{{amount}}</strong>.</p>
+                                """),
                 build("ANNOUNCEMENT", "ANNOUNCEMENT",
                                 "{{title}}",
                                 """
                                 <h1 style="margin:0 0 12px;font-size:20px;color:#0f172a">{{title}}</h1>
                                 <div style="font-size:15px;line-height:1.55;color:#334155">{{body}}</div>
                                 <p style="margin:16px 0 0;font-size:12px;color:#94a3b8">{{senderName}} · {{tenantName}}</p>
+                                """),
+                build("DISCLOSURE_PUBLISHED", "ANNOUNCEMENT",
+                                "Información del año {{academicYear}} disponible — {{tenantName}}",
+                                """
+                                <h1 style="margin:0 0 16px;font-size:20px;color:#0f172a">Información anual publicada</h1>
+                                <p style="margin:0 0 12px;font-size:15px;line-height:1.55;color:#334155">{{tenantName}} publicó la información del servicio educativo para el año {{academicYear}}.</p>
+                                <p style="margin:0;font-size:14px;color:#64748b">Consulta la versión {{version}} desde el portal familiar de EduShift.</p>
                                 """),
                 build("PASSWORD_RESET", "SYSTEM",
                                 "Restablece tu contraseña — {{tenantName}}",

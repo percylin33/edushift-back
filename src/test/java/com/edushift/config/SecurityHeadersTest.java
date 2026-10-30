@@ -1,7 +1,9 @@
 package com.edushift.config;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.options;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.edushift.infrastructure.multitenancy.MultiTenancyConfiguration;
 import com.edushift.infrastructure.multitenancy.TenantInterceptor;
@@ -14,6 +16,7 @@ import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.context.annotation.ComponentScan;
 import org.springframework.context.annotation.FilterType;
 import org.springframework.context.annotation.Import;
+import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -75,6 +78,11 @@ class SecurityHeadersTest {
 		String privateEndpoint() {
 			return "ok";
 		}
+
+		@GetMapping({"/actuator/health", "/actuator/health/db", "/actuator/info", "/actuator/metrics"})
+		String actuatorEndpoint() {
+			return "ok";
+		}
 	}
 
 	@MockitoBean
@@ -85,6 +93,34 @@ class SecurityHeadersTest {
 
 	@org.springframework.beans.factory.annotation.Autowired
 	private MockMvc mockMvc;
+
+	@Test
+	void onlyMinimalActuatorHealthIsPublic() throws Exception {
+		mockMvc.perform(get("/actuator/health"))
+				.andExpect(status().isOk());
+	}
+
+	@Test
+	@WithMockUser(roles = "TENANT_ADMIN")
+	void diagnosticsRemainDeniedToTenantUsers() throws Exception {
+		for (String path : new String[]{"/actuator/health/db", "/actuator/info", "/actuator/metrics"}) {
+			mockMvc.perform(get(path))
+					.andExpect(status().isForbidden());
+		}
+		mockMvc.perform(options("/actuator/metrics"))
+				.andExpect(status().isForbidden());
+	}
+
+	@Test
+	@WithMockUser(roles = "SUPER_ADMIN")
+	void superAdminCanReadInternalMetricsButNotComponentHealth() throws Exception {
+		mockMvc.perform(get("/actuator/info"))
+				.andExpect(status().isOk());
+		mockMvc.perform(get("/actuator/metrics"))
+				.andExpect(status().isOk());
+		mockMvc.perform(get("/actuator/health/db"))
+				.andExpect(status().isForbidden());
+	}
 
 	@Test
 	@DisplayName("Public endpoint emits the full set of defense-in-depth headers")

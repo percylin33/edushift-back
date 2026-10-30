@@ -6,9 +6,7 @@ import java.time.Instant;
 import java.util.UUID;
 
 /**
- * Slim projection of a {@link com.edushift.modules.quizzes.entity.Quiz}
- * for list endpoints (Sprint 7b / BE-7b.1). No questions are
- * embedded to keep page size bounded.
+ * Slim projection of a quiz for list endpoints (Sprint 7b / BE-7b.1 + V105).
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public record QuizSummary(
@@ -22,6 +20,10 @@ public record QuizSummary(
 		UUID ownerPublicUuid,
 		int questionCount,
 		int totalPoints,
-		Instant createdAt
+		Instant createdAt,
+		UUID teacherAssignmentPublicUuid,
+		UUID coursePublicUuid,
+		String courseName,
+		String periodLabel
 ) {
 }

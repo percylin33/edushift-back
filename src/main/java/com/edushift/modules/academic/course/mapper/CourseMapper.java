@@ -1,5 +1,6 @@
 package com.edushift.modules.academic.course.mapper;
 
+import com.edushift.modules.academic.course.CourseVisualDefaults;
 import com.edushift.modules.academic.course.dto.CourseListItem;
 import com.edushift.modules.academic.course.dto.CourseResponse;
 import com.edushift.modules.academic.course.dto.CourseResponse.CourseLevelRef;
@@ -32,6 +33,8 @@ public class CourseMapper {
 				course.getCredits(),
 				course.getHoursPerWeek(),
 				course.getIsActive(),
+				course.getColor(),
+				course.getIcon(),
 				toLevelRefs(levels),
 				course.getCreatedAt(),
 				course.getUpdatedAt()
@@ -46,6 +49,8 @@ public class CourseMapper {
 				course.getCredits(),
 				course.getHoursPerWeek(),
 				course.getIsActive(),
+				course.getColor(),
+				course.getIcon(),
 				toLevelRefs(levels)
 		);
 	}
@@ -58,6 +63,12 @@ public class CourseMapper {
 		course.setCredits(request.credits());
 		course.setHoursPerWeek(request.hoursPerWeek());
 		course.setIsActive(request.isActive() == null ? Boolean.TRUE : request.isActive());
+
+		CourseVisualDefaults.Visual defaults = CourseVisualDefaults.fromCode(request.code());
+		String color = blankToNull(request.color());
+		String icon = blankToNull(request.icon());
+		course.setColor(color != null ? color.toUpperCase() : defaults.color());
+		course.setIcon(icon != null ? icon.trim() : defaults.icon());
 		return course;
 	}
 
@@ -81,6 +92,21 @@ public class CourseMapper {
 		if (patch.isActive() != null) {
 			course.setIsActive(patch.isActive());
 		}
+		if (patch.color() != null) {
+			String color = blankToNull(patch.color());
+			course.setColor(color != null ? color.toUpperCase() : CourseVisualDefaults.DEFAULT_COLOR);
+		}
+		if (patch.icon() != null) {
+			String icon = blankToNull(patch.icon());
+			course.setIcon(icon != null ? icon.trim() : CourseVisualDefaults.DEFAULT_ICON);
+		}
+	}
+
+	private static String blankToNull(String value) {
+		if (value == null || value.isBlank()) {
+			return null;
+		}
+		return value.trim();
 	}
 
 	private static List<CourseLevelRef> toLevelRefs(List<CourseLevel> links) {

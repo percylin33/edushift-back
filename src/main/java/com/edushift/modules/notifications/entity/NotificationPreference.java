@@ -16,8 +16,8 @@ import lombok.Setter;
  *
  * <p>One row per {@code (user, channel, category)} triple. Controls
  * whether the user receives a given category through a given channel.
- * <b>Default is enabled</b>: if a row doesn't exist for a triple, the
- * preference is treated as {@code enabled=true}.</p>
+ * In-app and email default to enabled when no row exists. Push defaults
+ * to disabled and requires an explicit opt-in.</p>
  *
  * <h3>Usage</h3>
  * The {@code NotificationService} checks this table before creating a

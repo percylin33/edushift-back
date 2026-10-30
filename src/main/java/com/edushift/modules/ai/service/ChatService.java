@@ -1,8 +1,9 @@
 package com.edushift.modules.ai.service;
 
-import com.edushift.modules.ai.config.MiniMaxProperties;
+import com.edushift.modules.ai.config.ActiveLlmSettings;
 import com.edushift.modules.ai.entity.AiChatMessage;
 import com.edushift.modules.ai.entity.AiChatSession;
+import com.edushift.modules.ai.entity.AiAgentType;
 import com.edushift.modules.ai.entity.TenantAiSettings;
 import com.edushift.modules.ai.exception.AiDisabledException;
 import com.edushift.modules.ai.exception.ChatSessionNotActiveException;
@@ -14,6 +15,8 @@ import com.edushift.modules.ai.llm.LlmClient.StreamObserver;
 import com.edushift.modules.ai.llm.LlmClient.StreamResult;
 import com.edushift.modules.ai.repository.AiChatMessageRepository;
 import com.edushift.modules.ai.repository.AiChatSessionRepository;
+import com.edushift.modules.ai.rag.AiSourceSearchService.Citation;
+import com.edushift.modules.ai.entity.AiCitationRef;
 import com.edushift.modules.ai.safety.AuditHash;
 import com.edushift.modules.ai.safety.PiiSafetyFilter;
 import com.edushift.modules.ai.service.TenantAiContextService.TenantContextSnapshot;
@@ -76,7 +79,10 @@ public class ChatService {
     private final RateLimitService rateLimitService;
     private final PiiSafetyFilter piiFilter;
     private final LlmClient llmClient;
-    private final MiniMaxProperties miniMaxProperties;
+    private final ActiveLlmSettings activeLlm;
+    private final AiAgentAccessService agentAccess;
+    private final AiAgentPromptService agentPrompts;
+    private final AiTutorDailyLimitService tutorDailyLimit;
 
     @org.springframework.beans.factory.annotation.Value("${app.ai.chat.temperature:0.7}")
     private double chatTemperature;
@@ -93,6 +99,23 @@ public class ChatService {
     public List<AiChatSession> listSessions(UUID userId, int limit) {
         return sessionRepo.findActiveByUser(userId,
                 org.springframework.data.domain.PageRequest.of(0, limit)).getContent();
+    }
+
+    @Transactional(readOnly = true)
+    public List<AiChatSession> listAgentSessions(UUID userId, AiAgentType type, int limit) {
+        // An empty list must still be denied when the plan no longer includes the agent.
+        agentAccess.requirePlan(type);
+        // Family links and student enrollment can change after a session was created.
+        return sessionRepo.findActiveByUserAndAgent(userId, type,
+                org.springframework.data.domain.PageRequest.of(0, limit)).getContent()
+                .stream().filter(s -> {
+                    try {
+                        agentAccess.requireSubject(type, userId, s.getSubjectPublicUuid());
+                        return true;
+                    } catch (ChatSessionNotFoundException ex) {
+                        return false;
+                    }
+                }).toList();
     }
 
     /**
@@ -130,6 +153,15 @@ public class ChatService {
         return sessionRepo.save(session);
     }
 
+    @Transactional
+    public AiChatSession createAgentSession(UUID userId, AiAgentType type, UUID subject) {
+        UUID validatedSubject = agentAccess.requireSubject(type, userId, subject);
+        AiChatSession session = createSession(userId);
+        session.setAgentType(type);
+        session.setSubjectPublicUuid(validatedSubject);
+        return sessionRepo.save(session);
+    }
+
     /**
      * Soft-delete a session (user-initiated). Cascades to its messages
      * via the FK ON DELETE CASCADE + the soft-delete filter.
@@ -164,6 +196,19 @@ public class ChatService {
     @Transactional
     public StreamHandle sendMessage(UUID sessionPublicUuid, UUID callerUserId,
                                     String userText, StreamObserver observer) {
+        return sendInternal(sessionPublicUuid, callerUserId, userText, observer, null);
+    }
+
+    @Transactional
+    public StreamHandle sendAgentMessage(UUID sessionPublicUuid, UUID callerUserId,
+                                         AiAgentType type, String userText,
+                                         StreamObserver observer) {
+        return sendInternal(sessionPublicUuid, callerUserId, userText, observer, type);
+    }
+
+    private StreamHandle sendInternal(UUID sessionPublicUuid, UUID callerUserId,
+                                      String userText, StreamObserver observer,
+                                      AiAgentType requestedType) {
         AiChatSession session = sessionRepo.findByPublicUuid(sessionPublicUuid)
                 .orElseThrow(ChatSessionNotFoundException::new);
         if (!session.getUserId().equals(callerUserId)) {
@@ -172,13 +217,25 @@ public class ChatService {
         if (session.getStatus() != AiChatSession.Status.ACTIVE) {
             throw new ChatSessionNotActiveException();
         }
+        if (requestedType == null && session.getAgentType() != null
+                || requestedType != null && session.getAgentType() != requestedType) {
+            throw new ChatSessionNotFoundException();
+        }
+        if (requestedType != null) {
+            agentAccess.requireSubject(requestedType, callerUserId,
+                    session.getSubjectPublicUuid());
+        }
+        if (requestedType == AiAgentType.TUTOR) {
+            tutorDailyLimit.requireAvailable(session.getSubjectPublicUuid());
+        }
 
-        // 1) Quota check (SEC-8.1: per-tenant cap)
+        // Rate-limit before reserving a paid daily quota unit.
         UUID tenantId = TenantContext.currentRequired();
-        TenantAiSettings settings = quotaService.verifyCanCall();
-        String model = resolveChatModel(settings);
-        // 2) Rate limit (SEC-8.1: per-user 20/h, 100/day)
         rateLimitService.checkAndIncrement(callerUserId);
+        TenantAiSettings settings = quotaService.verifyCanCall(
+                requestedType == null ? AiEntitlementService.GENERATE
+                        : AiAgentAccessService.feature(requestedType));
+        String model = resolveChatModel(settings);
 
         // 2) Persist user message (SEC-8.1: PII filter + audit hash)
         String userTextMasked = piiFilter.mask(userText);
@@ -201,6 +258,16 @@ public class ChatService {
         // 4) Build the LLM request (system + history + new user)
         TenantContextSnapshot ctx = tenantContextService.snapshot(tenantId);
         String systemPrompt = buildSystemPrompt(ctx);
+        List<Citation> citations = List.of();
+        boolean familyEvidenceMissing = false;
+        if (requestedType != null) {
+            var agentContext = agentPrompts.build(requestedType,
+                    session.getSubjectPublicUuid(), callerUserId, userTextMasked);
+            systemPrompt += "\n\n" + agentContext.systemPrompt();
+            citations = agentContext.citations();
+            familyEvidenceMissing = requestedType == AiAgentType.FAMILY
+                    && !agentContext.hasEvidence();
+        }
         List<LlmClient.HistoryItem> history = loadHistory(session.getId());
 
         // 5) Create the assistant message in STREAMING state
@@ -218,6 +285,7 @@ public class ChatService {
         LlmRequest req = new LlmRequest(
                 model, systemPrompt, userTextMasked, chatTemperature, 1024,
                 List.of(), null, history);
+        if (!familyEvidenceMissing) quotaService.reserveForRequest(req);
         LlmClient.WrappingObserver wrap = new LlmClient.WrappingObserver(observer) {
             @Override
             public boolean onToken(String chunk) {
@@ -225,11 +293,27 @@ public class ChatService {
                 return super.onToken(chunk);
             }
         };
-        StreamResult result = llmClient.stream(req, wrap);
+        StreamResult result;
+        try {
+            if (familyEvidenceMissing) {
+                String unavailable = "No encontré información autorizada y vigente para "
+                        + "responder esa pregunta. Revisa el portal del colegio o consulta "
+                        + "a administración.";
+                boolean delivered = wrap.onToken(unavailable);
+                if (delivered) wrap.onComplete();
+                result = new StreamResult("grounding-gate", 0, 0, 0, !delivered);
+            } else {
+                result = llmClient.stream(req, wrap);
+            }
+        } catch (RuntimeException ex) {
+            quotaService.incrementCounters(false, 0L, 0L);
+            throw ex;
+        }
 
         // 7) Persist final assistant message (SEC-8.1: PII filter + audit hash)
         String finalContent = piiFilter.mask(buffer.toString());
         assistantMsg.setContent(finalContent);
+        assistantMsg.setCitations(citations.stream().map(AiCitationRef::from).toList());
         assistantMsg.setStatus(result.cancelled() ? AiChatMessage.Status.CANCELLED
                 : AiChatMessage.Status.COMPLETED);
         assistantMsg.setModelUsed(result.model());
@@ -245,8 +329,11 @@ public class ChatService {
                 result.tokensOut() == null ? 0 : result.tokensOut());
         session.setExpiresAt(Instant.now().plus(SESSION_TTL));
         sessionRepo.save(session);
+        quotaService.incrementCounters(!result.cancelled(),
+                result.tokensIn() == null ? 0L : result.tokensIn(),
+                result.tokensOut() == null ? 0L : result.tokensOut());
 
-        return new StreamHandle(assistantPublicUuid, result.cancelled());
+        return new StreamHandle(assistantPublicUuid, result.cancelled(), citations);
     }
 
     // ------------------------------------------------------------------
@@ -255,16 +342,10 @@ public class ChatService {
 
     /**
      * Resolves the chat model from tenant settings, falling back to the
-     * global MiniMax default ({@code app.llm.minimax.default-model}).
-     * Rejects legacy OpenRouter-style ids the same way quiz generation does.
+     * active provider default (MiniMax, or the local Ollama tag).
      */
     String resolveChatModel(TenantAiSettings settings) {
-        String model = LmsAiService.resolveMiniMaxModel(
-                settings == null ? null : settings.getDefaultModel());
-        if (model == null || model.isBlank()) {
-            model = miniMaxProperties.getDefaultModel();
-        }
-        return model;
+        return activeLlm.resolve(settings == null ? null : settings.getDefaultModel());
     }
 
     /**
@@ -276,7 +357,7 @@ public class ChatService {
         StringBuilder sb = new StringBuilder(2048);
         sb.append("Eres el asistente IA de EduShift para el colegio '")
           .append(ctx.tenantName()).append("'. ");
-        sb.append("Tu rol: ayudar a docentes y administradores con tareas academicas. ");
+        sb.append("Sigue las instrucciones del asistente asignado a esta conversación. ");
         sb.append("Responde en espanol, claro y conciso. ");
         sb.append("Si no sabes algo, dilo honestamente.\n\n");
         sb.append("CONTEXTO INSTITUCIONAL (cap 4KB):\n");
@@ -323,5 +404,6 @@ public class ChatService {
      * Return value of {@link #sendMessage}: the assistant message publicUuid
      * (so the FE can reconcile) + whether the stream was cancelled.
      */
-    public record StreamHandle(UUID assistantMessagePublicUuid, boolean cancelled) {}
+    public record StreamHandle(UUID assistantMessagePublicUuid, boolean cancelled,
+                               List<Citation> citations) {}
 }

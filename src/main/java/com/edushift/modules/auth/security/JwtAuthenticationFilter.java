@@ -71,7 +71,6 @@ import org.springframework.web.filter.OncePerRequestFilter;
  * need its own {@code finally} cleanup.
  */
 @Slf4j
-@Component
 @RequiredArgsConstructor
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
@@ -79,7 +78,8 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
 	private final JwtService jwtService;
 	private final LmsRoleAuthorityMapper lmsRoleAuthorityMapper;
-	private final com.edushift.modules.tenants.repository.TenantRepository tenantRepository;
+	private final com.edushift.modules.tenants.service.TenantStatusCache tenantStatusCache;
+	private final com.edushift.modules.auth.repository.UserRepository userRepository;
 
 	@Override
 	protected void doFilterInternal(HttpServletRequest request,
@@ -93,17 +93,46 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 	}
 
 	private static String extractBearer(HttpServletRequest request) {
+		// Explicit stop endpoint authenticates with the preserved SUPER_ADMIN cookie.
+		if (request.getRequestURI().endsWith("/admin/impersonate/stop")) {
+			String adminCookie = getCookieValue(request, "edushift_access_token");
+			return adminCookie == null || adminCookie.isEmpty() ? null : adminCookie;
+		}
+
+		// During support mode use only the short-lived impersonation cookie.
+		// This prevents a stale Authorization header from silently reverting
+		// requests to the administrator's identity.
+		if ("1".equals(request.getHeader("X-Admin-Impersonation"))) {
+			String impersonationCookie = getCookieValue(request, "edushift_impersonation_access_token");
+			return impersonationCookie == null || impersonationCookie.isEmpty()
+					? null : impersonationCookie;
+		}
+
+		// SECURITY FIX: Try Authorization header first (backward compat with Bearer tokens)
 		String header = request.getHeader(HttpHeaders.AUTHORIZATION);
-		if (header == null) {
-			return null;
+		if (header != null && header.length() > BEARER_PREFIX.length()
+				&& header.regionMatches(true, 0, BEARER_PREFIX, 0, BEARER_PREFIX.length())) {
+			String token = header.substring(BEARER_PREFIX.length()).trim();
+			if (!token.isEmpty()) return token;
 		}
-		// Bearer scheme is case-insensitive per RFC 6750 §2.1.
-		if (header.length() <= BEARER_PREFIX.length()
-				|| !header.regionMatches(true, 0, BEARER_PREFIX, 0, BEARER_PREFIX.length())) {
-			return null;
+
+		// SECURITY FIX: Try httpOnly cookie (primary method after migration)
+		String cookieToken = getCookieValue(request, "edushift_access_token");
+		if (cookieToken != null && !cookieToken.isEmpty()) {
+			return cookieToken;
 		}
-		String token = header.substring(BEARER_PREFIX.length()).trim();
-		return token.isEmpty() ? null : token;
+
+		return null;
+	}
+
+	private static String getCookieValue(HttpServletRequest request, String name) {
+		if (request.getCookies() == null) return null;
+		for (jakarta.servlet.http.Cookie cookie : request.getCookies()) {
+			if (cookie.getName().equals(name)) {
+				return cookie.getValue();
+			}
+		}
+		return null;
 	}
 
 	private void tryAuthenticate(String token, HttpServletRequest request) {
@@ -124,9 +153,25 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 			return;
 		}
 
-		if (claims.type() != TokenType.ACCESS) {
+		boolean impersonationToken = claims.type() == TokenType.IMPERSONATION;
+		String servletPath = request.getRequestURI().substring(request.getContextPath().length());
+		boolean mfaChallenge = claims.type() == TokenType.MFA
+				&& "POST".equals(request.getMethod())
+				&& "/v1/auth/mfa/challenge".equals(servletPath);
+		if (claims.type() != TokenType.ACCESS && !impersonationToken && !mfaChallenge) {
 			log.debug("[auth] reject bearer ({}): not an access token (type={})",
 					request.getRequestURI(), claims.type());
+			return;
+		}
+		if (impersonationToken && (!"1".equals(request.getHeader("X-Admin-Impersonation"))
+				|| claims.impersonatedBy() == null
+				|| claims.tenantId() == null
+				|| com.edushift.infrastructure.multitenancy.TenantIdResolver.SUPER_ADMIN_SENTINEL
+						.equals(claims.tenantId())
+				|| claims.roles() == null
+				|| claims.roles().contains("SUPER_ADMIN"))) {
+			log.debug("[auth] reject impersonation bearer ({}): invalid support-token context",
+					request.getRequestURI());
 			return;
 		}
 
@@ -146,9 +191,41 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 			}
 		}
 
-		List<GrantedAuthority> authorities = mapAuthorities(
+		// ====================================================================
+		// SECURITY FIX: Verify user exists and can authenticate
+		// ====================================================================
+		com.edushift.modules.auth.entity.User user = userRepository.findByPublicUuid(publicUuid).orElse(null);
+		if (user == null) {
+			log.warn("[auth] rejecting bearer for non-existent user: publicUuid={}, path={}",
+					publicUuid, request.getRequestURI());
+			return;
+		}
+		UUID userTenantId = user.getTenantId();
+		UUID superAdminTenant = com.edushift.infrastructure.multitenancy.TenantIdResolver.SUPER_ADMIN_SENTINEL;
+		boolean superAdminOnSystemTenant = claims.roles() != null
+				&& claims.roles().contains("SUPER_ADMIN")
+				&& superAdminTenant.equals(userTenantId)
+				&& (claims.tenantId() == null || superAdminTenant.equals(claims.tenantId()));
+		if (!superAdminOnSystemTenant && !java.util.Objects.equals(claims.tenantId(), userTenantId)) {
+			log.warn("[auth] rejecting bearer with tenant membership mismatch: publicUuid={}, path={}",
+					publicUuid, request.getRequestURI());
+			return;
+		}
+		if (impersonationToken && !claims.tenantId().equals(user.getTenantId())) {
+			log.warn("[auth] rejecting impersonation bearer with tenant mismatch: publicUuid={}, path={}",
+					publicUuid, request.getRequestURI());
+			return;
+		}
+		if (user.getStatus() != null && !user.getStatus().canAuthenticate()) {
+			log.warn("[auth] rejecting bearer for inactive user: publicUuid={}, status={}, path={}",
+					publicUuid, user.getStatus(), request.getRequestURI());
+			return;
+		}
+
+		List<GrantedAuthority> authorities = mfaChallenge ? List.of() : mapAuthorities(
 				claims.tenantId(),
-				claims.roles());
+				claims.roles(),
+				user.getId());
 		JwtAuthenticatedPrincipal principal = new JwtAuthenticatedPrincipal(
 				publicUuid,
 				claims.tenantId() != null ? claims.tenantId() : com.edushift.infrastructure.multitenancy.TenantIdResolver.SUPER_ADMIN_SENTINEL,
@@ -163,13 +240,10 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 		if (claims.tenantId() != null
 				&& !com.edushift.infrastructure.multitenancy.TenantIdResolver.SUPER_ADMIN_SENTINEL
 						.equals(claims.tenantId())) {
+			// Cached (Caffeine TTL 30s) — avoids a tenants SELECT on every
+			// authenticated request during morning peaks.
 			com.edushift.modules.tenants.entity.TenantStatus status =
-					com.edushift.modules.tenants.entity.TenantStatus.ACTIVE;
-			java.util.Optional<com.edushift.modules.tenants.entity.Tenant> tenant =
-					tenantRepository.findById(claims.tenantId());
-			if (tenant.isPresent()) {
-				status = tenant.get().getStatus();
-			}
+					tenantStatusCache.getStatus(claims.tenantId());
 			if (status == null || !status.canAuthenticate()) {
 				log.warn("[auth] rejecting bearer for inactive tenant: tenantId={}, status={}, path={}",
 						claims.tenantId(), status, request.getRequestURI());
@@ -177,7 +251,9 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 			}
 		}
 
-		JwtAuthenticationToken auth = new JwtAuthenticationToken(principal, token, authorities);
+		// SECURITY FIX: Do not store the raw token as credentials
+		JwtAuthenticationToken auth = new JwtAuthenticationToken(principal, null, authorities);
+		if (mfaChallenge) auth.setDetails(claims);
 		SecurityContextHolder.getContext().setAuthentication(auth);
 
 		log.debug("[auth] authenticated publicUuid={} tenantSlug={} path={}",
@@ -200,7 +276,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 		}
 	}
 
-	private List<GrantedAuthority> mapAuthorities(UUID tenantId, Set<String> roles) {
+	private List<GrantedAuthority> mapAuthorities(UUID tenantId, Set<String> roles, UUID internalUserId) {
 		if (roles == null || roles.isEmpty()) {
 			return List.of();
 		}
@@ -225,7 +301,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 		}
 		// Tenant-aware resolution. SUPER_ADMIN bypasses overrides anyway
 		// (the mapper detects it via the role itself).
-		authorities.addAll(lmsRoleAuthorityMapper.resolveFor(tenantId, parsedRoles));
+		authorities.addAll(lmsRoleAuthorityMapper.resolveFor(tenantId, internalUserId, parsedRoles));
 		return authorities.stream()
 				.<GrantedAuthority>map(SimpleGrantedAuthority::new)
 				.toList();

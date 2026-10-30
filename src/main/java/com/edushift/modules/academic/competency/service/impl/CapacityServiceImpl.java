@@ -6,6 +6,7 @@ import com.edushift.modules.academic.competency.dto.CreateCapacityRequest;
 import com.edushift.modules.academic.competency.dto.UpdateCapacityRequest;
 import com.edushift.modules.academic.competency.entity.Capacity;
 import com.edushift.modules.academic.competency.entity.Competency;
+import com.edushift.modules.academic.competency.entity.CurriculumSourceContentStatus;
 import com.edushift.modules.academic.competency.mapper.CapacityMapper;
 import com.edushift.modules.academic.competency.repository.CapacityRepository;
 import com.edushift.modules.academic.competency.repository.CompetencyRepository;
@@ -114,6 +115,10 @@ public class CapacityServiceImpl implements CapacityService {
 		}
 
 		mapper.applyUpdate(request, capacity);
+		if (capacity.getSourceCatalogCode() != null) {
+			capacity.setSourceContentStatus(
+					CurriculumSourceContentStatus.INSTITUTIONAL_ADAPTATION);
+		}
 
 		try {
 			Capacity saved = capacityRepository.saveAndFlush(capacity);
@@ -148,6 +153,11 @@ public class CapacityServiceImpl implements CapacityService {
 						"Capacity " + item.publicUuid()
 								+ " does not belong to competency '"
 								+ competency.getCode() + "'");
+			}
+			if (target.getSourceCatalogCode() != null
+					&& !target.getDisplayOrder().equals(item.displayOrder())) {
+				target.setSourceContentStatus(
+						CurriculumSourceContentStatus.INSTITUTIONAL_ADAPTATION);
 			}
 		}
 

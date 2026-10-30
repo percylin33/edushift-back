@@ -37,7 +37,7 @@ import org.springframework.web.bind.annotation.RestController;
  * <table>
  *   <caption>Academic year endpoints</caption>
  *   <tr><th>Method</th><th>Path</th><th>Auth</th><th>Returns</th></tr>
- *   <tr><td>GET   </td><td>/                            </td><td>TENANT_ADMIN</td><td>{@code List<}{@link AcademicYearListItem}{@code >}</td></tr>
+ *   <tr><td>GET   </td><td>/                            </td><td>TENANT_ADMIN, TEACHER</td><td>{@code List<}{@link AcademicYearListItem}{@code >}</td></tr>
  *   <tr><td>GET   </td><td>/{publicUuid}                </td><td>TENANT_ADMIN</td><td>{@link AcademicYearResponse}</td></tr>
  *   <tr><td>POST  </td><td>/                            </td><td>TENANT_ADMIN</td><td>{@link AcademicYearResponse} (201)</td></tr>
  *   <tr><td>PUT   </td><td>/{publicUuid}                </td><td>TENANT_ADMIN</td><td>{@link AcademicYearResponse}</td></tr>
@@ -62,11 +62,13 @@ public class AcademicYearController {
 
 	@GetMapping
 	@SecurityRequirement(name = "bearerAuth")
-	@PreAuthorize("hasRole('TENANT_ADMIN')")
+	@PreAuthorize("hasAnyRole('TENANT_ADMIN','TEACHER','STAFF')")
 	@Operation(
-			summary = "List academic years in the current tenant (TENANT_ADMIN)",
+				summary = "List academic years in the current tenant (TENANT_ADMIN, TEACHER, STAFF read-only)",
 			description = "Sorted by status (ACTIVE first) then startDate desc. "
-					+ "Optional ?status filter to slice by lifecycle stage."
+					+ "Optional ?status filter to slice by lifecycle stage. "
+					+ "TEACHER and STAFF need read access to resolve the active year "
+					+ "when loading their authorized workspaces."
 	)
 	public ResponseEntity<List<AcademicYearListItem>> list(
 			@Parameter(description = "Filter by exact lifecycle status")

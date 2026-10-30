@@ -125,7 +125,7 @@ class AnnouncementAudienceResolverIT extends IntegrationTest {
         a.setTitle("DM");
         a.setBodyHtml("<p>Directo</p>");
         a.setAudienceType(Announcement.AudienceType.USER);
-        a.setAudienceIds(List.of(target.getPublicUuid().toString()));
+        a.setAudienceIds(List.of(target.getPublicUuid().toString(), UUID.randomUUID().toString()));
         a.setStatus(Announcement.Status.DRAFT);
 
         TenantContext.runAs(f.tenant().getId(), () -> {
@@ -210,8 +210,8 @@ class AnnouncementAudienceResolverIT extends IntegrationTest {
      * student gets a {@code student_enrollments} row in the section;
      * the teacher gets a {@code teacher_assignments} row in the
      * section AND for the course. Then three audience cases are
-     * exercised: GRADE (student only), SECTION (student + teacher),
-     * COURSE (teacher only).</p>
+     * exercised: GRADE by public UUID (student only), SECTION (student + teacher),
+     * COURSE (teacher and the student enrolled in the section where the course is taught).</p>
      */
     @Test
     @DisplayName("GRADE/SECTION/COURSE audiences return correct user_ids post-V76+V77")
@@ -228,13 +228,15 @@ class AnnouncementAudienceResolverIT extends IntegrationTest {
         byGrade.setTitle("GRADE 5A");
         byGrade.setBodyHtml("<p>g</p>");
         byGrade.setAudienceType(Announcement.AudienceType.GRADE);
-        // The resolver matches against `g.name` (the Grade entity
-        // doesn't have a `code` column; the FE composer sends the
-        // grade identifier which maps to g.name at write time).
-        byGrade.setAudienceIds(List.of(b.grade.getName()));
         byGrade.setStatus(Announcement.Status.DRAFT);
 
         TenantContext.runAs(b.tenant.getId(), () -> {
+            byGrade.setAudienceIds(List.of(b.grade.getName()));
+            assertThat(resolver.resolve(byGrade))
+                    .as("a grade name is not an id and must not match another level")
+                    .doesNotContain(studentPublic);
+
+            byGrade.setAudienceIds(List.of(b.grade.getPublicUuid().toString()));
             List<UUID> resolved = resolver.resolve(byGrade);
             assertThat(resolved)
                     .as("GRADE 5A audience must include the student but not the teacher")
@@ -275,9 +277,8 @@ class AnnouncementAudienceResolverIT extends IntegrationTest {
             return null;
         });
 
-        // COURSE audience: only the teacher (no direct student→course
-        // enrollment; students are enrolled in sections). audienceIds
-        // are courses.public_uuid (FE contract); resolver JOINs courses.
+        // COURSE audience: teacher assigned to the course, plus students
+        // enrolled in a section where that course is taught.
         Announcement byCourse = new Announcement();
         byCourse.setTenantId(b.tenant.getId());
         byCourse.setAuthorUserId(b.admin.getPublicUuid());
@@ -290,9 +291,8 @@ class AnnouncementAudienceResolverIT extends IntegrationTest {
         TenantContext.runAs(b.tenant.getId(), () -> {
             List<UUID> resolved = resolver.resolve(byCourse);
             assertThat(resolved)
-                    .as("COURSE audience must include the teacher but not the student")
-                    .contains(teacherPublic)
-                    .doesNotContain(studentPublic);
+                    .as("COURSE audience must include the teacher and the enrolled student")
+                    .contains(teacherPublic, studentPublic);
             return null;
         });
     }
@@ -321,13 +321,13 @@ class AnnouncementAudienceResolverIT extends IntegrationTest {
 
     private Bundle seedAcademicBundle() {
         String suffix = UUID.randomUUID().toString().substring(0, 8);
-        return tx.execute(s -> {
-            Tenant tenant = new Tenant();
-            tenant.setPublicUuid(UUID.randomUUID());
-            tenant.setSlug("phase3-resolver-" + suffix);
-            tenant.setName("Phase3 Resolver " + suffix);
-            tenant.setStatus(TenantStatus.ACTIVE);
-            tenant = tenantRepo.save(tenant);
+        Tenant tenant = newTestTenant();
+        tenant.setPublicUuid(UUID.randomUUID());
+        tenant.setSlug("phase3-resolver-" + suffix);
+        tenant.setName("Phase3 Resolver " + suffix);
+        tenant.setStatus(TenantStatus.ACTIVE);
+        tenantRepo.saveAndFlush(tenant);
+        return TenantContext.runAs(tenant.getId(), () -> tx.execute(s -> {
 
             User admin = createUser(tenant, "admin-r-" + suffix,
                     "admin-r-" + suffix + "@resolver.test", UserRole.TENANT_ADMIN);
@@ -441,7 +441,7 @@ class AnnouncementAudienceResolverIT extends IntegrationTest {
 
             return new Bundle(tenant, admin, year, period, grade, section, course,
                     studentUser, teacherUser);
-        });
+        }));
     }
 
     private com.edushift.modules.academic.levelgrade.entity.AcademicLevel ensurePrimaria(Tenant t) {
@@ -481,7 +481,7 @@ class AnnouncementAudienceResolverIT extends IntegrationTest {
     private Fixture seedTenant(String slugPrefix, int extraUsers) {
         String suffix = UUID.randomUUID().toString().substring(0, 8);
         return tx.execute(status -> {
-            Tenant t = new Tenant();
+            Tenant t = newTestTenant();
             t.setPublicUuid(UUID.randomUUID());
             t.setSlug(slugPrefix + suffix);
             t.setName("ResolverIT " + suffix);
@@ -506,12 +506,13 @@ class AnnouncementAudienceResolverIT extends IntegrationTest {
                     student.setTenantId(t.getId());
                     student.setPublicUuid(UUID.randomUUID());
                     student.setDocumentType(DocumentType.DNI);
-                    student.setDocumentNumber("DNI-" + u.getId().toString().substring(0, 8));
+                    student.setDocumentNumber("DNI" + UUID.randomUUID().toString()
+							.replace("-", "").substring(0, 17));
                     student.setFirstName(u.getFirstName());
                     student.setLastName(u.getLastName());
                     student.setGender(Gender.NOT_SPECIFIED);
                     student.setEnrollmentStatus(EnrollmentStatus.ENROLLED);
-                    student.setUserId(u.getId());
+                    student.setUserId(u.getPublicUuid());
                     studentRepo.save(student);
                 }
             }

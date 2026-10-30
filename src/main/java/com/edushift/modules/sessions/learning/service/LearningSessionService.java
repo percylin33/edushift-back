@@ -1,10 +1,12 @@
 package com.edushift.modules.sessions.learning.service;
 
+import com.edushift.modules.sessions.learning.dto.CopyLearningSessionRequest;
 import com.edushift.modules.sessions.learning.dto.CreateLearningSessionRequest;
 import com.edushift.modules.sessions.learning.dto.LearningSessionFilters;
 import com.edushift.modules.sessions.learning.dto.LearningSessionListItem;
 import com.edushift.modules.sessions.learning.dto.LearningSessionResponse;
 import com.edushift.modules.sessions.learning.dto.LifecycleRequest;
+import com.edushift.modules.sessions.learning.dto.SharedLearningSessionResponse;
 import com.edushift.modules.sessions.learning.dto.UpdateLearningSessionRequest;
 import java.util.List;
 import java.util.UUID;
@@ -37,6 +39,20 @@ public interface LearningSessionService {
 	LearningSessionResponse update(UUID publicUuid, UpdateLearningSessionRequest request);
 
 	void delete(UUID publicUuid);
+
+	/**
+	 * Plans shared with the caller's grade. Teachers see colleagues'
+	 * sessions of the same course, grade and period. Admins see every
+	 * shared session in the tenant. Observations are omitted.
+	 */
+	List<SharedLearningSessionResponse> listShared();
+
+	/**
+	 * Creates a new {@code PLANNED} session on {@code request}'s assignment
+	 * from the source plan. Observations are dropped. 404 when the caller
+	 * cannot see the source or the target is another course, grade or period.
+	 */
+	LearningSessionResponse copy(UUID publicUuid, CopyLearningSessionRequest request);
 
 	// ---- Reverse views ------------------------------------------------------
 

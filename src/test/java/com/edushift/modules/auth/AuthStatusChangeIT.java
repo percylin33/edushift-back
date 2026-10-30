@@ -8,6 +8,7 @@ import com.edushift.modules.auth.entity.RevocationReason;
 import com.edushift.modules.auth.entity.User;
 import com.edushift.modules.auth.entity.UserRole;
 import com.edushift.modules.auth.entity.UserStatus;
+import com.edushift.modules.auth.events.UserStatusChangeEvent;
 import com.edushift.modules.auth.repository.RefreshTokenRepository;
 import com.edushift.modules.auth.repository.UserRepository;
 import com.edushift.modules.tenants.entity.Tenant;
@@ -17,6 +18,7 @@ import com.edushift.modules.users.dto.UserDetailResponse;
 import java.lang.reflect.Field;
 import java.time.Instant;
 import java.util.UUID;
+import org.springframework.context.ApplicationEventPublisher;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -30,6 +32,8 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 /**
  * Sprint 14 (MVP Closure) / DEBT-AUTH-4 — full-stack IT.
@@ -51,6 +55,8 @@ class AuthStatusChangeIT extends IntegrationTest {
 	@Autowired private UserRepository userRepository;
 	@Autowired private RefreshTokenRepository refreshTokenRepository;
 	@Autowired private PasswordEncoder passwordEncoder;
+	@Autowired private ApplicationEventPublisher eventPublisher;
+	@Autowired private PlatformTransactionManager txManager;
 
 	private Tenant tenant;
 	private User student;
@@ -58,11 +64,12 @@ class AuthStatusChangeIT extends IntegrationTest {
 
 	@BeforeEach
 	void setUp() {
-		tenant = new Tenant();
+		tenant = newTestTenant();
 		tenant.setName("Status Test Tenant");
 		tenant.setSlug(tenantSlug);
 		tenant.setStatus(TenantStatus.ACTIVE);
-		tenant = tenantRepository.save(tenant);
+		tenant = tenantRepository.saveAndFlush(tenant);
+		com.edushift.shared.multitenancy.TenantContext.set(tenant.getId());
 
 		student = new User();
 		student.setPublicUuid(UUID.randomUUID());
@@ -73,7 +80,13 @@ class AuthStatusChangeIT extends IntegrationTest {
 		student.setStatus(UserStatus.ACTIVE);
 		student.setEmailVerified(true);
 		student.setPasswordHash(passwordEncoder.encode("EduShift2026!"));
-		student = userRepository.save(student);
+		student = com.edushift.shared.multitenancy.TenantContext.runAs(
+				tenant.getId(), () -> userRepository.saveAndFlush(student));
+	}
+
+	@org.junit.jupiter.api.AfterEach
+	void clearTenant() {
+		com.edushift.shared.multitenancy.TenantContext.clear();
 	}
 
 	private String login() {
@@ -82,22 +95,15 @@ class AuthStatusChangeIT extends IntegrationTest {
 		h.set("X-Tenant-Slug", tenantSlug);
 		String body = "{\"email\":\"victim@status.test\",\"password\":\"EduShift2026!\"}";
 		ResponseEntity<java.util.Map> r = http.exchange(
-				"http://localhost:" + port + "/v1/auth/login",
+				"/v1/auth/login",
 				HttpMethod.POST,
 				new HttpEntity<>(body, h),
 				java.util.Map.class);
 		assertThat(r.getStatusCode().value()).isEqualTo(HttpStatus.OK.value());
 		java.util.Map body2 = r.getBody();
 		assertThat(body2).isNotNull();
-		// Refresh token is at top-level (we send back the bearer) or inside `data`.
-		Object refresh = body2.get("refreshToken");
-		if (refresh == null) {
-			Object data = body2.get("data");
-			assertThat(data).isNotNull();
-			refresh = ((java.util.Map) data).get("refreshToken");
-		}
-		assertThat(refresh).as("login response must contain refreshToken").isNotNull();
-		return refresh.toString();
+		assertThat(body2).doesNotContainKeys("accessToken", "refreshToken");
+		return sessionCookie(r, "edushift_refresh_token");
 	}
 
 	private void persistFakeRefreshTokenForStudent(String rawToken) {
@@ -113,11 +119,12 @@ class AuthStatusChangeIT extends IntegrationTest {
 
 	private ResponseEntity<String> refresh(String refreshToken) {
 		HttpHeaders h = new HttpHeaders();
+		h.add(HttpHeaders.COOKIE, "edushift_refresh_token=" + refreshToken);
 		h.setContentType(MediaType.APPLICATION_JSON);
 		h.set("X-Tenant-Slug", tenantSlug);
 		String body = "{\"refreshToken\":\"" + refreshToken + "\"}";
 		return http.exchange(
-				"http://localhost:" + port + "/v1/auth/refresh",
+				"/v1/auth/refresh",
 				HttpMethod.POST,
 				new HttpEntity<>(body, h),
 				String.class);
@@ -132,16 +139,25 @@ class AuthStatusChangeIT extends IntegrationTest {
 		assertThat(refreshTokenRepository.findByTokenHash(sha256Hex(refreshToken)))
 				.isPresent();
 
-		// Suspend the user via a direct disable call (no admin auth needed
-		// for this IT — we test the service-level side effect, not RBAC).
-		student.setStatus(UserStatus.SUSPENDED);
-		userRepository.saveAndFlush(student);
+		// Publish the same status-transition event as the users module,
+		// inside the transaction that persists the change. This exercises
+		// the real AFTER_COMMIT token-revocation listener.
+		com.edushift.shared.multitenancy.TenantContext.runAs(tenant.getId(), () -> {
+			new TransactionTemplate(txManager).executeWithoutResult(status -> {
+					User managed = userRepository.findByPublicUuid(student.getPublicUuid())
+							.orElseThrow();
+					UserStatus oldStatus = managed.getStatus();
+					managed.setStatus(UserStatus.SUSPENDED);
+					userRepository.saveAndFlush(managed);
+					eventPublisher.publishEvent(new UserStatusChangeEvent(
+							managed.getPublicUuid(), oldStatus, UserStatus.SUSPENDED,
+							"it-disable", null));
+			});
+			return null;
+		});
 
-		// Trigger the same effect the listener would (avoiding the full
-		// ApplicationEventPublisher wiring for an IT):
-		refreshTokenRepository.revokeAllByUser(student.getId(), RevocationReason.ADMIN_REVOKE);
-
-		// Now the refresh token must be marked revoked with ADMIN_REVOKE.
+		// The user-status event listener revokes sessions after the status
+		// update commits; assert its persisted effect directly.
 		var stored = refreshTokenRepository.findByTokenHash(sha256Hex(refreshToken));
 		assertThat(stored).isPresent();
 		assertThat(stored.get().isRevoked()).isTrue();

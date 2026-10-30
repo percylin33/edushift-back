@@ -41,6 +41,10 @@ public interface QuizAttemptRepository extends JpaRepository<QuizAttempt, UUID> 
 	Optional<QuizAttempt> findFirstByQuizAndStudentUserIdOrderByAttemptNumberDesc(
 			Quiz quiz, UUID studentUserId);
 
+	/** Latest IN_PROGRESS attempt (resume path for the player). */
+	Optional<QuizAttempt> findFirstByQuizAndStudentUserIdAndStatusOrderByAttemptNumberDesc(
+			Quiz quiz, UUID studentUserId, AttemptStatus status);
+
 	/** Number of attempts already taken (active + soft-deleted). */
 	long countByQuizAndStudentUserId(Quiz quiz, UUID studentUserId);
 

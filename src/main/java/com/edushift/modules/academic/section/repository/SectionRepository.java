@@ -34,6 +34,18 @@ public interface SectionRepository extends JpaRepository<Section, UUID> {
 
 	List<Section> findAllByAcademicYearOrderByDisplayOrderAscNameAsc(AcademicYear academicYear);
 
+	/**
+	 * Year listing grouped by level (Inicial, then Primaria, then Secundaria),
+	 * then by grade ordinal inside that level.
+	 */
+	@Query("""
+			select s from Section s
+			where s.academicYear = :year
+			order by s.grade.level.ordinal asc, s.grade.ordinal asc,
+			         s.displayOrder asc, s.name asc
+			""")
+	List<Section> findAllByYearGrouped(@Param("year") AcademicYear year);
+
 	List<Section> findAllByAcademicYearAndGradeOrderByDisplayOrderAscNameAsc(
 			AcademicYear academicYear, Grade grade);
 

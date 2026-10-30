@@ -30,7 +30,13 @@ public record UpdateCourseRequest(
 		@PositiveOrZero(message = "hoursPerWeek must be >= 0")
 		Integer hoursPerWeek,
 
-		Boolean isActive
+		Boolean isActive,
+
+		@Pattern(regexp = "^#[0-9A-Fa-f]{6}$", message = "color must be #RRGGBB")
+		String color,
+
+		@Size(max = 64, message = "icon too long")
+		String icon
 ) {
 
 	public boolean isEmpty() {
@@ -39,6 +45,8 @@ public record UpdateCourseRequest(
 				&& description == null
 				&& credits == null
 				&& hoursPerWeek == null
-				&& isActive == null;
+				&& isActive == null
+				&& color == null
+				&& icon == null;
 	}
 }

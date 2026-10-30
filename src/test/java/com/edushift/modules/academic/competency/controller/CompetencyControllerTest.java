@@ -15,6 +15,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.edushift.infrastructure.multitenancy.MultiTenancyConfiguration;
 import com.edushift.infrastructure.multitenancy.TenantInterceptor;
+import com.edushift.modules.academic.competency.entity.CompetencyOrigin;
 import com.edushift.modules.academic.competency.dto.CompetencyListItem;
 import com.edushift.modules.academic.competency.dto.CompetencyReorderRequest;
 import com.edushift.modules.academic.competency.dto.CompetencyResponse;
@@ -79,6 +80,13 @@ class CompetencyControllerTest {
             List.of(new SimpleGrantedAuthority("ROLE_TENANT_ADMIN")));
     }
 
+    private static JwtAuthenticationToken teacherAuth() {
+        var principal = new JwtAuthenticatedPrincipal(
+            UUID.randomUUID(), UUID.randomUUID(), "acme", "teacher@acme.test");
+        return new JwtAuthenticationToken(principal, "fake.token",
+            List.of(new SimpleGrantedAuthority("ROLE_TEACHER")));
+    }
+
     private static JwtAuthenticationToken plainAuth() {
         var principal = new JwtAuthenticatedPrincipal(
             UUID.randomUUID(), UUID.randomUUID(), "acme", "user@acme.test");
@@ -94,11 +102,21 @@ class CompetencyControllerTest {
         void happyPath() throws Exception {
             given(service.listCompetencies(any(), any()))
                 .willReturn(List.of(
-                    new CompetencyListItem(UUID.randomUUID(), "MAT_C1", "Resuelve", 1, true, 2L)));
+                    new CompetencyListItem(UUID.randomUUID(), "MAT_C1", "Resuelve", 1, true, 2L,
+                        CompetencyOrigin.INSTITUTIONAL, null)));
 
             mockMvc.perform(get(COURSE_BASE, UUID.randomUUID()).with(authentication(adminAuth())))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].code").value("MAT_C1"));
+        }
+
+        @Test
+        @DisplayName("TEACHER — 200 (session picker)")
+        void teacherOk() throws Exception {
+            given(service.listCompetencies(any(), any())).willReturn(List.of());
+
+            mockMvc.perform(get(COURSE_BASE, UUID.randomUUID()).with(authentication(teacherAuth())))
+                .andExpect(status().isOk());
         }
 
         @Test
@@ -128,7 +146,8 @@ class CompetencyControllerTest {
                 .willReturn(new CompetencyResponse(id, new CourseRef(UUID.randomUUID(), "MAT", "Mat"),
                     "MAT_C1", "Resuelve", null, 1, true, List.of(),
                     Instant.parse("2026-01-01T00:00:00Z"),
-                    Instant.parse("2026-01-01T00:00:00Z")));
+                    Instant.parse("2026-01-01T00:00:00Z"),
+                    CompetencyOrigin.INSTITUTIONAL, null));
 
             mockMvc.perform(post(COURSE_BASE, UUID.randomUUID())
                     .with(csrf()).with(authentication(adminAuth()))
@@ -163,6 +182,25 @@ class CompetencyControllerTest {
                     .content("{\"code\":\"MAT_C1\"}"))
                 .andExpect(status().isBadRequest());
         }
+
+        @Test
+        @DisplayName("TEACHER — 201 (service enforces assignment)")
+        void teacherOk() throws Exception {
+            var id = UUID.randomUUID();
+            given(service.createCompetency(any(), any()))
+                .willReturn(new CompetencyResponse(id, new CourseRef(UUID.randomUUID(), "MAT", "Mat"),
+                    "C_TRABAJO", "Trabajo en equipo", null, 1, true, List.of(),
+                    Instant.parse("2026-01-01T00:00:00Z"),
+                    Instant.parse("2026-01-01T00:00:00Z"),
+                    CompetencyOrigin.TEACHER, null));
+
+            mockMvc.perform(post(COURSE_BASE, UUID.randomUUID())
+                    .with(csrf()).with(authentication(teacherAuth()))
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("{\"name\":\"Trabajo en equipo\",\"capacities\":[{\"name\":\"Colabora\"}]}"))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.data.origin").value("TEACHER"));
+        }
     }
 
     @Nested
@@ -178,7 +216,8 @@ class CompetencyControllerTest {
                     new CourseRef(UUID.randomUUID(), "MAT", "Mat"),
                     "MAT_C1", "Resuelve", null, 1, true, List.of(),
                     Instant.parse("2026-01-01T00:00:00Z"),
-                    Instant.parse("2026-01-01T00:00:00Z"))));
+                    Instant.parse("2026-01-01T00:00:00Z"),
+                    CompetencyOrigin.INSTITUTIONAL, null)));
 
             var req = new CompetencyReorderRequest(List.of(
                 new CompetencyReorderRequest.Item(id, 1)));
@@ -221,7 +260,8 @@ class CompetencyControllerTest {
                 .willReturn(new CompetencyResponse(id, new CourseRef(UUID.randomUUID(), "MAT", "Mat"),
                     "MAT_C1", "Resuelve", null, 1, true, List.of(),
                     Instant.parse("2026-01-01T00:00:00Z"),
-                    Instant.parse("2026-01-01T00:00:00Z")));
+                    Instant.parse("2026-01-01T00:00:00Z"),
+                    CompetencyOrigin.INSTITUTIONAL, null));
 
             mockMvc.perform(get(FLAT_BASE + "/{id}", id).with(authentication(adminAuth())))
                 .andExpect(status().isOk())
@@ -252,7 +292,8 @@ class CompetencyControllerTest {
                 .willReturn(new CompetencyResponse(id, new CourseRef(UUID.randomUUID(), "MAT", "Mat"),
                     "MAT_C1", "Updated", null, 1, true, List.of(),
                     Instant.parse("2026-01-01T00:00:00Z"),
-                    Instant.parse("2026-01-01T00:00:00Z")));
+                    Instant.parse("2026-01-01T00:00:00Z"),
+                    CompetencyOrigin.INSTITUTIONAL, null));
 
             mockMvc.perform(put(FLAT_BASE + "/{id}", id)
                     .with(csrf()).with(authentication(adminAuth()))
@@ -286,6 +327,66 @@ class CompetencyControllerTest {
             mockMvc.perform(delete(FLAT_BASE + "/{id}", id)
                     .with(csrf()).with(authentication(adminAuth())))
                 .andExpect(status().isNotFound());
+        }
+
+        @Test
+        @DisplayName("TEACHER — 403 (delete stays admin-only)")
+        void teacherForbidden() throws Exception {
+            mockMvc.perform(delete(FLAT_BASE + "/{id}", UUID.randomUUID())
+                    .with(csrf()).with(authentication(teacherAuth())))
+                .andExpect(status().isForbidden());
+        }
+    }
+
+    @Nested
+    @DisplayName("POST /academic/competencies/{publicUuid}/deactivate")
+    class Deactivate {
+
+        @Test
+        @DisplayName("TEACHER — 200")
+        void teacherOk() throws Exception {
+            var id = UUID.randomUUID();
+            given(service.deactivateCompetency(id))
+                .willReturn(new CompetencyResponse(id, new CourseRef(UUID.randomUUID(), "MAT", "Mat"),
+                    "MAT_C1", "Resuelve", null, 1, false, List.of(),
+                    Instant.parse("2026-01-01T00:00:00Z"),
+                    Instant.parse("2026-01-01T00:00:00Z"),
+                    CompetencyOrigin.TEACHER, null));
+
+            mockMvc.perform(post(FLAT_BASE + "/{id}/deactivate", id)
+                    .with(csrf()).with(authentication(teacherAuth())))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.isActive").value(false));
+        }
+    }
+
+    @Nested
+    @DisplayName("POST /academic/competencies/{publicUuid}/promote")
+    class Promote {
+
+        @Test
+        @DisplayName("TENANT_ADMIN — 200")
+        void adminOk() throws Exception {
+            var id = UUID.randomUUID();
+            given(service.promoteCompetency(id))
+                .willReturn(new CompetencyResponse(id, new CourseRef(UUID.randomUUID(), "MAT", "Mat"),
+                    "MAT_C1", "Resuelve", null, 1, true, List.of(),
+                    Instant.parse("2026-01-01T00:00:00Z"),
+                    Instant.parse("2026-01-01T00:00:00Z"),
+                    CompetencyOrigin.INSTITUTIONAL, null));
+
+            mockMvc.perform(post(FLAT_BASE + "/{id}/promote", id)
+                    .with(csrf()).with(authentication(adminAuth())))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.origin").value("INSTITUTIONAL"));
+        }
+
+        @Test
+        @DisplayName("TEACHER — 403")
+        void teacherForbidden() throws Exception {
+            mockMvc.perform(post(FLAT_BASE + "/{id}/promote", UUID.randomUUID())
+                    .with(csrf()).with(authentication(teacherAuth())))
+                .andExpect(status().isForbidden());
         }
     }
 }

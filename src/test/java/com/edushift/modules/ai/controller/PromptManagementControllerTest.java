@@ -21,6 +21,8 @@ import org.springframework.test.web.servlet.MockMvc;
 @Import({com.edushift.test.EdushiftWebMvcTestConfig.class, com.edushift.test.TestSecurityConfig.class})
 class PromptManagementControllerTest extends AbstractControllerTest {
 
+    @MockitoBean com.edushift.modules.ai.service.AiEntitlementService entitlements;
+
     @Autowired MockMvc mockMvc;
     @MockitoBean PromptManagementService service;
 
@@ -28,7 +30,7 @@ class PromptManagementControllerTest extends AbstractControllerTest {
         return new JwtAuthenticationToken(
                 new JwtAuthenticatedPrincipal(ANY_USER, ANY_TENANT, "ai", "ai@t"),
                 "t",
-                List.of(new SimpleGrantedAuthority("LMS_AI_GENERATE")));
+                List.of(new SimpleGrantedAuthority("AI:PROMPT_MANAGE")));
     }
 
     @Test

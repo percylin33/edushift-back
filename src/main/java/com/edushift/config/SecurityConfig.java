@@ -2,6 +2,7 @@ package com.edushift.config;
 
 import com.edushift.modules.admin.impersonation.ImpersonationFilter;
 import com.edushift.modules.auth.security.JwtAuthenticationFilter;
+import com.edushift.modules.payments.security.PaymentLmsAccessFilter;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -54,7 +55,7 @@ import org.springframework.web.servlet.HandlerExceptionResolver;
  *       to revoke it; layering bearer auth on top is defense-in-depth only and
  *       would break logout from clients whose access token has expired.</li>
  *   <li>{@code /swagger-ui/**}, {@code /v3/api-docs/**} — API docs (springdoc).</li>
- *   <li>{@code /actuator/health}, {@code /actuator/info} — liveness probes.</li>
+ *   <li>{@code /actuator/health} — minimal liveness probe.</li>
  * </ul>
  *
  * <h3>Path matchers and the {@code /api} context-path</h3>
@@ -110,6 +111,7 @@ public class SecurityConfig {
 			// withheld at the DTO level (TenantSummary), so opening this path
 			// to the public web is safe by construction.
 			"/v1/tenants/by-slug/*",
+			"/v1/tenants/by-slug/*/manifest.webmanifest",
 			// `tenants/register` is invite-gated public signup: anyone with a
 			// valid unused Super-Admin school invitation token can create a
 			// TRIAL tenant. The token is the credential.
@@ -131,9 +133,14 @@ public class SecurityConfig {
 			"/v3/api-docs",
 			"/v3/api-docs/**",
 			"/actuator/health",
-			"/actuator/info",
 			// Sprint 15 / BE-15.1: admin login is public (no tenant context).
 			"/v1/admin/login",
+			// Uses a short-lived ONBOARDING bearer, validated by AdminAuthService.
+			"/v1/admin/initial-password",
+			// Admin MFA endpoints validate their short-lived onboarding/MFA
+			// bearer tokens inside AdminMfaOnboardingService. Let them reach
+			// that controller-level validation instead of requiring an access JWT.
+			"/v1/admin/mfa/**",
 			// Sprint 15 / F-02 follow-up: dev-only MFA enrolment bypass.
 			// The controller bean is itself @Profile({"dev","local"}) — in prod
 			// the path is unmapped and Spring returns 404. Auth here is the
@@ -151,12 +158,16 @@ public class SecurityConfig {
 			// Branding assets (logo / login background) must be readable on the
 			// unauthenticated login page. The controller only serves rows whose
 			// remote_key is under /lms/branding/ and content-type is image/*.
-			"/v1/files/public/*"
+			"/v1/files/public/*",
+		"/v1/public/admissions/*/inquiries",
+		"/v1/public/admissions/*/catalog",
+		"/v1/public/admissions/*/offers/*",
+		"/v1/public/admissions/*/offers/*/response",
+		// Libro de Reclamaciones Virtual — Ley N° 32495 (INDECOPI).
+		// Public endpoint: anyone can submit a complaint without authentication.
+		"/public/claims",
+		"/public/contact"
 	};
-
-	private final JwtAuthenticationFilter jwtAuthenticationFilter;
-
-	private final ImpersonationFilter impersonationFilter;
 
 	private final HandlerExceptionResolver handlerExceptionResolver;
 
@@ -177,18 +188,25 @@ public class SecurityConfig {
 	 * filter and the security chain's pre-flight handling.
 	 */
 	public SecurityConfig(
-			JwtAuthenticationFilter jwtAuthenticationFilter,
-			ImpersonationFilter impersonationFilter,
 			@Qualifier("handlerExceptionResolver") HandlerExceptionResolver handlerExceptionResolver,
 			CorsConfigurationSource corsConfigurationSource) {
-		this.jwtAuthenticationFilter = jwtAuthenticationFilter;
-		this.impersonationFilter = impersonationFilter;
 		this.handlerExceptionResolver = handlerExceptionResolver;
 		this.corsConfigurationSource = corsConfigurationSource;
 	}
 
 	@Bean
-	SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+	SecurityFilterChain securityFilterChain(
+			HttpSecurity http,
+			com.edushift.modules.auth.service.JwtService jwtService,
+			com.edushift.shared.security.LmsRoleAuthorityMapper lmsRoleAuthorityMapper,
+			com.edushift.modules.tenants.service.TenantStatusCache tenantStatusCache,
+			com.edushift.modules.auth.repository.UserRepository userRepository,
+			ImpersonationFilter impersonationFilter,
+			PaymentLmsAccessFilter paymentLmsAccessFilter,
+			RateLimitFilter rateLimitFilter) throws Exception {
+
+		JwtAuthenticationFilter jwtAuthenticationFilter = new JwtAuthenticationFilter(
+				jwtService, lmsRoleAuthorityMapper, tenantStatusCache, userRepository);
 		http
 				.csrf(csrf -> csrf.disable())
 				.cors(cors -> cors.configurationSource(corsConfigurationSource))
@@ -209,8 +227,11 @@ public class SecurityConfig {
 						 * Access-Control-* headers, but the security chain still sees
 						 * them. Allowing OPTIONS unconditionally avoids the
 						 * 403-on-preflight class of bug entirely. */
-						.requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
 						.requestMatchers(PUBLIC_PATHS).permitAll()
+						.requestMatchers(HttpMethod.GET, "/actuator/info", "/actuator/metrics", "/actuator/metrics/**")
+								.hasRole("SUPER_ADMIN")
+						.requestMatchers("/actuator/**").denyAll()
+						.requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
 						.anyRequest().authenticated())
 				.exceptionHandling(eh -> eh
 						.authenticationEntryPoint(restAuthenticationEntryPoint())
@@ -230,6 +251,7 @@ public class SecurityConfig {
 										+ "style-src 'self' 'unsafe-inline'; "
 										+ "font-src 'self' data:; "
 										+ "connect-src 'self' https: wss:; "
+									+ "frame-src 'self' blob:; "
 										+ "frame-ancestors 'none'; "
 										+ "base-uri 'self'; "
 										+ "form-action 'self'"))
@@ -267,8 +289,14 @@ public class SecurityConfig {
 								response.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
 							}
 						}))
+				// Spring Security 6.5 only accepts an anchor class that already has an
+				// order. UsernamePasswordAuthenticationFilter is built-in; the custom
+				// filters get an order only after they are added. Register JWT first,
+				// then place the others relative to it.
 				.addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)
-				.addFilterAfter(impersonationFilter, JwtAuthenticationFilter.class);
+				.addFilterBefore(rateLimitFilter, JwtAuthenticationFilter.class)
+				.addFilterAfter(impersonationFilter, JwtAuthenticationFilter.class)
+				.addFilterAfter(paymentLmsAccessFilter, ImpersonationFilter.class);
 
 		return http.build();
 	}

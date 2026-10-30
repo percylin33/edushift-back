@@ -12,9 +12,12 @@ import com.edushift.modules.academic.year.entity.AcademicYear;
 import com.edushift.modules.academic.year.entity.AcademicYearStatus;
 import com.edushift.modules.academic.year.repository.AcademicYearRepository;
 import com.edushift.modules.attendance.dto.CreateSessionRequest;
+import com.edushift.modules.attendance.entity.AttendanceRecord;
+import com.edushift.modules.attendance.entity.AttendanceRecordStatus;
 import com.edushift.modules.attendance.entity.AttendanceSessionSlot;
 import com.edushift.modules.attendance.entity.AttendanceSessionStatus;
 import com.edushift.modules.attendance.repository.AttendanceSessionRepository;
+import com.edushift.modules.attendance.repository.AttendanceRecordRepository;
 import com.edushift.modules.auth.entity.User;
 import com.edushift.modules.auth.entity.UserRole;
 import com.edushift.modules.auth.entity.UserStatus;
@@ -92,6 +95,7 @@ class AttendanceAbsenceCascadeIT extends IntegrationTest {
 	@Autowired private GuardianRepository guardianRepository;
 	@Autowired private StudentGuardianRepository studentGuardianRepository;
 	@Autowired private AttendanceSessionRepository sessionRepository;
+	@Autowired private AttendanceRecordRepository attendanceRecordRepository;
 	@Autowired private AcademicSeedService seedService;
 	@Autowired private PasswordEncoder passwordEncoder;
 	@Autowired private PlatformTransactionManager txManager;
@@ -106,7 +110,7 @@ class AttendanceAbsenceCascadeIT extends IntegrationTest {
 	@DisplayName(
 			"SPRINT9A-CASCADE-1: close session with 3 ausentes -> 3 STUDENT_ABSENT notifications to PARENT user_ids")
 	void closeSessionWithThreeAbsentees_threeParentNotificationsCreated() {
-		Fixture fx = buildFixture("it-9a-a-", 3, /* withParentUserId */ true);
+		Fixture fx = buildFixture("it-9a-a-", 4, /* withParentUserId */ true);
 
 		// 1. Login as tenant admin
 		String jwt = login(fx.tenant.getSlug(), "admin@it.test",
@@ -121,7 +125,7 @@ class AttendanceAbsenceCascadeIT extends IntegrationTest {
 		headers.set("X-Tenant-Slug", fx.tenant.getSlug());
 
 		ResponseEntity<String> openResp = rest.exchange(
-				"/api/v1/attendance/sessions",
+				"/v1/attendance/sessions",
 				HttpMethod.POST,
 				new HttpEntity<>(openBody, headers),
 				String.class);
@@ -132,12 +136,14 @@ class AttendanceAbsenceCascadeIT extends IntegrationTest {
 		String sessionUuid = extractPublicUuid(openResp.getBody(), "data");
 		assertThat(sessionUuid).as("session public uuid present").isNotBlank();
 
-		// 3. Close the session -- no check-ins, so all 3 students materialize ABSENT.
+		// One student is checked in so the session is not an unused/holiday
+		// session; the other three are materialized as absent.
+		seedPresentRecord(fx, sessionUuid);
 		HttpHeaders closeHeaders = new HttpHeaders();
 		closeHeaders.setBearerAuth(jwt);
 		closeHeaders.set("X-Tenant-Slug", fx.tenant.getSlug());
 		ResponseEntity<String> closeResp = rest.exchange(
-				"/api/v1/attendance/sessions/" + sessionUuid + "/close",
+				"/v1/attendance/sessions/" + sessionUuid + "/close",
 				HttpMethod.PATCH,
 				new HttpEntity<>(closeHeaders),
 				String.class);
@@ -146,15 +152,13 @@ class AttendanceAbsenceCascadeIT extends IntegrationTest {
 				.isEqualTo(HttpStatus.OK);
 
 		// 4. Assert 3 notifications in edushift.notifications, recipients are PARENT user_ids
-		Integer notifCount = jdbcTemplate.queryForObject(
-				"SELECT count(*) FROM edushift.notifications "
-						+ "WHERE template_key = 'STUDENT_ABSENT' "
-						+ "AND tenant_id = ?",
-				Integer.class,
-				fx.tenant.getId());
-		assertThat(notifCount)
-				.as("expected 3 STUDENT_ABSENT notifications in tenant %s", fx.tenant.getSlug())
-				.isEqualTo(3);
+		org.awaitility.Awaitility.await().atMost(java.time.Duration.ofSeconds(5))
+				.untilAsserted(() -> assertThat(jdbcTemplate.queryForObject(
+						"SELECT count(*) FROM edushift.notifications "
+								+ "WHERE template_key = 'STUDENT_ABSENT' AND tenant_id = ?",
+						Integer.class, fx.tenant.getId()))
+						.as("expected 3 STUDENT_ABSENT notifications in tenant %s", fx.tenant.getSlug())
+						.isEqualTo(3));
 
 		// 5. Verify recipients are GUARDIAN user_ids, NOT student user_ids
 		List<UUID> recipients = jdbcTemplate.queryForList(
@@ -163,7 +167,8 @@ class AttendanceAbsenceCascadeIT extends IntegrationTest {
 						+ "AND tenant_id = ? ORDER BY recipient_user_id",
 				UUID.class,
 				fx.tenant.getId());
-		assertThat(recipients).containsExactlyInAnyOrderElementsOf(fx.guardianUserIds);
+		assertThat(recipients).containsExactlyInAnyOrderElementsOf(
+				fx.guardianUserIds.subList(1, fx.guardianUserIds.size()));
 		// And NEVER the student user_ids (which are null in this fixture).
 		assertThat(recipients).doesNotContainNull();
 
@@ -180,12 +185,18 @@ class AttendanceAbsenceCascadeIT extends IntegrationTest {
 	@DisplayName(
 			"SPRINT9A-CASCADE-2: tenant B no ve las notifications de tenant A (cross-tenant)")
 	void crossTenantIsolated_notificationsDoNotLeak() {
-		Fixture fxA = buildFixture("it-9a-xa-", 2, true);
-		Fixture fxB = buildFixture("it-9a-xb-", 2, true);
+		Fixture fxA = buildFixture("it-9a-xa-", 3, true);
+		Fixture fxB = buildFixture("it-9a-xb-", 3, true);
 
 		// Close a session in tenant A.
 		closeOneSessionFor(fxA);
 
+		org.awaitility.Awaitility.await().atMost(java.time.Duration.ofSeconds(5))
+				.untilAsserted(() -> assertThat(jdbcTemplate.queryForObject(
+						"SELECT count(*) FROM edushift.notifications "
+								+ "WHERE template_key = 'STUDENT_ABSENT' AND tenant_id = ?",
+						Integer.class, fxA.tenant.getId()))
+						.isEqualTo(2));
 		Integer countA = jdbcTemplate.queryForObject(
 				"SELECT count(*) FROM edushift.notifications "
 						+ "WHERE template_key = 'STUDENT_ABSENT' AND tenant_id = ?",
@@ -202,7 +213,7 @@ class AttendanceAbsenceCascadeIT extends IntegrationTest {
 	@DisplayName(
 			"SPRINT9A-CASCADE-3: students con guardians SIN userId -> 0 notifications (skip con WARN)")
 	void noGuardianUserId_zeroNotifications_noCrash() {
-		Fixture fx = buildFixture("it-9a-z-", 2, /* withParentUserId */ false);
+		Fixture fx = buildFixture("it-9a-z-", 3, /* withParentUserId */ false);
 		closeOneSessionFor(fx);
 
 		Integer count = jdbcTemplate.queryForObject(
@@ -237,9 +248,10 @@ class AttendanceAbsenceCascadeIT extends IntegrationTest {
 				tx().execute(s -> { seedService.seedDefaults(tenant.getId()); return null; }));
 
 		// Build the academic structure for the section.
-		AcademicLevel level = levelRepository.findByCodeIgnoreCase("PRIMARIA")
-				.orElseThrow();
-		Grade grade = gradeRepository.findAllByLevelOrderByOrdinalAsc(level).get(0);
+		AcademicLevel level = TenantContext.runAs(tenant.getId(), () ->
+				levelRepository.findByCodeIgnoreCase("PRIMARIA").orElseThrow());
+		Grade grade = TenantContext.runAs(tenant.getId(), () ->
+				gradeRepository.findAllByLevelOrderByOrdinalAsc(level).get(0));
 
 		AcademicYear year = TenantContext.runAs(tenant.getId(), () -> tx().execute(s -> {
 			AcademicYear y = new AcademicYear();
@@ -262,6 +274,7 @@ class AttendanceAbsenceCascadeIT extends IntegrationTest {
 
 		// Students + Guardians + StudentGuardian links
 		List<UUID> guardianUserIds = new ArrayList<>();
+		List<UUID> studentPublicUuids = new ArrayList<>();
 		for (int i = 0; i < studentCount; i++) {
 			final int idx = i;
 			TenantContext.runAs(tenant.getId(), () -> tx().execute(s -> {
@@ -272,6 +285,7 @@ class AttendanceAbsenceCascadeIT extends IntegrationTest {
 				student.setLastName("Test");
 				student.setUserId(null); // K-12: students don't have portal accounts.
 				Student savedStudent = studentRepository.saveAndFlush(student);
+				studentPublicUuids.add(savedStudent.getPublicUuid());
 
 				Guardian guardian = new Guardian();
 				guardian.setDocumentType(DocumentType.DNI);
@@ -293,6 +307,7 @@ class AttendanceAbsenceCascadeIT extends IntegrationTest {
 				StudentGuardian sg = new StudentGuardian();
 				sg.setStudent(savedStudent);
 				sg.setGuardian(savedGuardian);
+				sg.setRelationship(com.edushift.modules.students.entity.RelationshipType.MOTHER);
 				sg.setPrimaryContact(true);
 				studentGuardianRepository.saveAndFlush(sg);
 
@@ -308,7 +323,11 @@ class AttendanceAbsenceCascadeIT extends IntegrationTest {
 			}));
 		}
 
-		return new Fixture(tenant, section, guardianUserIds);
+		UUID adminPublicUuid = TenantContext.runAs(tenant.getId(), () ->
+				userRepository.findByEmailAndTenantId("admin@it.test", tenant.getId())
+						.map(User::getPublicUuid).orElseThrow());
+		return new Fixture(tenant, section, guardianUserIds, studentPublicUuids,
+				adminPublicUuid);
 	}
 
 private void closeOneSessionFor(Fixture fx) {
@@ -320,13 +339,14 @@ private void closeOneSessionFor(Fixture fx) {
 		String openBody = "{\"sectionPublicUuid\":\"" + fx.section.getPublicUuid()
 				+ "\",\"occurredOn\":\"" + LocalDate.now() + "\",\"slot\":\"MORNING\"}";
 		ResponseEntity<String> openResp = rest.exchange(
-				"/api/v1/attendance/sessions",
+				"/v1/attendance/sessions",
 				HttpMethod.POST,
 				new HttpEntity<>(openBody, headers),
 				String.class);
 		String sessionUuid = extractPublicUuid(openResp.getBody(), "data");
+		seedPresentRecord(fx, sessionUuid);
 		ResponseEntity<String> closeResp = rest.exchange(
-				"/api/v1/attendance/sessions/" + sessionUuid + "/close",
+				"/v1/attendance/sessions/" + sessionUuid + "/close",
 				HttpMethod.PATCH,
 				new HttpEntity<>(headers),
 				String.class);
@@ -335,17 +355,34 @@ private void closeOneSessionFor(Fixture fx) {
 				.isEqualTo(HttpStatus.OK);
 	}
 
+	private void seedPresentRecord(Fixture fx, String sessionPublicUuid) {
+		TenantContext.runAs(fx.tenant.getId(), () -> tx().execute(s -> {
+			var session = sessionRepository.findByPublicUuid(UUID.fromString(sessionPublicUuid))
+					.orElseThrow();
+			Student student = studentRepository.findByPublicUuid(fx.studentPublicUuids.get(0))
+					.orElseThrow();
+			AttendanceRecord present = new AttendanceRecord();
+			present.setSession(session);
+			present.setStudent(student);
+			present.setStatus(AttendanceRecordStatus.PRESENT);
+			present.setOccurredAt(Instant.now());
+			present.setScannedByUserId(fx.adminPublicUuid);
+			attendanceRecordRepository.saveAndFlush(present);
+			return null;
+		}));
+	}
+
 	private Tenant createTenant(String slugPrefix) {
-		Tenant t = new Tenant();
+		Tenant t = newTestTenant();
 		t.setSlug(slugPrefix + UUID.randomUUID().toString().substring(0, 8));
 		t.setName("IT Tenant " + t.getSlug());
 		t.setStatus(TenantStatus.ACTIVE);
 		return tx().execute(s -> tenantRepository.saveAndFlush(t));
 	}
 
-	private void createAdmin(Tenant tenant) {
-		TenantContext.runAs(tenant.getId(), () ->
-				tx().execute(s -> {
+	private UUID createAdmin(Tenant tenant) {
+		return TenantContext.runAs(tenant.getId(), () ->
+			tx().execute(s -> {
 					User user = new User();
 					user.setEmail("admin@it.test");
 					user.setPasswordHash(passwordEncoder.encode("EduShift2026!"));
@@ -355,8 +392,7 @@ private void closeOneSessionFor(Fixture fx) {
 					user.setEmailVerified(true);
 					user.setMfaEnabled(false);
 					user.addRole(UserRole.TENANT_ADMIN);
-					userRepository.saveAndFlush(user);
-					return null;
+				return userRepository.saveAndFlush(user).getPublicUuid();
 				}));
 	}
 
@@ -380,12 +416,12 @@ private void closeOneSessionFor(Fixture fx) {
 			HttpHeaders h = new HttpHeaders();
 			h.setContentType(MediaType.APPLICATION_JSON);
 			h.set("X-Tenant-Slug", slug);
-			String json = rest.exchange(
-					"/api/v1/auth/login",
+			var loginResponse = rest.exchange(
+					"/v1/auth/login",
 					HttpMethod.POST,
 					new HttpEntity<>(body, h),
-					String.class).getBody();
-			return objectMapper().readTree(json).path("accessToken").asText();
+					String.class);
+			return readSessionResponse(objectMapper(), loginResponse).accessToken();
 		} catch (Exception e) {
 			throw new RuntimeException(e);
 		}
@@ -408,6 +444,6 @@ private void closeOneSessionFor(Fixture fx) {
 	}
 
 	record Fixture(Tenant tenant, com.edushift.modules.academic.section.entity.Section section,
-			List<UUID> guardianUserIds) {
+			List<UUID> guardianUserIds, List<UUID> studentPublicUuids, UUID adminPublicUuid) {
 	}
 }

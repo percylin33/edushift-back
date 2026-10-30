@@ -27,6 +27,7 @@ public interface TimeSlotRepository extends JpaRepository<TimeSlot, UUID> {
 	@Query("""
 			select s from TimeSlot s
 			where s.teacherAssignment = :assignment
+			  and s.deleted = false
 			order by s.dayOfWeek asc, s.startTime asc
 			""")
 	List<TimeSlot> findAllByAssignmentOrdered(
@@ -40,6 +41,7 @@ public interface TimeSlotRepository extends JpaRepository<TimeSlot, UUID> {
 	@Query("""
 			select s from TimeSlot s
 			where s.teacherAssignment in :assignments
+			  and s.deleted = false
 			order by s.dayOfWeek asc, s.startTime asc
 			""")
 	List<TimeSlot> findAllByAssignmentInOrdered(
@@ -57,6 +59,7 @@ public interface TimeSlotRepository extends JpaRepository<TimeSlot, UUID> {
 	@Query("""
 			select s from TimeSlot s
 			where s.teacherAssignment = :assignment
+			  and s.deleted = false
 			  and s.dayOfWeek = :dayOfWeek
 			  and s.startTime < :endTime
 			  and :startTime < s.endTime
@@ -71,76 +74,81 @@ public interface TimeSlotRepository extends JpaRepository<TimeSlot, UUID> {
 
 	// ----------------------------------------------------------------------
 	// Sprint cierre-C / B4 -- conflict detection queries.
-	// Each query is tenant-scoped explicitly (defense-in-depth on top of
-	// Hibernate's @TenantId on TimeSlot) and returns ALL slots in that
-	// tenant + day; the caller (ScheduleConflictDetector) checks
-	// time overlap in Java.
+	// Scoped to the same academic period + active assignment: year-template
+	// replicas across bimestres must NOT collide (ADR-SCH-13).
+	// Caller still checks time overlap in Java.
 	// ----------------------------------------------------------------------
 
 	/**
-	 * All non-deleted slots in {@code tenantId} where the underlying
-	 * teacher's publicUuid matches on the given day.
+	 * Active-assignment slots for the same teacher + period + day.
 	 */
 	@Query("""
 			select s from TimeSlot s
 			where s.tenantId = :tenantId
 			  and s.deleted = false
+			  and s.teacherAssignment.unassignedAt is null
 			  and s.teacherAssignment.teacher.publicUuid = :teacherUuid
+			  and s.teacherAssignment.academicPeriod.publicUuid = :periodUuid
 			  and s.dayOfWeek = :dayOfWeek
 			""")
-	List<TimeSlot> findByTenantIdAndTeacherAndDay(
+	List<TimeSlot> findByTenantIdAndTeacherPeriodAndDay(
 			@Param("tenantId") UUID tenantId,
 			@Param("teacherUuid") UUID teacherUuid,
+			@Param("periodUuid") UUID periodUuid,
 			@Param("dayOfWeek") Short dayOfWeek);
 
 	/**
-	 * All non-deleted slots in {@code tenantId} pointing at
-	 * {@code classroomId} on the given day (B4 FK).
+	 * Active-assignment slots for the same classroom_id + period + day (B4 FK).
 	 */
 	@Query("""
 			select s from TimeSlot s
 			where s.tenantId = :tenantId
 			  and s.deleted = false
+			  and s.teacherAssignment.unassignedAt is null
+			  and s.teacherAssignment.academicPeriod.publicUuid = :periodUuid
 			  and s.classroomId = :classroomId
 			  and s.dayOfWeek = :dayOfWeek
 			""")
-	List<TimeSlot> findByTenantIdAndClassroomAndDay(
+	List<TimeSlot> findByTenantIdAndClassroomPeriodAndDay(
 			@Param("tenantId") UUID tenantId,
 			@Param("classroomId") UUID classroomId,
+			@Param("periodUuid") UUID periodUuid,
 			@Param("dayOfWeek") Short dayOfWeek);
 
 	/**
-	 * All non-deleted slots in {@code tenantId} carrying the legacy
-	 * free-text {@code classroom} label on the given day. Pre-B4 slots
-	 * that haven't been migrated to {@code classroomId} yet still go
-	 * through the same conflict check.
+	 * Active-assignment slots with the same legacy classroom label + period + day.
 	 */
 	@Query("""
 			select s from TimeSlot s
 			where s.tenantId = :tenantId
 			  and s.deleted = false
+			  and s.teacherAssignment.unassignedAt is null
+			  and s.teacherAssignment.academicPeriod.publicUuid = :periodUuid
 			  and s.classroom = :classroomLabel
 			  and s.dayOfWeek = :dayOfWeek
 			""")
-	List<TimeSlot> findByTenantIdAndClassroomLabelAndDay(
+	List<TimeSlot> findByTenantIdAndClassroomLabelPeriodAndDay(
 			@Param("tenantId") UUID tenantId,
 			@Param("classroomLabel") String classroomLabel,
+			@Param("periodUuid") UUID periodUuid,
 			@Param("dayOfWeek") Short dayOfWeek);
 
 	/**
-	 * All non-deleted slots in {@code tenantId} attached to the same
-	 * section (via the teacher assignment) on the given day.
+	 * Active-assignment slots for the same section + period + day.
 	 */
 	@Query("""
 			select s from TimeSlot s
 			where s.tenantId = :tenantId
 			  and s.deleted = false
+			  and s.teacherAssignment.unassignedAt is null
 			  and s.teacherAssignment.section.publicUuid = :sectionUuid
+			  and s.teacherAssignment.academicPeriod.publicUuid = :periodUuid
 			  and s.dayOfWeek = :dayOfWeek
 			""")
-	List<TimeSlot> findByTenantIdAndSectionAndDay(
+	List<TimeSlot> findByTenantIdAndSectionPeriodAndDay(
 			@Param("tenantId") UUID tenantId,
 			@Param("sectionUuid") UUID sectionUuid,
+			@Param("periodUuid") UUID periodUuid,
 			@Param("dayOfWeek") Short dayOfWeek);
 
 	/**

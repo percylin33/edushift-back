@@ -34,7 +34,14 @@ public class CompetencyMapper {
 				competency.getIsActive(),
 				toCapacityRefs(capacities),
 				competency.getCreatedAt(),
-				competency.getUpdatedAt()
+				competency.getUpdatedAt(),
+				competency.getOrigin(),
+				competency.getCreatedBy(),
+				competency.getSourceCatalogVersion(),
+				competency.getSourceCatalogCode(),
+				competency.getSourceLevelCode(),
+				competency.getSourceCycleCodes(),
+				competency.getSourceContentStatus()
 		);
 	}
 
@@ -45,7 +52,14 @@ public class CompetencyMapper {
 				competency.getName(),
 				competency.getDisplayOrder(),
 				competency.getIsActive(),
-				capacityCount
+				capacityCount,
+				competency.getOrigin(),
+				competency.getCreatedBy(),
+				competency.getSourceCatalogVersion(),
+				competency.getSourceCatalogCode(),
+				competency.getSourceLevelCode(),
+				competency.getSourceCycleCodes(),
+				competency.getSourceContentStatus()
 		);
 	}
 
@@ -94,7 +108,10 @@ public class CompetencyMapper {
 						c.getCode(),
 						c.getName(),
 						c.getDisplayOrder(),
-						c.getIsActive()))
+						c.getIsActive(),
+						c.getSourceCatalogVersion(),
+						c.getSourceCatalogCode(),
+						c.getSourceContentStatus()))
 				.toList();
 	}
 

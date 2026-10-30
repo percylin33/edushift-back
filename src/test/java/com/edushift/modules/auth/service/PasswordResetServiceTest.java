@@ -110,14 +110,14 @@ class PasswordResetServiceTest {
 			when(jwtService.resetTokenTtl()).thenReturn(Duration.ofHours(1));
 			when(passwordResetMailer.send(
 					eq("alice@acme.test"), eq(tenant.getName()),
-					eq("http://localhost:4201/auth/reset-password?tenant=acme&token=signed.jwt.token"),
+					eq("http://acme.localhost:4201/auth/reset-password?token=signed.jwt.token"),
 					eq(60L), anyString())).thenReturn(true);
 
 			service.requestReset("alice@acme.test", "acme", "127.0.0.1");
 
 			verify(passwordResetMailer).send(
 					eq("alice@acme.test"), eq(tenant.getName()),
-					eq("http://localhost:4201/auth/reset-password?tenant=acme&token=signed.jwt.token"),
+					eq("http://acme.localhost:4201/auth/reset-password?token=signed.jwt.token"),
 					eq(60L), anyString());
 
 			// Token persisted
@@ -138,7 +138,7 @@ class PasswordResetServiceTest {
 			assertThat(cmd.preferredChannel()).isEqualTo(Notification.Channel.IN_APP);
 			assertThat(cmd.payload())
 					.containsEntry("resetLink",
-							"http://localhost:4201/auth/reset-password?tenant=acme&token=signed.jwt.token")
+							"http://acme.localhost:4201/auth/reset-password?token=signed.jwt.token")
 					.containsEntry("tenantSlug", "acme");
 		}
 
@@ -225,7 +225,7 @@ class PasswordResetServiceTest {
 		void wrongType() {
 			JwtService.JwtClaims claims = new JwtService.JwtClaims(
 					"u", UUID.randomUUID(), "acme", java.util.Set.of(),
-					JwtService.TokenType.ACCESS, UUID.randomUUID(), Instant.now(), Instant.now().plusSeconds(60));
+					JwtService.TokenType.ACCESS, UUID.randomUUID(), Instant.now(), Instant.now().plusSeconds(60), null);
 			when(jwtService.parseAndValidate("t")).thenReturn(claims);
 			ResetPasswordValidateResponse resp = service.validateToken("t");
 			assertThat(resp.valid()).isFalse();
@@ -241,7 +241,7 @@ class PasswordResetServiceTest {
 			JwtService.JwtClaims claims = new JwtService.JwtClaims(
 					user.getPublicUuid().toString(), tenant.getId(), tenant.getSlug(),
 					java.util.Set.of(), JwtService.TokenType.RESET, jti,
-					Instant.now().minusSeconds(7200), Instant.now().minusSeconds(60));
+					Instant.now().minusSeconds(7200), Instant.now().minusSeconds(60), null);
 			when(jwtService.parseAndValidate("t")).thenReturn(claims);
 			when(tenantRepository.findById(tenant.getId())).thenReturn(Optional.of(tenant));
 			when(resetTokenRepository.findByJti(jti)).thenReturn(Optional.of(buildRow(jti, user.getId(), tenant.getId(), Instant.now().minusSeconds(60), null, null)));
@@ -269,7 +269,7 @@ class PasswordResetServiceTest {
 			JwtService.JwtClaims claims = new JwtService.JwtClaims(
 					user.getPublicUuid().toString(), tenant.getId(), tenant.getSlug(),
 					java.util.Set.of(), JwtService.TokenType.RESET, jti,
-					Instant.now(), Instant.now().plusSeconds(3600));
+					Instant.now(), Instant.now().plusSeconds(3600), null);
 			when(jwtService.parseAndValidate("t")).thenReturn(claims);
 			when(resetTokenRepository.findByJti(jti))
 					.thenReturn(Optional.of(buildRow(jti, user.getId(), tenant.getId(), Instant.now().plusSeconds(3600), null, null)));
@@ -300,7 +300,7 @@ class PasswordResetServiceTest {
 			JwtService.JwtClaims claims = new JwtService.JwtClaims(
 					user.getPublicUuid().toString(), tenant.getId(), tenant.getSlug(),
 					java.util.Set.of(), JwtService.TokenType.RESET, jti,
-					Instant.now(), Instant.now().plusSeconds(3600));
+					Instant.now(), Instant.now().plusSeconds(3600), null);
 			when(jwtService.parseAndValidate("t")).thenReturn(claims);
 			PasswordResetToken row = buildRow(jti, user.getId(), tenant.getId(),
 					Instant.now().plusSeconds(3600), Instant.now().minusSeconds(60), null);
@@ -322,7 +322,7 @@ class PasswordResetServiceTest {
 			JwtService.JwtClaims claims = new JwtService.JwtClaims(
 					user.getPublicUuid().toString(), tenantA.getId(), tenantA.getSlug(),
 					java.util.Set.of(), JwtService.TokenType.RESET, jti,
-					Instant.now(), Instant.now().plusSeconds(3600));
+					Instant.now(), Instant.now().plusSeconds(3600), null);
 			when(jwtService.parseAndValidate("t")).thenReturn(claims);
 			// DB row claims to belong to tenantB
 			PasswordResetToken row = buildRow(jti, user.getId(), tenantB.getId(),
@@ -343,7 +343,7 @@ class PasswordResetServiceTest {
 			JwtService.JwtClaims claims = new JwtService.JwtClaims(
 					user.getPublicUuid().toString(), tenant.getId(), tenant.getSlug(),
 					java.util.Set.of(), JwtService.TokenType.RESET, jti,
-					Instant.now(), Instant.now().plusSeconds(3600));
+					Instant.now(), Instant.now().plusSeconds(3600), null);
 			when(jwtService.parseAndValidate("t")).thenReturn(claims);
 			when(resetTokenRepository.findByJti(jti))
 					.thenReturn(Optional.of(buildRow(jti, user.getId(), tenant.getId(), Instant.now().plusSeconds(3600), null, null)));

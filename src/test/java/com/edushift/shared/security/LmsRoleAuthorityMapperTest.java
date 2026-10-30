@@ -1,12 +1,13 @@
 package com.edushift.shared.security;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.Mockito.mock;
 
 import com.edushift.modules.auth.entity.UserRole;
+import com.edushift.modules.tenants.dto.RolePermissionOverrideDto;
 import com.edushift.modules.tenants.service.PermissionOverrideService;
 import java.util.EnumSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -22,33 +23,23 @@ import org.junit.jupiter.api.Test;
 class LmsRoleAuthorityMapperTest {
 
 	private final LmsRoleAuthorityMapper mapper =
-			new LmsRoleAuthorityMapper(mock(PermissionOverrideService.class));
+			new LmsRoleAuthorityMapper(overrides(Map.of(), Map.of()));
 
 	@Test
-	@DisplayName("tenant_admin gets all LMS authorities (tasks + materials + quizzes + AI + payment-admin + announcements)")
-	void tenantAdminHasAllAuthorities() {
+	@DisplayName("tenant_admin can inspect, review and publish annual disclosures but not prepare or submit")
+	void tenantAdminCanReviewDisclosuresWithoutPreparingOrSubmitting() {
 		Set<String> auths = mapper.grantFor(UserRole.TENANT_ADMIN);
-		assertThat(auths).containsExactlyInAnyOrder(
-				LmsAuthorities.LMS_TASK_READ,
-				LmsAuthorities.LMS_TASK_CREATE,
-				LmsAuthorities.LMS_TASK_GRADE,
-				LmsAuthorities.LMS_TASK_SUBMIT,
-				LmsAuthorities.LMS_MATERIAL_READ,
-				LmsAuthorities.LMS_MATERIAL_WRITE,
-				LmsAuthorities.LMS_MATERIAL_DELETE,
-				LmsAuthorities.LMS_QUIZ_READ,
-				LmsAuthorities.LMS_QUIZ_CREATE,
-				LmsAuthorities.LMS_QUIZ_GRADE,
-				LmsAuthorities.LMS_QUIZ_SUBMIT,
-				LmsAuthorities.LMS_AI_GENERATE,
-				LmsAuthorities.LMS_PAYMENT_ADMIN,
-				LmsAuthorities.LMS_ANNOUNCEMENTS_CREATE,
-				LmsAuthorities.LMS_NOTIFICATIONS_MANAGE,
-				LmsAuthorities.LMS_AI_USAGE);
+		assertThat(auths).contains(
+				LmsAuthorities.LMS_DISCLOSURE_READ,
+				LmsAuthorities.LMS_DISCLOSURE_REVIEW,
+				LmsAuthorities.LMS_DISCLOSURE_PUBLISH);
+		assertThat(auths).doesNotContain(
+				LmsAuthorities.LMS_DISCLOSURE_MANAGE,
+				LmsAuthorities.LMS_DISCLOSURE_SUBMIT);
 	}
 
 	@Test
-	@DisplayName("teacher can read/create/grade tasks, manage materials, read/create/grade quizzes, generate AI (no submit)")
+	@DisplayName("teacher permissions include classroom AI but no learner submission")
 	void teacherHasExpectedAuthorities() {
 		Set<String> auths = mapper.grantFor(UserRole.TEACHER);
 		assertThat(auths).containsExactlyInAnyOrder(
@@ -61,7 +52,12 @@ class LmsRoleAuthorityMapperTest {
 				LmsAuthorities.LMS_QUIZ_READ,
 				LmsAuthorities.LMS_QUIZ_CREATE,
 				LmsAuthorities.LMS_QUIZ_GRADE,
-				LmsAuthorities.LMS_AI_GENERATE);
+				LmsAuthorities.LMS_AI_GENERATE,
+				LmsAuthorities.AI_TEACHER_USE,
+				LmsAuthorities.LMS_ANNOUNCEMENTS_CREATE_OWN,
+				LmsAuthorities.ATTENDANCE_READ,
+				LmsAuthorities.ATTENDANCE_REGISTER,
+				LmsAuthorities.ATTENDANCE_CORRECT);
 		assertThat(auths).doesNotContain(
 				LmsAuthorities.LMS_TASK_SUBMIT,
 				LmsAuthorities.LMS_QUIZ_SUBMIT,
@@ -69,7 +65,7 @@ class LmsRoleAuthorityMapperTest {
 	}
 
 	@Test
-	@DisplayName("student can read tasks + submit, read materials, read/submit quizzes (no create/grade)")
+	@DisplayName("student permissions include learner workspace and tutor access")
 	void studentHasReadAndSubmit() {
 		Set<String> auths = mapper.grantFor(UserRole.STUDENT);
 		assertThat(auths).containsExactlyInAnyOrder(
@@ -77,11 +73,18 @@ class LmsRoleAuthorityMapperTest {
 				LmsAuthorities.LMS_TASK_SUBMIT,
 				LmsAuthorities.LMS_MATERIAL_READ,
 				LmsAuthorities.LMS_QUIZ_READ,
-				LmsAuthorities.LMS_QUIZ_SUBMIT);
+				LmsAuthorities.LMS_QUIZ_SUBMIT,
+				LmsAuthorities.ME_READ,
+				LmsAuthorities.ME_ATTENDANCE_READ,
+				LmsAuthorities.ME_ATTENDANCE_JUSTIFY,
+				LmsAuthorities.ME_QR_READ,
+				LmsAuthorities.ME_PAYMENTS_READ,
+				LmsAuthorities.ME_PAYMENTS_CHECKOUT,
+				LmsAuthorities.AI_TUTOR_USE);
 	}
 
 	@Test
-	@DisplayName("parent can access family, justify attendance and submit on behalf")
+	@DisplayName("parent permissions include family access and family AI")
 	void parentHasReadAndSubmit() {
 		Set<String> auths = mapper.grantFor(UserRole.PARENT);
 		assertThat(auths).containsExactlyInAnyOrder(
@@ -91,18 +94,19 @@ class LmsRoleAuthorityMapperTest {
 				LmsAuthorities.LMS_TASK_SUBMIT,
 				LmsAuthorities.LMS_MATERIAL_READ,
 				LmsAuthorities.LMS_QUIZ_READ,
-				LmsAuthorities.LMS_QUIZ_SUBMIT);
+				LmsAuthorities.LMS_QUIZ_SUBMIT,
+				LmsAuthorities.AI_FAMILY_USE);
 	}
 
 	@Test
-	@DisplayName("staff is read-only: tasks + materials + quizzes + payment-admin")
-	void staffIsReadOnly() {
+	@DisplayName("staff defaults are read-only until individual profiles grant further access")
+	void staffDefaultsAreReadOnly() {
 		Set<String> auths = mapper.grantFor(UserRole.STAFF);
 		assertThat(auths).containsExactlyInAnyOrder(
 				LmsAuthorities.LMS_TASK_READ,
 				LmsAuthorities.LMS_MATERIAL_READ,
 				LmsAuthorities.LMS_QUIZ_READ,
-				LmsAuthorities.LMS_PAYMENT_ADMIN);
+				LmsAuthorities.LMS_DISCLOSURE_READ);
 	}
 
 	@Test
@@ -118,10 +122,10 @@ class LmsRoleAuthorityMapperTest {
 	}
 
 	@Test
-	@DisplayName("multiple roles → union, dedup'd")
+	@DisplayName("multiple roles → union, deduplicating overlap")
 	void unionIsDeduped() {
-		// STUDENT and PARENT grant the same set; the result must not
-		// duplicate any authority.
+		// Student and parent share classroom permissions while each
+		// retains role-specific workspace and family permissions.
 		Set<String> auths = mapper.mapAuthorities(
 				EnumSet.of(UserRole.STUDENT, UserRole.PARENT));
 		assertThat(auths).containsExactlyInAnyOrder(
@@ -131,7 +135,15 @@ class LmsRoleAuthorityMapperTest {
 				LmsAuthorities.LMS_QUIZ_READ,
 				LmsAuthorities.LMS_QUIZ_SUBMIT,
 				LmsAuthorities.LMS_FAMILY_READ,
-				LmsAuthorities.LMS_ATTENDANCE_JUSTIFY);
+				LmsAuthorities.LMS_ATTENDANCE_JUSTIFY,
+				LmsAuthorities.ME_READ,
+				LmsAuthorities.ME_ATTENDANCE_READ,
+				LmsAuthorities.ME_ATTENDANCE_JUSTIFY,
+				LmsAuthorities.ME_QR_READ,
+				LmsAuthorities.ME_PAYMENTS_READ,
+				LmsAuthorities.ME_PAYMENTS_CHECKOUT,
+				LmsAuthorities.AI_TUTOR_USE,
+				LmsAuthorities.AI_FAMILY_USE);
 	}
 
 	@Test
@@ -139,6 +151,55 @@ class LmsRoleAuthorityMapperTest {
 	void tenantAdminAndTeacherStillHasAll() {
 		Set<String> auths = mapper.mapAuthorities(
 				EnumSet.of(UserRole.TENANT_ADMIN, UserRole.TEACHER));
-		assertThat(auths).hasSize(16);
+		assertThat(auths)
+				.containsAll(mapper.grantFor(UserRole.TENANT_ADMIN))
+				.containsAll(mapper.grantFor(UserRole.TEACHER));
+	}
+
+	@Test
+	@DisplayName("a tenant override cannot grant announcement publishing to a student")
+	void studentOverrideCannotPublishAnnouncements() {
+		PermissionOverrideService tenantOverrides = overrides(
+				Map.of(UserRole.STUDENT,
+						Set.of(LmsAuthorities.LMS_ANNOUNCEMENTS_CREATE,
+								LmsAuthorities.LMS_ANNOUNCEMENTS_CREATE_OWN)),
+				Map.of());
+		LmsRoleAuthorityMapper scoped = new LmsRoleAuthorityMapper(tenantOverrides);
+		Set<String> auths = scoped.resolveFor(java.util.UUID.randomUUID(), List.of(UserRole.STUDENT));
+		assertThat(auths).doesNotContain(
+				LmsAuthorities.LMS_ANNOUNCEMENTS_CREATE,
+				LmsAuthorities.LMS_ANNOUNCEMENTS_CREATE_OWN);
+	}
+
+	private static PermissionOverrideService overrides(
+			Map<UserRole, Set<String>> grants,
+			Map<UserRole, Set<String>> revocations) {
+		return new PermissionOverrideService() {
+			@Override
+			public Map<UserRole, Set<String>> snapshotFor(java.util.UUID tenantId) {
+				return grants;
+			}
+
+			@Override
+			public Map<UserRole, Set<String>> revokedFor(java.util.UUID tenantId) {
+				return revocations;
+			}
+
+			@Override
+			public List<RolePermissionOverrideDto> listAll(java.util.UUID tenantId) {
+				return List.of();
+			}
+
+			@Override
+			public RolePermissionOverrideDto upsert(
+					java.util.UUID tenantId, UserRole role, String authority, boolean granted, java.util.UUID actorUserId) {
+				throw new UnsupportedOperationException("Test override is read-only");
+			}
+
+			@Override
+			public void evict(java.util.UUID tenantId) {
+				// The mapper only reads this fixture.
+			}
+		};
 	}
 }

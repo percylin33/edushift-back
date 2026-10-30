@@ -1,9 +1,15 @@
 package com.edushift.modules.payments.service;
 
+import com.edushift.modules.auth.repository.UserRepository;
+import com.edushift.modules.files.entity.FileUploadStatus;
+import com.edushift.modules.files.service.FileObjectService;
+import com.edushift.modules.notifications.entity.Notification;
+import com.edushift.modules.notifications.event.NotificationEvent;
 import com.edushift.modules.payments.dto.CheckoutResponse;
 import com.edushift.modules.payments.dto.InvoiceItemResponse;
 import com.edushift.modules.payments.dto.InvoiceResponse;
 import com.edushift.modules.payments.dto.PaymentResponse;
+import com.edushift.modules.payments.dto.SubmitPaymentEvidenceRequest;
 import com.edushift.modules.payments.entity.Invoice;
 import com.edushift.modules.payments.entity.Payment;
 import com.edushift.modules.payments.exception.InvoiceNotFoundException;
@@ -13,6 +19,7 @@ import com.edushift.modules.payments.repository.PaymentRepository;
 import com.edushift.modules.students.repository.StudentGuardianRepository;
 import com.edushift.modules.students.repository.StudentRepository;
 import com.edushift.modules.tenants.repository.TenantRepository;
+import com.edushift.shared.exception.BadRequestException;
 import com.edushift.shared.exception.ForbiddenException;
 import com.edushift.shared.exception.ResourceNotFoundException;
 import com.edushift.shared.multitenancy.TenantContext;
@@ -20,10 +27,14 @@ import com.edushift.shared.security.CurrentUserProvider;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Instant;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
@@ -77,6 +88,9 @@ public class PaymentService {
     private final TenantRepository tenantRepository;
     private final InvoiceReceiptPdfGenerator receiptPdfGenerator;
     private final CurrentUserProvider currentUserProvider;
+    private final FileObjectService fileObjectService;
+    private final UserRepository userRepository;
+    private final ApplicationEventPublisher eventPublisher;
 
     // ----------------------------------------------------------------- read
 
@@ -160,10 +174,15 @@ public class PaymentService {
                     "INVOICE_CANCELLED", "This invoice has been cancelled");
         }
 
+        long amountDue = i.getBalanceCents();
+        if (amountDue <= 0) {
+            throw new com.edushift.shared.exception.BusinessException(
+                    "INVOICE_NO_BALANCE", "This invoice has no remaining balance");
+        }
         String initPoint = mpClient.createPreference(
                 i.getPublicUuid().toString(),
                 "Cuota EduShift — " + i.getPeriodLabel(),
-                i.getTotalCents(),
+                amountDue,
                 i.getCurrency(),
                 guardianEmail);
 
@@ -174,7 +193,7 @@ public class PaymentService {
         payment.setProvider(Payment.Provider.MERCADOPAGO);
         payment.setExternalReference(i.getPublicUuid().toString());
         payment.setStatus(Payment.Status.PENDING);
-        payment.setAmountCents(i.getTotalCents());
+        payment.setAmountCents(amountDue);
         payment.setCurrency(i.getCurrency());
         payment = paymentRepo.save(payment);
 
@@ -188,13 +207,140 @@ public class PaymentService {
         if (invoice.getStatus() != Invoice.Status.PAID) {
             throw new ResourceNotFoundException("InvoiceReceipt", invoicePublicUuid);
         }
-        String schoolName = tenantRepository.findById(TenantContext.currentRequired())
-                .map(tenant -> tenant.getName())
-                .orElse("EduShift");
+
+        var tenant = tenantRepository.findById(TenantContext.currentRequired()).orElse(null);
+        String schoolName = tenant != null && tenant.getName() != null && !tenant.getName().isBlank()
+                ? tenant.getName()
+                : "EduShift";
+        String logoUrl = brandingString(tenant != null ? tenant.getBranding() : null, "logoUrl");
+        String primaryColor = brandingString(tenant != null ? tenant.getBranding() : null, "primaryColor");
+        byte[] logoBytes = receiptPdfGenerator.loadLogoBytes(logoUrl);
+
         String studentName = studentRepository.findByPublicUuid(invoice.getStudentId())
                 .map(student -> student.fullName())
                 .orElse("—");
-        return receiptPdfGenerator.generate(schoolName, studentName, invoice);
+
+        var items = itemRepo.findByInvoiceIdOrderByCreatedAtAsc(invoice.getId());
+
+        return receiptPdfGenerator.generate(new InvoiceReceiptPdfGenerator.ReceiptContext(
+                schoolName,
+                primaryColor,
+                logoBytes,
+                studentName,
+                invoice,
+                items));
+    }
+
+    private static String brandingString(java.util.Map<String, Object> branding, String key) {
+        if (branding == null || branding.isEmpty()) {
+            return null;
+        }
+        Object value = branding.get(key);
+        if (value instanceof String s && !s.isBlank()) {
+            return s.trim();
+        }
+        return null;
+    }
+
+    /**
+     * Parent/student attaches a voucher image/PDF already uploaded via
+     * {@code POST /files?module=payments}. Never marks the invoice PAID.
+     */
+    @Transactional
+    public InvoiceResponse submitEvidence(UUID invoicePublicUuid, SubmitPaymentEvidenceRequest request) {
+        Invoice invoice = invoiceRepo.findByPublicUuidForUpdate(invoicePublicUuid)
+                .orElseThrow(() -> new InvoiceNotFoundException(
+                        "Invoice not found in the current tenant: " + invoicePublicUuid));
+        assertOwnership(invoice);
+        if (invoice.getStatus() != Invoice.Status.PENDING
+                && invoice.getStatus() != Invoice.Status.OVERDUE
+                && invoice.getStatus() != Invoice.Status.PENDING_REVIEW) {
+            throw new com.edushift.shared.exception.BusinessException(
+                    "INVOICE_NOT_OPEN",
+                    "Evidence can only be submitted for pending or overdue invoices (current: "
+                            + invoice.getStatus() + ")");
+        }
+
+        var file = fileObjectService.getByPublicUuid(request.filePublicUuid());
+        if (file.getStatus() != FileUploadStatus.READY) {
+            throw new BadRequestException(
+                    "EVIDENCE_FILE_NOT_READY",
+                    "Payment evidence file is not ready");
+        }
+        String mime = file.getContentType() == null ? "" : file.getContentType().toLowerCase(Locale.ROOT);
+        boolean allowed = mime.startsWith("image/") || "application/pdf".equals(mime);
+        if (!allowed) {
+            throw new BadRequestException(
+                    "EVIDENCE_FILE_TYPE",
+                    "Payment evidence must be an image or a PDF");
+        }
+
+        UUID previous = invoice.getEvidenceFilePublicUuid();
+        if (previous != null && !previous.equals(request.filePublicUuid())) {
+            try {
+                fileObjectService.releaseReference(previous);
+            } catch (Exception ex) {
+                log.warn("[payments] releaseReference failed for previous evidence {}: {}",
+                        previous, ex.getMessage());
+            }
+        }
+        if (previous == null || !previous.equals(request.filePublicUuid())) {
+            fileObjectService.acquireReference(request.filePublicUuid());
+        }
+
+        invoice.setEvidenceFilePublicUuid(request.filePublicUuid());
+        invoice.setEvidenceSubmittedAt(Instant.now());
+        invoice.setEvidenceNotes(blankToNull(request.notes()));
+        invoice.setEvidenceRejectionReason(null);
+        invoice.setStatus(Invoice.Status.PENDING_REVIEW);
+        invoiceRepo.save(invoice);
+        publishEvidenceSubmitted(invoice);
+
+        List<InvoiceItemResponse> items = itemRepo.findByInvoiceIdOrderByCreatedAtAsc(invoice.getId())
+                .stream().map(InvoiceItemResponse::from).toList();
+        return InvoiceResponse.from(invoice, items);
+    }
+
+    private void publishEvidenceSubmitted(Invoice inv) {
+        UUID tenantId = inv.getTenantId() != null ? inv.getTenantId() : TenantContext.currentRequired();
+        List<NotificationEvent.Recipient> recipients = userRepository
+                .findActivePaymentAdmins(tenantId)
+                .stream()
+                .map(u -> new NotificationEvent.Recipient(u.getPublicUuid(), u.getEmail()))
+                .toList();
+        if (recipients.isEmpty()) {
+            log.warn("[payments] no payment admins to notify for evidence on invoice {}",
+                    inv.getPublicUuid());
+            return;
+        }
+        String studentName = studentRepository.findByPublicUuid(inv.getStudentId())
+                .map(s -> s.fullName())
+                .orElse("");
+        String amount = String.format(Locale.US, "%s %.2f",
+                inv.getCurrency() == null ? "PEN" : inv.getCurrency(),
+                inv.getBalanceCents() / 100.0);
+        Map<String, Object> payload = new HashMap<>();
+        payload.put("invoiceNumber", inv.getPeriodLabel());
+        payload.put("concept", "Cuota " + inv.getPeriodLabel());
+        payload.put("amount", amount);
+        payload.put("studentName", studentName);
+        payload.put("invoicePublicUuid", inv.getPublicUuid().toString());
+        payload.put("notes", inv.getEvidenceNotes() == null ? "" : inv.getEvidenceNotes());
+        eventPublisher.publishEvent(
+                NotificationEvent.builder()
+                        .templateKey("PAYMENT_EVIDENCE_SUBMITTED")
+                        .category(Notification.Category.PAYMENT)
+                        .sourceId(inv.getPublicUuid())
+                        .tenantId(tenantId)
+                        .recipients(recipients)
+                        .payload(payload)
+                        .build());
+    }
+
+    private static String blankToNull(String s) {
+        if (s == null) return null;
+        String t = s.trim();
+        return t.isEmpty() ? null : t;
     }
 
     // --------------------------------------------------------- webhook
@@ -242,7 +388,7 @@ public class PaymentService {
                     p.setProvider(Payment.Provider.MERCADOPAGO);
                     p.setExternalId(dataId);
                     p.setExternalReference(mpExternalRef);
-                    p.setAmountCents(invoice.getTotalCents());
+                    p.setAmountCents(invoice.getBalanceCents());
                     p.setCurrency(invoice.getCurrency());
                     return p;
                 });

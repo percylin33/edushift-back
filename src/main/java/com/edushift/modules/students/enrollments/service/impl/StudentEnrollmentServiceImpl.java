@@ -4,10 +4,12 @@ import com.edushift.modules.academic.section.entity.Section;
 import com.edushift.modules.academic.section.repository.SectionRepository;
 import com.edushift.modules.academic.year.entity.AcademicYear;
 import com.edushift.modules.academic.year.repository.AcademicYearRepository;
+import com.edushift.modules.admissions.repository.AdmissionVacancyReservationRepository;
 import com.edushift.modules.students.enrollments.dto.CreateEnrollmentRequest;
 import com.edushift.modules.students.enrollments.dto.EnrollmentListItem;
 import com.edushift.modules.students.enrollments.dto.EnrollmentResponse;
 import com.edushift.modules.students.enrollments.dto.SectionStudentRosterItem;
+import com.edushift.modules.students.enrollments.dto.UpdateEnrollmentRequest;
 import com.edushift.modules.students.enrollments.dto.WithdrawEnrollmentRequest;
 import com.edushift.modules.students.enrollments.entity.StudentEnrollment;
 import com.edushift.modules.students.enrollments.entity.StudentEnrollmentStatus;
@@ -15,7 +17,9 @@ import com.edushift.modules.students.enrollments.mapper.StudentEnrollmentMapper;
 import com.edushift.modules.students.enrollments.repository.StudentEnrollmentRepository;
 import com.edushift.modules.students.enrollments.service.StudentEnrollmentService;
 import com.edushift.modules.students.entity.Student;
+import com.edushift.modules.students.entity.EnrollmentStatus;
 import com.edushift.modules.students.repository.StudentRepository;
+import com.edushift.modules.payments.service.SubscriptionService;
 import com.edushift.shared.exception.BadRequestException;
 import com.edushift.shared.exception.ConflictException;
 import com.edushift.shared.exception.ResourceNotFoundException;
@@ -70,6 +74,8 @@ public class StudentEnrollmentServiceImpl implements StudentEnrollmentService {
 	private final SectionRepository sectionRepository;
 	private final AcademicYearRepository yearRepository;
 	private final StudentEnrollmentMapper mapper;
+	private final SubscriptionService subscriptionService;
+	private final AdmissionVacancyReservationRepository admissionReservationRepository;
 
 	// =========================================================================
 	// Reads
@@ -104,11 +110,15 @@ public class StudentEnrollmentServiceImpl implements StudentEnrollmentService {
 
 		Student student = loadStudent(studentPublicUuid);
 		Section section = loadSection(request.sectionPublicUuid());
-		AcademicYear year = loadYear(request.academicYearPublicUuid());
+		// Serialize enrollment writes for one school year so simultaneous
+		// requests cannot exceed a classroom's configured capacity.
+		AcademicYear year = loadYearForUpdate(request.academicYearPublicUuid());
 
 		validateYearAlignment(section, year);
 		validateEnrolledAtInYear(year, request.enrolledAt());
 		validateNoActiveEnrollment(student, year);
+		validateSectionCapacity(section);
+		validateGradeCapacity(year, section, student);
 
 		StudentEnrollment enrollment = new StudentEnrollment();
 		enrollment.setStudent(student);
@@ -118,15 +128,9 @@ public class StudentEnrollmentServiceImpl implements StudentEnrollmentService {
 		enrollment.setStatus(StudentEnrollmentStatus.ACTIVE);
 		enrollment.setNotes(blankToNull(request.notes()));
 
+		StudentEnrollment saved;
 		try {
-			StudentEnrollment saved = enrollmentRepository.saveAndFlush(enrollment);
-			log.info("[students.enrollments] created -- publicUuid={} student={} section={} year={} enrolledAt={}",
-					saved.getPublicUuid(),
-					student.getPublicUuid(),
-					section.getPublicUuid(),
-					year.getPublicUuid(),
-					saved.getEnrolledAt());
-			return mapper.toResponse(saved);
+			saved = enrollmentRepository.saveAndFlush(enrollment);
 		}
 		catch (DataIntegrityViolationException ex) {
 			// uk_student_enrollments_active fired — concurrent insert
@@ -136,6 +140,19 @@ public class StudentEnrollmentServiceImpl implements StudentEnrollmentService {
 							+ "' already has an active enrollment in year '"
 							+ year.getName() + "'.", ex);
 		}
+		student.setEnrollmentStatus(EnrollmentStatus.ENROLLED);
+		if (student.getEnrollmentDate() == null) {
+			student.setEnrollmentDate(request.enrolledAt());
+		}
+		studentRepository.save(student);
+		subscriptionService.synchronizeStudentForBillingRules(student.getPublicUuid());
+		log.info("[students.enrollments] created -- publicUuid={} student={} section={} year={} enrolledAt={}",
+				saved.getPublicUuid(),
+				student.getPublicUuid(),
+				section.getPublicUuid(),
+				year.getPublicUuid(),
+				saved.getEnrolledAt());
+		return mapper.toResponse(saved);
 	}
 
 	@Override
@@ -161,12 +178,51 @@ public class StudentEnrollmentServiceImpl implements StudentEnrollmentService {
 		enrollment.setWithdrawnAt(request.withdrawnAt());
 
 		StudentEnrollment saved = enrollmentRepository.saveAndFlush(enrollment);
+		if (enrollmentRepository.findActiveByStudent(enrollment.getStudent()).isEmpty()) {
+			enrollment.getStudent().setEnrollmentStatus(switch (request.status()) {
+				case TRANSFERRED -> EnrollmentStatus.TRANSFERRED;
+				case GRADUATED -> EnrollmentStatus.GRADUATED;
+				case WITHDRAWN -> EnrollmentStatus.WITHDRAWN;
+				case ACTIVE -> EnrollmentStatus.ENROLLED;
+			});
+			studentRepository.save(enrollment.getStudent());
+		}
 		log.info("[students.enrollments] soft-ended -- publicUuid={} student={} status={} withdrawnAt={}",
 				saved.getPublicUuid(),
 				saved.getStudent().getPublicUuid(),
 				saved.getStatus(),
 				saved.getWithdrawnAt());
 
+		return mapper.toResponse(saved);
+	}
+
+	@Override
+	@Transactional
+	public EnrollmentResponse updateEnrollment(UUID enrollmentPublicUuid,
+			UpdateEnrollmentRequest request) {
+
+		StudentEnrollment enrollment = enrollmentRepository.findByPublicUuid(enrollmentPublicUuid)
+				.orElseThrow(() -> new ResourceNotFoundException(
+						"StudentEnrollment", enrollmentPublicUuid));
+
+		if (enrollment.getStatus() != StudentEnrollmentStatus.ACTIVE) {
+			throw new ConflictException("ENROLLMENT_NOT_ACTIVE",
+					"Only ACTIVE enrollments can change enrolledAt; current status is "
+							+ enrollment.getStatus());
+		}
+
+		LocalDate enrolledAt = request.enrolledAt();
+		validateEnrolledAtInYear(enrollment.getAcademicYear(), enrolledAt);
+		if (enrollment.getWithdrawnAt() != null) {
+			validateWithdrawDateOrder(enrolledAt, enrollment.getWithdrawnAt());
+		}
+
+		enrollment.setEnrolledAt(enrolledAt);
+		StudentEnrollment saved = enrollmentRepository.saveAndFlush(enrollment);
+		log.info("[students.enrollments] enrolledAt updated -- publicUuid={} student={} enrolledAt={}",
+				saved.getPublicUuid(),
+				saved.getStudent().getPublicUuid(),
+				saved.getEnrolledAt());
 		return mapper.toResponse(saved);
 	}
 
@@ -207,6 +263,29 @@ public class StudentEnrollmentServiceImpl implements StudentEnrollmentService {
 				});
 	}
 
+	private void validateSectionCapacity(Section section) {
+		Integer capacity = section.getCapacity();
+		if (capacity != null && enrollmentRepository.countActiveBySection(section) >= capacity) {
+			throw new ConflictException("SECTION_CAPACITY_REACHED",
+					"La sección '" + section.getName() + "' alcanzó el aforo configurado de "
+							+ capacity + " estudiantes.");
+		}
+	}
+
+	private void validateGradeCapacity(AcademicYear year, Section section, Student student) {
+		var sections = sectionRepository.findAllByAcademicYearAndGradeOrderByDisplayOrderAscNameAsc(
+				year, section.getGrade());
+		if (sections.isEmpty() || sections.stream().anyMatch(item -> item.getCapacity() == null)) return;
+		int capacity = sections.stream().mapToInt(Section::getCapacity).sum();
+		long active = enrollmentRepository.countActiveByYearAndGrade(year, section.getGrade());
+		long reserved = admissionReservationRepository.countEffectiveExcludingStudent(
+				year, section.getGrade(), student.getId(), java.time.Instant.now());
+		if (active + reserved >= capacity) {
+			throw new ConflictException("GRADE_CAPACITY_REACHED",
+					"Las vacantes configuradas para " + section.getGrade().getName() + " ya están ocupadas o reservadas.");
+		}
+	}
+
 	private void validateTerminalStatus(StudentEnrollmentStatus target) {
 		if (target == null || target == StudentEnrollmentStatus.ACTIVE) {
 			throw new BadRequestException("INVALID_WITHDRAW_STATUS",
@@ -239,6 +318,11 @@ public class StudentEnrollmentServiceImpl implements StudentEnrollmentService {
 
 	private AcademicYear loadYear(UUID publicUuid) {
 		return yearRepository.findByPublicUuid(publicUuid)
+				.orElseThrow(() -> new ResourceNotFoundException("AcademicYear", publicUuid));
+	}
+
+	private AcademicYear loadYearForUpdate(UUID publicUuid) {
+		return yearRepository.findByPublicUuidForUpdate(publicUuid)
 				.orElseThrow(() -> new ResourceNotFoundException("AcademicYear", publicUuid));
 	}
 

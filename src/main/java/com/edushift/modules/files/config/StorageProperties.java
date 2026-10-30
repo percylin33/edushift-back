@@ -17,6 +17,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  * <h3>Property map</h3>
  * <ul>
  *   <li>{@code app.storage.provider} — {@code FIREBASE} or {@code LOCAL_FS} (mandatory at startup; fail-fast otherwise).</li>
+ *   <li>{@code app.storage.env} — logical environment segment in object keys ({@code dev}|{@code staging}|{@code prod}). Empty → derived from Spring profiles.</li>
  *   <li>{@code app.storage.max-file-size-bytes} — per-file cap. Default 25 MB. Spring multipart is also configured from this value.</li>
  *   <li>{@code app.storage.allowed-content-types} — MIME allow-list. Default: PDF, images, MS Office, OpenDocument, plain text, ZIP.</li>
  *   <li>{@code app.storage.local-fs.root} — absolute path where Local-FS provider stores blobs. Default: {@code ./edushift-storage}.</li>
@@ -37,6 +38,14 @@ public class StorageProperties {
 	 * an unknown value makes the application refuse to boot.
 	 */
 	private StorageProvider provider = StorageProvider.LOCAL_FS;
+
+	/**
+	 * Environment segment for object keys ({@code envs/{env}/...}).
+	 * Bound from {@code STORAGE_ENV}. When blank, callers should derive
+	 * from the active Spring profile ({@code prod} → {@code prod}, else
+	 * {@code dev}).
+	 */
+	private String env = "";
 
 	/**
 	 * Maximum per-file size in bytes. Default 25 MiB.

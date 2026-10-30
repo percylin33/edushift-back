@@ -52,15 +52,9 @@ public class QuizAttemptMapper {
 	 *                           {@code correct} / {@code pointsAwarded}
 	 *                           fields are populated on the answer
 	 *                           rows.
-	 * @param pendingAnswerCount number of SHORT_ANSWER answers in
-	 *                           this attempt still awaiting manual
-	 *                           grading (used by FE-7b.3 to render
-	 *                           "3 of 5 graded" in the results
-	 *                           screen). When negative the field is
-	 *                           omitted.
 	 */
 	public AttemptResponse toResponse(QuizAttempt attempt, Quiz quiz,
-			boolean revealCorrectness, int pendingAnswerCount) {
+			boolean revealCorrectness) {
 		List<QuizAnswer> answers = answerRepository
 				.findAllByAttemptOrderByQuestionPositionAsc(attempt);
 		List<AnswerResponse> answerDtos = answers.stream()
@@ -99,9 +93,8 @@ public class QuizAttemptMapper {
 	 * reference (e.g. when only the attempt is in scope).
 	 */
 	public AttemptResponse toResponse(QuizAttempt attempt,
-			boolean revealCorrectness, int pendingAnswerCount) {
-		return toResponse(attempt, attempt.getQuiz(),
-				revealCorrectness, pendingAnswerCount);
+			boolean revealCorrectness) {
+		return toResponse(attempt, attempt.getQuiz(), revealCorrectness);
 	}
 
 	// ------------------------------------------------------------------

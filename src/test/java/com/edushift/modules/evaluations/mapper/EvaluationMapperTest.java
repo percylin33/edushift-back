@@ -181,7 +181,7 @@ class EvaluationMapperTest {
                     EvaluationKind.QUIZ, "Quiz 1", null,
                     new BigDecimal("10.00"),
                     LocalDate.of(2026, 4, 1), null,
-                    EvaluationScale.SCORE_0_20, null, null, Boolean.FALSE);
+                    EvaluationScale.SCORE_0_20, null, null, null, Boolean.FALSE);
 
             Evaluation eval = mapper.fromCreate(req, assignment);
 
@@ -205,7 +205,7 @@ class EvaluationMapperTest {
                     EvaluationKind.QUIZ, "  Quiz 1  ", null,
                     new BigDecimal("10.00"),
                     LocalDate.of(2026, 4, 1), null,
-                    EvaluationScale.SCORE_0_20, null, null, null);
+                    EvaluationScale.SCORE_0_20, null, null, null, null);
             Evaluation eval = mapper.fromCreate(req, assignment);
             assertThat(eval.getName()).isEqualTo("Quiz 1");
         }
@@ -217,7 +217,7 @@ class EvaluationMapperTest {
                     EvaluationKind.QUIZ, "Quiz 1", "   ",
                     new BigDecimal("10.00"),
                     LocalDate.of(2026, 4, 1), null,
-                    EvaluationScale.SCORE_0_20, null, null, null);
+                    EvaluationScale.SCORE_0_20, null, null, null, null);
             Evaluation eval = mapper.fromCreate(req, assignment);
             assertThat(eval.getDescription()).isNull();
         }
@@ -229,7 +229,7 @@ class EvaluationMapperTest {
                     EvaluationKind.QUIZ, "Quiz 1", null,
                     new BigDecimal("10.00"),
                     LocalDate.of(2026, 4, 1), null,
-                    EvaluationScale.SCORE_0_20, null, null, null);
+                    EvaluationScale.SCORE_0_20, null, null, null, null);
             Evaluation eval = mapper.fromCreate(req, assignment);
             assertThat(eval.getIsActive()).isTrue();
         }
@@ -245,7 +245,7 @@ class EvaluationMapperTest {
             UpdateEvaluationRequest patch = new UpdateEvaluationRequest(
                     EvaluationKind.QUIZ, null, "Updated description",
                     null, LocalDate.of(2026, 5, 15), null,
-                    null, null, null, Boolean.FALSE);
+                    null, null, null, null, Boolean.FALSE);
 
             mapper.applyUpdate(patch, evaluation);
 
@@ -262,7 +262,7 @@ class EvaluationMapperTest {
         void blankDescription() {
             UpdateEvaluationRequest patch = new UpdateEvaluationRequest(
                     null, null, "   ", null, null, null,
-                    null, null, null, null);
+                    null, null, null, null, null);
             mapper.applyUpdate(patch, evaluation);
             assertThat(evaluation.getDescription()).isNull();
         }
@@ -273,7 +273,7 @@ class EvaluationMapperTest {
             String original = evaluation.getName();
             UpdateEvaluationRequest patch = new UpdateEvaluationRequest(
                     null, null, null, null, null, null,
-                    null, null, null, null);
+                    null, null, null, null, null);
             mapper.applyUpdate(patch, evaluation);
             assertThat(evaluation.getName()).isEqualTo(original);
         }
@@ -283,7 +283,7 @@ class EvaluationMapperTest {
         void trimsName() {
             UpdateEvaluationRequest patch = new UpdateEvaluationRequest(
                     null, "  Renamed  ", null, null, null, null,
-                    null, null, null, null);
+                    null, null, null, null, null);
             mapper.applyUpdate(patch, evaluation);
             assertThat(evaluation.getName()).isEqualTo("Renamed");
         }

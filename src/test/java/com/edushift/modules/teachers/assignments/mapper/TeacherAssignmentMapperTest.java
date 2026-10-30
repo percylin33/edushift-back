@@ -3,6 +3,7 @@ package com.edushift.modules.teachers.assignments.mapper;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.edushift.modules.academic.course.entity.Course;
+import com.edushift.modules.academic.levelgrade.entity.Grade;
 import com.edushift.modules.academic.period.entity.AcademicPeriod;
 import com.edushift.modules.academic.period.entity.PeriodType;
 import com.edushift.modules.academic.section.entity.Section;
@@ -25,9 +26,13 @@ class TeacherAssignmentMapperTest {
     }
 
     private Section section() {
+        var grade = new Grade();
+        grade.setPublicUuid(UUID.randomUUID());
+        grade.setName("1ro Primaria");
         var s = new Section();
         s.setPublicUuid(UUID.randomUUID());
         s.setName("Section A");
+        s.setGrade(grade);
         return s;
     }
 
@@ -36,6 +41,8 @@ class TeacherAssignmentMapperTest {
         c.setPublicUuid(UUID.randomUUID());
         c.setCode("MAT");
         c.setName("Matemática");
+        c.setColor("#3B82F6");
+        c.setIcon("target");
         return c;
     }
 
@@ -72,7 +79,10 @@ class TeacherAssignmentMapperTest {
         assertThat(resp.publicUuid()).isEqualTo(a.getPublicUuid());
         assertThat(resp.teacherFullName()).isEqualTo("Ana Diaz");
         assertThat(resp.sectionName()).isEqualTo("Section A");
+        assertThat(resp.gradeName()).isEqualTo("1ro Primaria");
         assertThat(resp.courseCode()).isEqualTo("MAT");
+        assertThat(resp.courseColor()).isEqualTo("#3B82F6");
+        assertThat(resp.courseIcon()).isEqualTo("target");
         assertThat(resp.periodName()).isEqualTo("B1 2026");
         assertThat(resp.active()).isTrue();
         assertThat(resp.unassignedAt()).isNull();
@@ -91,6 +101,9 @@ class TeacherAssignmentMapperTest {
 
         var item = new TeacherAssignmentMapper().toListItem(a);
         assertThat(item.courseCode()).isEqualTo("MAT");
+        assertThat(item.gradeName()).isEqualTo("1ro Primaria");
+        assertThat(item.courseColor()).isEqualTo("#3B82F6");
+        assertThat(item.courseIcon()).isEqualTo("target");
         assertThat(item.active()).isTrue();
     }
 

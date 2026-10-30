@@ -6,6 +6,7 @@ import static org.springframework.security.test.web.servlet.request.SecurityMock
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.edushift.modules.ai.service.ApplicationSheetGeneratorService;
 import com.edushift.modules.ai.service.RubricGeneratorService;
 import com.edushift.modules.ai.service.SessionGeneratorService;
 import com.edushift.modules.auth.security.JwtAuthenticatedPrincipal;
@@ -31,6 +32,7 @@ class AiGenerationControllerTest extends AbstractControllerTest {
     @Autowired MockMvc mockMvc;
     @MockitoBean SessionGeneratorService sessionGeneratorService;
     @MockitoBean RubricGeneratorService rubricGeneratorService;
+    @MockitoBean ApplicationSheetGeneratorService applicationSheetGeneratorService;
     @MockitoBean(name = "aiJobExecutor") Executor aiJobExecutor;
 
     private static JwtAuthenticationToken aiUser() {

@@ -22,6 +22,7 @@ import com.edushift.modules.tenants.entity.Tenant;
 import com.edushift.modules.tenants.entity.TenantStatus;
 import com.edushift.modules.tenants.exception.TenantNotFoundException;
 import com.edushift.modules.tenants.repository.TenantRepository;
+import com.edushift.modules.students.repository.StudentRepository;
 import com.edushift.shared.exception.UnauthorizedException;
 import com.edushift.shared.multitenancy.TenantContext;
 import java.nio.charset.StandardCharsets;
@@ -113,6 +114,7 @@ public class AuthServiceImpl implements AuthService {
 	private final LoginAttemptService loginAttemptService;
 	/** Sprint 17 / BE-17.2: MFA (TOTP) support. */
 	private final MfaService mfaService;
+	private final StudentRepository studentRepository;
 
 	public AuthServiceImpl(TenantRepository tenantRepository,
 	                       UserRepository userRepository,
@@ -123,7 +125,8 @@ public class AuthServiceImpl implements AuthService {
 	                       PlatformTransactionManager txManager,
 	                       AuditLogger auditLogger,
 	                       LoginAttemptService loginAttemptService,
-	                       MfaService mfaService) {
+	                       MfaService mfaService,
+	                       StudentRepository studentRepository) {
 		this.tenantRepository = tenantRepository;
 		this.userRepository = userRepository;
 		this.refreshTokenRepository = refreshTokenRepository;
@@ -134,6 +137,7 @@ public class AuthServiceImpl implements AuthService {
 		this.auditLogger = auditLogger;
 		this.loginAttemptService = loginAttemptService;
 		this.mfaService = mfaService;
+		this.studentRepository = studentRepository;
 	}
 
 	/**
@@ -524,26 +528,30 @@ public class AuthServiceImpl implements AuthService {
 		if (auth == null || !auth.isAuthenticated() || auth.getPrincipal() == null) {
 			throw new UnauthorizedException("MFA_TOKEN_MISSING", "MFA token is required");
 		}
+		if (!(auth.getDetails() instanceof JwtService.JwtClaims claims)
+				|| claims.type() != JwtService.TokenType.MFA) {
+			throw new UnauthorizedException("MFA_TOKEN_INVALID", "A verified MFA token is required");
+		}
 		UUID userPublicUuid = UUID.fromString(auth.getName());
 		Tenant tenant = tenantRepository.findBySlugIgnoreCase(tenantSlug)
 				.orElseThrow(() -> TenantNotFoundException.forSlug(tenantSlug));
 		// Defense in depth: tenant from the JWT must match the slug.
-		JwtService.JwtClaims claims = jwtService.parseAndValidate(
-				(String) auth.getCredentials());
-		if (claims.type() != JwtService.TokenType.MFA
-				|| !tenant.getId().equals(claims.tenantId())) {
+		if (!tenant.getId().equals(claims.tenantId())) {
 			throw new UnauthorizedException("MFA_TOKEN_INVALID",
 					"MFA token does not match the tenant");
 		}
 
 		return TenantContext.runAs(tenant.getId(), () ->
 				txTemplate.execute(status -> {
-					// Verify the TOTP / recovery code.
-					mfaService.verifyChallenge(userPublicUuid, mfaCode);
-
+					// Verify user exists and can authenticate BEFORE issuing session
 					User user = userRepository.findByPublicUuid(userPublicUuid)
 							.orElseThrow(() -> new UnauthorizedException("USER_NOT_FOUND",
 									"User not found"));
+					assertUserCanAuthenticate(user, tenantSlug);
+
+					// Verify the TOTP / recovery code.
+					mfaService.verifyChallenge(userPublicUuid, mfaCode);
+
 					user.recordSuccessfulLogin();
 					userRepository.saveAndFlush(user);
 					loginAttemptService.recordSuccessfulLogin(user.getEmail());
@@ -560,6 +568,108 @@ public class AuthServiceImpl implements AuthService {
 		return userRepository;
 	}
 
+	@Override
+	@Transactional
+	public UserResponse changePassword(com.edushift.modules.auth.dto.ChangePasswordRequest request) {
+		User user = requireCurrentUserEntity();
+		if (!passwordEncoder.matches(request.currentPassword(), user.getPasswordHash())) {
+			throw new UnauthorizedException("BAD_CREDENTIALS",
+					"Current password is incorrect");
+		}
+		if (request.newPassword().equals(request.currentPassword())) {
+			throw new com.edushift.shared.exception.BadRequestException(
+					"PASSWORD_UNCHANGED",
+					"New password must be different from the current one");
+		}
+		user.setPasswordHash(passwordEncoder.encode(request.newPassword()));
+		user.setMustChangePassword(false);
+		User saved = userRepository.saveAndFlush(user);
+		log.info("[auth] password changed -- publicUuid={}", saved.getPublicUuid());
+		return userMapper.toResponse(saved);
+	}
+
+	@Override
+	@Transactional
+	public UserResponse updateMe(com.edushift.modules.auth.dto.UpdateMeRequest request) {
+		User user = requireCurrentUserEntity();
+		if (request.firstName() != null && !request.firstName().isBlank()) {
+			user.setFirstName(request.firstName().trim());
+		}
+		if (request.lastName() != null && !request.lastName().isBlank()) {
+			user.setLastName(request.lastName().trim());
+		}
+		if (request.secondLastName() != null) {
+			String secondLastName = request.secondLastName().trim();
+			user.setSecondLastName(secondLastName.isEmpty() ? null : secondLastName);
+		}
+		if (request.phone() != null) {
+			String phone = request.phone().trim();
+			user.setPhone(phone.isEmpty() ? null : phone);
+		}
+		if (request.email() != null && !request.email().isBlank()) {
+			String nextEmail = request.email().trim().toLowerCase();
+			if (com.edushift.modules.students.provision.SyntheticEmailFactory
+					.isSyntheticAddress(nextEmail)) {
+				throw new com.edushift.shared.exception.BadRequestException(
+						"EMAIL_SYNTHETIC_NOT_ALLOWED",
+						"Provide a real email address");
+			}
+			if (!nextEmail.equalsIgnoreCase(user.getEmail())) {
+				if (userRepository.existsByEmail(nextEmail)) {
+					throw new com.edushift.shared.exception.ConflictException(
+							"EMAIL_ALREADY_EXISTS",
+							"That email is already in use");
+				}
+				user.setEmail(nextEmail);
+				user.setEmailSource(com.edushift.modules.auth.entity.EmailSource.REAL);
+				user.setEmailVerified(false);
+			}
+			// Unchanged address that is still synthetic must stay SYNTHETIC
+			// (CRED-7 first-login: real email is optional).
+		}
+		if (studentRepository != null) studentRepository.findByUserId(user.getPublicUuid()).ifPresent(student -> {
+			String oldStudentFullName = student.fullName();
+			if (request.firstName() != null && !request.firstName().isBlank()) {
+				student.setFirstName(user.getFirstName());
+			}
+			if (request.lastName() != null && !request.lastName().isBlank()) {
+				student.setLastName(user.getLastName());
+			}
+			if (request.secondLastName() != null) {
+				student.setSecondLastName(user.getSecondLastName());
+			}
+			studentRepository.save(student);
+			if (!oldStudentFullName.equals(student.fullName())) {
+				auditLogger.log(AuditAction.UPDATE, "student", student.getPublicUuid(),
+						"Student legal name updated from self-service profile",
+						java.util.Map.of("linkedUserPublicUuid", user.getPublicUuid().toString()),
+						"students");
+			}
+		});
+		User saved = userRepository.saveAndFlush(user);
+		auditLogger.log(AuditAction.UPDATE, "user", saved.getPublicUuid(),
+				"User profile updated", java.util.Map.of("source", "self-service"), "auth");
+		return userMapper.toResponse(saved);
+	}
+
+	private User requireCurrentUserEntity() {
+		Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+		if (auth == null || !auth.isAuthenticated() || auth.getPrincipal() == null) {
+			throw new UnauthorizedException("Authentication required");
+		}
+		UUID publicUuid;
+		try {
+			publicUuid = UUID.fromString(auth.getName());
+		}
+		catch (IllegalArgumentException e) {
+			throw new UnauthorizedException("INVALID_PRINCIPAL",
+					"Authenticated principal is not a valid UUID");
+		}
+		return userRepository.findByPublicUuid(publicUuid)
+				.orElseThrow(() -> new UnauthorizedException("USER_NOT_FOUND",
+						"Authenticated user no longer exists"));
+	}
+
 	private void persistRefreshToken(String rawToken, User user, UUID parentTokenId) {
 		String hash = sha256Hex(rawToken);
 		// Pre-check: si este hash ya existe para este user, es una rotación
@@ -572,6 +682,16 @@ public class AuthServiceImpl implements AuthService {
 					user.getId());
 			return;
 		}
+
+		// SECURITY FIX: Limit active refresh tokens per user (DoS prevention)
+		long activeCountLong = refreshTokenRepository.countByUserIdAndRevokedAtIsNullAndExpiresAtAfter(
+				user.getId(), Instant.now());
+		int activeCount = (int) Math.min(activeCountLong, Integer.MAX_VALUE);
+		if (activeCount >= 10) {
+			int pruned = refreshTokenRepository.revokeOldestActiveTokens(user.getId(), Instant.now(), activeCount - 9);
+			log.info("[auth] pruned {} oldest refresh tokens for user {}", pruned, user.getId());
+		}
+
 		RefreshToken token = new RefreshToken();
 		token.setTokenHash(hash);
 		token.setUserId(user.getId());

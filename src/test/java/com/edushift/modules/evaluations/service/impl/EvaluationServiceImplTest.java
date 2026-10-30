@@ -65,6 +65,7 @@ class EvaluationServiceImplTest {
 	@Mock private com.edushift.modules.evaluations.graderecord.repository.GradeRecordRepository gradeRecordRepository;
 	@Mock private com.edushift.modules.students.enrollments.repository.StudentEnrollmentRepository studentEnrollmentRepository;
 	@Mock private org.springframework.context.ApplicationEventPublisher eventPublisher;
+	@Mock private com.edushift.modules.evaluations.graderegister.service.GradeRegisterTemplateService gradeRegisterTemplateService;
 	@Spy private EvaluationMapper mapper = new EvaluationMapper();
 
 	@InjectMocks private EvaluationServiceImpl service;
@@ -122,8 +123,8 @@ class EvaluationServiceImplTest {
 			TeacherAssignment assignment = newAssignment(newCourse("MAT"));
 			when(assignmentRepository.findByPublicUuid(assignment.getPublicUuid()))
 					.thenReturn(Optional.of(assignment));
-			when(evaluationRepository.findByAssignmentAndNameIgnoreCase(
-					assignment, "Tarea 1")).thenReturn(Optional.empty());
+			when(evaluationRepository.findByAssignmentAndCategoryAndNameIgnoreCase(
+					assignment, null, "Tarea 1")).thenReturn(Optional.empty());
 			when(evaluationRepository.saveAndFlush(any())).thenAnswer(inv -> {
 				Evaluation e = inv.getArgument(0);
 				setField(e, "publicUuid", UUID.randomUUID());
@@ -135,7 +136,7 @@ class EvaluationServiceImplTest {
 					EvaluationKind.TASK, "Tarea 1", "Description",
 					BigDecimal.valueOf(1.5),
 					LocalDate.of(2026, 5, 1), LocalDate.of(2026, 5, 15),
-					EvaluationScale.SCORE_0_20, null, null, null);
+					EvaluationScale.SCORE_0_20, null, null, null, null);
 
 			EvaluationResponse response = service.createEvaluation(
 					assignment.getPublicUuid(), req);
@@ -153,13 +154,13 @@ class EvaluationServiceImplTest {
 					EvaluationKind.TASK, EvaluationScale.SCORE_0_20);
 			when(assignmentRepository.findByPublicUuid(assignment.getPublicUuid()))
 					.thenReturn(Optional.of(assignment));
-			when(evaluationRepository.findByAssignmentAndNameIgnoreCase(
-					assignment, "Tarea 1")).thenReturn(Optional.of(existing));
+			when(evaluationRepository.findByAssignmentAndCategoryAndNameIgnoreCase(
+					assignment, null, "Tarea 1")).thenReturn(Optional.of(existing));
 
 			CreateEvaluationRequest req = new CreateEvaluationRequest(
 					EvaluationKind.TASK, "Tarea 1", null, BigDecimal.ONE,
 					LocalDate.of(2026, 5, 1), null,
-					EvaluationScale.SCORE_0_20, null, null, null);
+					EvaluationScale.SCORE_0_20, null, null, null, null);
 
 			assertThatThrownBy(() -> service.createEvaluation(
 					assignment.getPublicUuid(), req))
@@ -178,7 +179,7 @@ class EvaluationServiceImplTest {
 			CreateEvaluationRequest req = new CreateEvaluationRequest(
 					EvaluationKind.TASK, "Tarea 1", null, BigDecimal.ONE,
 					LocalDate.of(2026, 5, 15), LocalDate.of(2026, 5, 1),
-					EvaluationScale.SCORE_0_20, null, null, null);
+					EvaluationScale.SCORE_0_20, null, null, null, null);
 
 			assertThatThrownBy(() -> service.createEvaluation(
 					assignment.getPublicUuid(), req))
@@ -196,7 +197,7 @@ class EvaluationServiceImplTest {
 			CreateEvaluationRequest req = new CreateEvaluationRequest(
 					EvaluationKind.EXAM, "Examen", null, BigDecimal.ONE,
 					LocalDate.of(2026, 5, 1), null,
-					EvaluationScale.LITERAL_NA, null, null, null);
+					EvaluationScale.LITERAL_NA, null, null, null, null);
 
 			assertThatThrownBy(() -> service.createEvaluation(
 					assignment.getPublicUuid(), req))
@@ -210,8 +211,8 @@ class EvaluationServiceImplTest {
 			TeacherAssignment assignment = newAssignment(newCourse("MAT"));
 			when(assignmentRepository.findByPublicUuid(assignment.getPublicUuid()))
 					.thenReturn(Optional.of(assignment));
-			when(evaluationRepository.findByAssignmentAndNameIgnoreCase(
-					assignment, "Tarea 1")).thenReturn(Optional.empty());
+			when(evaluationRepository.findByAssignmentAndCategoryAndNameIgnoreCase(
+					assignment, null, "Tarea 1")).thenReturn(Optional.empty());
 			when(evaluationRepository.saveAndFlush(any()))
 					.thenThrow(new DataIntegrityViolationException(
 							"uk_evaluations_tenant_assignment_name_ci"));
@@ -219,7 +220,7 @@ class EvaluationServiceImplTest {
 			CreateEvaluationRequest req = new CreateEvaluationRequest(
 					EvaluationKind.TASK, "Tarea 1", null, BigDecimal.ONE,
 					LocalDate.of(2026, 5, 1), null,
-					EvaluationScale.SCORE_0_20, null, null, null);
+					EvaluationScale.SCORE_0_20, null, null, null, null);
 
 			assertThatThrownBy(() -> service.createEvaluation(
 					assignment.getPublicUuid(), req))
@@ -235,16 +236,23 @@ class EvaluationServiceImplTest {
 			Unit foreignUnit = newUnit(otherCourse, "Unidad Hackeada", 1);
 			when(assignmentRepository.findByPublicUuid(assignment.getPublicUuid()))
 					.thenReturn(Optional.of(assignment));
-			when(evaluationRepository.findByAssignmentAndNameIgnoreCase(
-					assignment, "Tarea 1")).thenReturn(Optional.empty());
+			when(evaluationRepository.findByAssignmentAndCategoryAndNameIgnoreCase(
+					assignment, null, "Tarea 1")).thenReturn(Optional.empty());
 			when(unitRepository.findByPublicUuid(foreignUnit.getPublicUuid()))
 					.thenReturn(Optional.of(foreignUnit));
 
 			CreateEvaluationRequest req = new CreateEvaluationRequest(
-					EvaluationKind.TASK, "Tarea 1", null, BigDecimal.ONE,
-					LocalDate.of(2026, 5, 1), null,
+					EvaluationKind.TASK,
+					"Tarea 1",
+					null,
+					BigDecimal.ONE,
+					LocalDate.of(2026, 5, 1),
+					null,
 					EvaluationScale.SCORE_0_20,
-					foreignUnit.getPublicUuid().toString(), null, null);
+					foreignUnit.getPublicUuid().toString(),
+					null,
+					null,
+					null);
 
 			assertThatThrownBy(() -> service.createEvaluation(
 					assignment.getPublicUuid(), req))
@@ -275,7 +283,7 @@ class EvaluationServiceImplTest {
 			EvaluationResponse response = service.updateEvaluation(
 					existing.getPublicUuid(),
 					new UpdateEvaluationRequest(null, null, "Updated desc",
-							null, null, null, null, null, null, null));
+							null, null, null, null, null, null, null, null));
 
 			assertThat(response.description()).isEqualTo("Updated desc");
 			assertThat(response.name()).isEqualTo("Tarea 1");
@@ -297,7 +305,7 @@ class EvaluationServiceImplTest {
 			EvaluationResponse response = service.updateEvaluation(
 					existing.getPublicUuid(),
 					new UpdateEvaluationRequest(null, null, "anything",
-							null, null, null, null, null, null, null));
+							null, null, null, null, null, null, null, null));
 
 			assertThat(response.gradeCount()).isEqualTo(7L);
 		}
@@ -313,7 +321,7 @@ class EvaluationServiceImplTest {
 
 			EvaluationResponse response = service.updateEvaluation(
 					existing.getPublicUuid(), new UpdateEvaluationRequest(
-							null, null, null, null, null, null, null, null, null, null));
+							null, null, null, null, null, null, null, null, null, null, null));
 
 			assertThat(response.name()).isEqualTo("Tarea 1");
 			verify(evaluationRepository, never()).saveAndFlush(any());
@@ -333,8 +341,18 @@ class EvaluationServiceImplTest {
 
 			assertThatThrownBy(() -> service.updateEvaluation(
 					existing.getPublicUuid(),
-					new UpdateEvaluationRequest(null, null, "x",
-							null, null, null, null, null, null, null)))
+					new UpdateEvaluationRequest(
+					null,
+					null,
+					"x",
+					null,
+					null,
+					null,
+					null,
+					null,
+					null,
+					null,
+					null)))
 					.isInstanceOf(ConflictException.class)
 					.hasMessageContaining("CLOSED");
 		}
@@ -354,7 +372,7 @@ class EvaluationServiceImplTest {
 			assertThatThrownBy(() -> service.updateEvaluation(
 					existing.getPublicUuid(),
 					new UpdateEvaluationRequest(EvaluationKind.EXAM, null, null,
-							null, null, null, null, null, null, null)))
+							null, null, null, null, null, null, null, null)))
 					.isInstanceOf(ConflictException.class)
 					.hasMessageContaining("PUBLISHED");
 		}
@@ -375,7 +393,7 @@ class EvaluationServiceImplTest {
 			EvaluationResponse response = service.updateEvaluation(
 					existing.getPublicUuid(),
 					new UpdateEvaluationRequest(null, null, "Updated",
-							null, null, null, null, null, null, null));
+							null, null, null, null, null, null, null, null));
 
 			assertThat(response.description()).isEqualTo("Updated");
 		}
@@ -393,7 +411,7 @@ class EvaluationServiceImplTest {
 			assertThatThrownBy(() -> service.updateEvaluation(
 					existing.getPublicUuid(),
 					new UpdateEvaluationRequest(EvaluationKind.COMPETENCY, null, null,
-							null, null, null, null, null, null, null)))
+							null, null, null, null, null, null, null, null)))
 					.isInstanceOf(BadRequestException.class)
 					.hasMessageContaining("not compatible");
 		}

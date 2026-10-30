@@ -37,6 +37,8 @@ public class DayScheduleTemplateMapper {
 				template.getDayStart(),
 				template.getDayEnd(),
 				template.getPeriodMinutes(),
+				template.getReviewedAt(),
+				template.getReviewedByUuid(),
 				blocks == null ? List.of() : blocks
 		);
 	}

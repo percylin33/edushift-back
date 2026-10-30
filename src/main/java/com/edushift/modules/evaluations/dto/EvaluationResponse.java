@@ -22,6 +22,8 @@ public record EvaluationResponse(
 		AssignmentRef assignment,
 		UUID unitPublicUuid,
 		UUID learningSessionPublicUuid,
+		UUID categoryPublicUuid,
+		String categoryName,
 		EvaluationKind kind,
 		String name,
 		String description,

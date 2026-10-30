@@ -57,6 +57,7 @@ public class GradeRecordServiceImpl implements GradeRecordService {
     private static final Set<String> LITERAL_AD_VALUES = Set.of("AD", "A");
     private static final Set<String> LITERAL_NA_VALUES = Set.of("NA", "A");
     private static final Set<String> LITERAL_A_B_C_D_VALUES = Set.of("A", "B", "C", "D");
+    private static final Set<String> LITERAL_CNEB_VALUES = Set.of("AD", "A", "B", "C");
 
     private final GradeRecordRepository gradeRecordRepository;
     private final EvaluationRepository evaluationRepository;
@@ -282,6 +283,8 @@ public class GradeRecordServiceImpl implements GradeRecordService {
             case LITERAL_NA -> validateLiteral(scale, literal, score, LITERAL_NA_VALUES);
             case LITERAL_A_B_C_D ->
                     validateLiteral(scale, literal, score, LITERAL_A_B_C_D_VALUES);
+            case LITERAL_CNEB ->
+                    validateLiteral(scale, literal, score, LITERAL_CNEB_VALUES);
         }
     }
 

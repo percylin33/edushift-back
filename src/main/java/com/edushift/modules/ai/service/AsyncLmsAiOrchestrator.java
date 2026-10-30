@@ -119,10 +119,11 @@ public class AsyncLmsAiOrchestrator {
      */
     public UUID startGeneration(SuggestQuizQuestionsRequest request) {
         UUID generationUuid = self.persistPendingRow(request);
+        UUID reservationId = quotaService.detachReservation();
         // After persistPendingRow returns, the row is committed and
         // visible to any other transaction. Safe to dispatch the
         // async worker.
-        self.runOnExecutor(generationUuid, request);
+        self.runOnExecutor(generationUuid, request, reservationId);
         return generationUuid;
     }
 
@@ -146,6 +147,7 @@ public class AsyncLmsAiOrchestrator {
         String model = LmsAiService.resolveMiniMaxModel(settings.getDefaultModel());
         LlmRequest llmRequest = promptBuilder.build(
                 request.topic(), request.count(), request.questionType(), model);
+        quotaService.reserveForRequest(llmRequest);
 
         // 3. Persist the PENDING row.
         AiGeneration gen = new AiGeneration();
@@ -182,16 +184,33 @@ public class AsyncLmsAiOrchestrator {
      */
     @Async("aiJobExecutor")
     @Transactional
+    public void runOnExecutor(UUID generationPublicUuid, SuggestQuizQuestionsRequest request,
+                              UUID reservationId) {
+        if (reservationId != null) quotaService.bindReservation(reservationId);
+        try {
+            runBoundJob(generationPublicUuid, request);
+        } finally {
+            quotaService.clearReservation();
+        }
+    }
+
+    /** Compatibility entry point for direct callers; async dispatch uses the ticketed overload. */
     public void runOnExecutor(UUID generationPublicUuid, SuggestQuizQuestionsRequest request) {
+        runOnExecutor(generationPublicUuid, request, null);
+    }
+
+    private void runBoundJob(UUID generationPublicUuid, SuggestQuizQuestionsRequest request) {
         var maybeGen = generationRepo.findByPublicUuid(generationPublicUuid);
         if (maybeGen.isEmpty()) {
             log.warn("AI async job fired for missing row {} — skipping (deleted between submit and pickup?)",
                     generationPublicUuid);
+            quotaService.incrementCounters(false, 0, 0);
             return;
         }
         AiGeneration gen = maybeGen.get();
         if (gen.getStatus() == AiGeneration.Status.CANCELLED) {
             log.info("AI async job fired for CANCELLED row {} — skipping", generationPublicUuid);
+            quotaService.incrementCounters(false, 0, 0);
             return;
         }
 

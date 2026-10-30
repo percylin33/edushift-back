@@ -56,6 +56,13 @@ public class AiChatSession extends TenantAwareEntity {
     @Column(name = "user_id", nullable = false)
     private UUID userId;
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "agent_type", length = 12)
+    private AiAgentType agentType;
+
+    @Column(name = "subject_public_uuid")
+    private UUID subjectPublicUuid;
+
     @Column(name = "title", nullable = false, length = 200)
     private String title = "Nueva conversacion";
 

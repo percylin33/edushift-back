@@ -6,8 +6,12 @@ import com.edushift.modules.notifications.realtime.RealtimeService;
 import com.edushift.modules.notifications.service.NotificationService;
 import com.edushift.modules.notifications.service.NotificationService.NotifyCommand;
 import com.edushift.modules.notifications.service.RecipientEmailResolver;
+import com.edushift.modules.students.provision.SyntheticEmailFactory;
 import com.edushift.shared.multitenancy.TenantContext;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.UUID;
 import java.util.function.Supplier;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -76,14 +80,24 @@ public class NotificationEventListener {
 		}
 		runAsTenant(event.tenantId(), () -> {
 			try {
-				List<NotifyCommand> cmds = event.recipients().stream()
+				List<NotificationEvent.Recipient> recipients = event.recipients();
+				List<UUID> missingEmails = new ArrayList<>();
+				for (NotificationEvent.Recipient recipient : recipients) {
+					if (recipient.userId() != null && !hasDeliverableEmail(recipient.email())) {
+						missingEmails.add(recipient.userId());
+					}
+				}
+				Map<UUID, String> resolvedEmails = recipientEmailResolver.resolveEmails(missingEmails);
+				List<NotifyCommand> cmds = recipients.stream()
 						.map(r -> NotifyCommand.builder()
 								// DEBT-NOTIF-4 (Sprint 9A): publishers pass
 								// publicUuid directly now — the defensive
 								// resolver was removed. Recipient.userId is
 								// users(public_uuid), the FK target.
 								.recipient(r.userId())
-								.email(recipientEmailResolver.resolveOrFallback(r.userId(), r.email()))
+								.email(hasDeliverableEmail(r.email())
+										? r.email().trim()
+										: resolvedEmails.get(r.userId()))
 								.template(event.templateKey())
 								.category(event.category())
 								.channel(Channel.BOTH)
@@ -121,6 +135,13 @@ public class NotificationEventListener {
 	 * here as a single point to instrument (logging, metrics) without
 	 * touching every call site.
 	 */
+	private static boolean hasDeliverableEmail(String email) {
+		if (email == null || email.isBlank()) {
+			return false;
+		}
+		return !SyntheticEmailFactory.isSyntheticAddress(email.trim());
+	}
+
 	private static <T> T runAsTenant(java.util.UUID tenantId, Supplier<T> action) {
 		return TenantContext.runAs(tenantId, action);
 	}

@@ -4,6 +4,7 @@ import com.edushift.modules.students.enrollments.dto.CreateEnrollmentRequest;
 import com.edushift.modules.students.enrollments.dto.EnrollmentListItem;
 import com.edushift.modules.students.enrollments.dto.EnrollmentResponse;
 import com.edushift.modules.students.enrollments.dto.SectionStudentRosterItem;
+import com.edushift.modules.students.enrollments.dto.UpdateEnrollmentRequest;
 import com.edushift.modules.students.enrollments.dto.WithdrawEnrollmentRequest;
 import com.edushift.modules.students.enrollments.service.StudentEnrollmentService;
 import com.edushift.shared.api.ApiResponse;
@@ -19,6 +20,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -35,6 +37,7 @@ import org.springframework.web.bind.annotation.RestController;
  *   <tr><th>Method</th><th>Path</th><th>Description</th></tr>
  *   <tr><td>POST  </td><td>/students/&#123;studentUuid&#125;/enrollments</td><td>Create enrollment</td></tr>
  *   <tr><td>GET   </td><td>/students/&#123;studentUuid&#125;/enrollments</td><td>Full enrollment timeline</td></tr>
+ *   <tr><td>PATCH </td><td>/enrollments/&#123;publicUuid&#125;</td><td>Update enrolledAt (ACTIVE)</td></tr>
  *   <tr><td>POST  </td><td>/enrollments/&#123;publicUuid&#125;/withdraw  </td><td>Soft-end enrollment</td></tr>
  *   <tr><td>GET   </td><td>/academic/sections/&#123;sectionUuid&#125;/students</td><td>Active section roster</td></tr>
  * </table>
@@ -59,7 +62,7 @@ public class StudentEnrollmentController {
 	@PostMapping("/students/{studentUuid}/enrollments")
 	@ResponseStatus(HttpStatus.CREATED)
 	@SecurityRequirement(name = "bearerAuth")
-	@PreAuthorize("hasRole('TENANT_ADMIN')")
+	@PreAuthorize("hasRole('TENANT_ADMIN') or hasAuthority('ENROLLMENTS:MANAGE')")
 	@Operation(
 			summary = "Enroll a student in a section for a given year",
 			description = "Validations (in order): section.year must equal "
@@ -79,7 +82,7 @@ public class StudentEnrollmentController {
 
 	@GetMapping("/students/{studentUuid}/enrollments")
 	@SecurityRequirement(name = "bearerAuth")
-	@PreAuthorize("hasRole('TENANT_ADMIN')")
+	@PreAuthorize("hasRole('TENANT_ADMIN') or hasAuthority('ENROLLMENTS:READ')")
 	@Operation(
 			summary = "List the full enrollment history of a student",
 			description = "Returns ACTIVE and terminal rows ordered by "
@@ -92,12 +95,33 @@ public class StudentEnrollmentController {
 	}
 
 	// =========================================================================
+	// /enrollments/{uuid}
+	// =========================================================================
+
+	@PatchMapping("/enrollments/{publicUuid}")
+	@SecurityRequirement(name = "bearerAuth")
+	@PreAuthorize("hasRole('TENANT_ADMIN') or hasAuthority('ENROLLMENTS:MANAGE')")
+	@Operation(
+			summary = "Update enrolledAt on an ACTIVE enrollment",
+			description = "enrolledAt must fall inside the academic year. "
+					+ "Errors: 409 ENROLLMENT_DATE_OUT_OF_YEAR, "
+					+ "409 ENROLLMENT_NOT_ACTIVE, 404 RESOURCE_NOT_FOUND."
+	)
+	public ResponseEntity<ApiResponse<EnrollmentResponse>> update(
+			@PathVariable UUID publicUuid,
+			@Valid @RequestBody UpdateEnrollmentRequest request
+	) {
+		EnrollmentResponse response = service.updateEnrollment(publicUuid, request);
+		return ResponseEntity.ok(ApiResponse.ok(response));
+	}
+
+	// =========================================================================
 	// /enrollments/{uuid}/withdraw
 	// =========================================================================
 
 	@PostMapping("/enrollments/{publicUuid}/withdraw")
 	@SecurityRequirement(name = "bearerAuth")
-	@PreAuthorize("hasRole('TENANT_ADMIN')")
+	@PreAuthorize("hasRole('TENANT_ADMIN') or hasAuthority('ENROLLMENTS:MANAGE')")
 	@Operation(
 			summary = "Soft-end an enrollment",
 			description = "Transitions the row to WITHDRAWN, TRANSFERRED or "
@@ -120,7 +144,7 @@ public class StudentEnrollmentController {
 
 	@GetMapping("/academic/sections/{sectionUuid}/students")
 	@SecurityRequirement(name = "bearerAuth")
-	@PreAuthorize("hasRole('TENANT_ADMIN')")
+	@PreAuthorize("hasRole('TENANT_ADMIN') or hasAuthority('ENROLLMENTS:READ')")
 	@Operation(
 			summary = "List the currently active students of a section",
 			description = "Roster ordered alphabetically by last name. Only "

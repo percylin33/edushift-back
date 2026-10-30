@@ -1,6 +1,7 @@
 package com.edushift.modules.notifications.repository;
 
 import com.edushift.modules.notifications.entity.Announcement;
+import com.edushift.modules.notifications.entity.Announcement.Status;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.data.domain.Page;
@@ -17,7 +18,7 @@ public interface AnnouncementRepository extends JpaRepository<Announcement, UUID
     @Query("""
             SELECT a FROM Announcement a
             WHERE a.status = com.edushift.modules.notifications.entity.Announcement.Status.PUBLISHED
-            ORDER BY a.publishedAt DESC
+            ORDER BY a.pinned DESC, a.publishedAt DESC
             """)
     Page<Announcement> findPublished(Pageable pageable);
 
@@ -52,7 +53,7 @@ public interface AnnouncementRepository extends JpaRepository<Announcement, UUID
                     AND r.userId = :userId
                 )
               )
-            ORDER BY a.publishedAt DESC
+            ORDER BY a.pinned DESC, a.publishedAt DESC
             """)
     Page<Announcement> findPublishedForUser(
             @Param("tenantId") UUID tenantId,
@@ -61,9 +62,34 @@ public interface AnnouncementRepository extends JpaRepository<Announcement, UUID
 
     @Query("""
             SELECT a FROM Announcement a
-            ORDER BY a.createdAt DESC
+            ORDER BY a.pinned DESC, a.createdAt DESC
             """)
     Page<Announcement> findAllForAdmin(Pageable pageable);
+
+    @Query("""
+            SELECT a FROM Announcement a
+            WHERE a.status = :status
+            ORDER BY a.pinned DESC, a.createdAt DESC
+            """)
+    Page<Announcement> findForAdminByStatus(@Param("status") Status status, Pageable pageable);
+
+    @Query("""
+            SELECT a FROM Announcement a
+            WHERE a.authorUserId = :authorId
+            ORDER BY a.pinned DESC, a.createdAt DESC
+            """)
+    Page<Announcement> findForAdminByAuthor(@Param("authorId") UUID authorId, Pageable pageable);
+
+    @Query("""
+            SELECT a FROM Announcement a
+            WHERE a.authorUserId = :authorId
+              AND a.status = :status
+            ORDER BY a.pinned DESC, a.createdAt DESC
+            """)
+    Page<Announcement> findForAdminByAuthorAndStatus(
+            @Param("authorId") UUID authorId,
+            @Param("status") Status status,
+            Pageable pageable);
 
     Optional<Announcement> findByPublicUuid(UUID publicUuid);
 

@@ -17,18 +17,18 @@ class FrontendLinksTest {
 	@Test
 	void userInvitationPinsTheSchool() {
 		assertThat(links.userInvitation("tok-1", "Colegio-De-Percy"))
-				.isEqualTo("http://localhost:4201/invitation/tok-1?tenant=colegio-de-percy");
+				.isEqualTo("http://colegiodepercy.localhost:4201/invitation/tok-1");
 	}
 
 	@Test
 	void passwordResetPinsSchoolAndToken() {
 		assertThat(links.passwordReset("jwt.token", "tecnosur"))
-				.isEqualTo("http://localhost:4201/auth/reset-password?tenant=tecnosur&token=jwt.token");
+				.isEqualTo("http://tecnosur.localhost:4201/auth/reset-password?token=jwt.token");
 	}
 
 	@Test
 	void schoolLoginPinsTheSchool() {
 		assertThat(links.schoolLogin("demo"))
-				.isEqualTo("http://localhost:4201/auth/login?tenant=demo");
+				.isEqualTo("http://demo.localhost:4201/auth/login");
 	}
 }

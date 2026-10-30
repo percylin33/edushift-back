@@ -53,6 +53,9 @@ public interface DayScheduleTemplateService {
 	 */
 	DayTemplateResponse applyDayPlan(UUID templateUuid, ApplyDayPlanRequest request);
 
+	/** Records the authenticated tenant admin's review of a complete day plan. */
+	DayTemplateResponse markReviewed(UUID templateUuid);
+
 	/** Suggested academic periods for a resolved section template. */
 	List<SuggestedPeriodItem> listSuggestedPeriodsForSection(Section section);
 }

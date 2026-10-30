@@ -20,7 +20,7 @@ class EnrollmentDtoTest {
         UUID sectionId = UUID.randomUUID();
         UUID yearId = UUID.randomUUID();
         var r = new EnrollmentResponse(id, studentId, "Ana Diaz", "12345678",
-                sectionId, "Section A", yearId, "2026",
+                sectionId, "Section A", "1ro Primaria", yearId, "2026",
                 LocalDate.of(2026, 3, 1), null, StudentEnrollmentStatus.ACTIVE, true,
                 "Welcome!", Instant.now(), Instant.now());
         assertThat(r.publicUuid()).isEqualTo(id);
@@ -34,7 +34,7 @@ class EnrollmentDtoTest {
     void enrollmentListItem() {
         UUID id = UUID.randomUUID();
         var item = new EnrollmentListItem(id, UUID.randomUUID(), "Ana",
-                UUID.randomUUID(), "Section A", UUID.randomUUID(), "2026",
+                UUID.randomUUID(), "Section A", "1ro Primaria", UUID.randomUUID(), "2026",
                 LocalDate.of(2026, 3, 1), null, StudentEnrollmentStatus.ACTIVE, true);
         assertThat(item.publicUuid()).isEqualTo(id);
         assertThat(item.active()).isTrue();

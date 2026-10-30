@@ -21,10 +21,22 @@ public class SafeTextValidator implements ConstraintValidator<SafeText, CharSequ
 			if (c == '<' || c == '>' || c == '\0') {
 				return false;
 			}
+			// Rechazar caracteres de control ASCII
 			if (c < 0x20 && c != '\t' && c != '\n' && c != '\r') {
 				return false;
 			}
-			if (c == 0x7F) {
+			// Rechazar DEL y caracteres de control C1
+			if (c == 0x7F || (c >= 0x80 && c <= 0x9F)) {
+				return false;
+			}
+			// Rechazar caracteres Unicode peligrosos
+			if (c == 0x202E || c == 0x202D) {  // RTL/LTR override
+				return false;
+			}
+			if (c == 0x200E || c == 0x200F) {  // LTR/RTL mark
+				return false;
+			}
+			if (c == 0xFEFF) {  // Zero-width no-break space (BOM)
 				return false;
 			}
 		}

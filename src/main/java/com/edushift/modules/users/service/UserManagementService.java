@@ -1,5 +1,7 @@
 package com.edushift.modules.users.service;
 
+import com.edushift.modules.users.dto.AdminResetPasswordRequest;
+import com.edushift.modules.users.dto.AdminResetPasswordResponse;
 import com.edushift.modules.users.dto.AssignRolesRequest;
 import com.edushift.modules.users.dto.UpdateUserRequest;
 import com.edushift.modules.users.dto.UserDetailResponse;
@@ -68,7 +70,9 @@ public interface UserManagementService {
 	 * Replaces the user's roles with the set in {@code request}. Throws
 	 * {@code 400 INVALID_ROLE} when the request contains an unknown role
 	 * name; throws {@code 409 LAST_ADMIN_PROTECTION} when the operation
-	 * would strand the tenant without an admin.
+	 * would strand the tenant without an admin. Profile-backed roles
+	 * ({@code TEACHER}, {@code STUDENT}, {@code PARENT}) can only be changed
+	 * through their corresponding domain profile operations.
 	 */
 	UserDetailResponse assignRoles(UUID publicUuid, AssignRolesRequest request);
 
@@ -89,10 +93,15 @@ public interface UserManagementService {
 	UserDetailResponse enableUser(UUID publicUuid);
 
 	/**
-	 * Initiates an admin-driven password reset. In the current sprint
-	 * this method only flags the user's account; the actual reset email
-	 * is delivered by the {@code notifications} module (Sprint 9).
+	 * Admin-driven password reset with two delivery modes:
+	 * <ul>
+	 *   <li>{@code EMAIL} — queues the forgot-password mail (requires
+	 *       {@code emailSource=REAL}).</li>
+	 *   <li>{@code TEMPORARY} — sets a random temp password, forces
+	 *       {@code mustChangePassword}, returns plaintext once.</li>
+	 * </ul>
+	 * {@code request} may be {@code null} (defaults to {@code EMAIL}).
 	 */
-	void resetPassword(UUID publicUuid);
+	AdminResetPasswordResponse resetPassword(UUID publicUuid, AdminResetPasswordRequest request);
 
 }

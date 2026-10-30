@@ -1,8 +1,10 @@
 package com.edushift.modules.evaluations.repository;
 
 import com.edushift.modules.academic.unit.entity.Unit;
+import com.edushift.modules.academic.year.entity.AcademicYear;
 import com.edushift.modules.evaluations.entity.Evaluation;
 import com.edushift.modules.evaluations.entity.EvaluationStatus;
+import com.edushift.modules.evaluations.graderegister.entity.GradeCategory;
 import com.edushift.modules.sessions.learning.entity.LearningSession;
 import com.edushift.modules.teachers.assignments.entity.TeacherAssignment;
 import java.time.LocalDate;
@@ -61,9 +63,27 @@ public interface EvaluationRepository extends JpaRepository<Evaluation, UUID> {
 			@Param("to") LocalDate to);
 
 	/**
-	 * Case-insensitive uniqueness probe scoped to a single assignment.
-	 * Used by the service to surface {@code EVAL_NAME_EXISTS} (409)
-	 * instead of a generic constraint violation.
+	 * Case-insensitive uniqueness probe scoped to a single assignment
+	 * <strong>and</strong> category (null category = uncategorised bucket).
+	 * Used by the service to surface {@code EVAL_NAME_EXISTS} (409).
+	 */
+	@Query("""
+			select e from Evaluation e
+			where e.teacherAssignment = :assignment
+			  and lower(e.name) = lower(:name)
+			  and (
+			        (:category is null and e.category is null)
+			     or (:category is not null and e.category = :category)
+			      )
+			""")
+	Optional<Evaluation> findByAssignmentAndCategoryAndNameIgnoreCase(
+			@Param("assignment") TeacherAssignment assignment,
+			@Param("category") GradeCategory category,
+			@Param("name") String name);
+
+	/**
+	 * @deprecated Prefer {@link #findByAssignmentAndCategoryAndNameIgnoreCase}.
+	 * Kept for any legacy callers; scans whole assignment.
 	 */
 	@Query("""
 			select e from Evaluation e
@@ -73,6 +93,16 @@ public interface EvaluationRepository extends JpaRepository<Evaluation, UUID> {
 	Optional<Evaluation> findByAssignmentAndNameIgnoreCase(
 			@Param("assignment") TeacherAssignment assignment,
 			@Param("name") String name);
+
+	/**
+	 * Evaluations linked to a grade category (for cascade soft-delete on
+	 * category removal). Soft-deleted rows are excluded by {@code @SQLRestriction}.
+	 */
+	@Query("""
+			select e from Evaluation e
+			where e.category = :category
+			""")
+	List<Evaluation> findAllByCategory(@Param("category") GradeCategory category);
 
 	/**
 	 * Cross-tenant lookup of an evaluation by public UUID, bypassing the
@@ -109,4 +139,17 @@ public interface EvaluationRepository extends JpaRepository<Evaluation, UUID> {
 			where e.learningSession = :session
 			""")
 	boolean existsByLearningSession(@Param("session") LearningSession session);
+
+	/**
+	 * Count evaluations linked to any of the given grade categories
+	 * within a single academic year (replace-template gate).
+	 */
+	@Query("""
+			select count(e) from Evaluation e
+			where e.category in :categories
+			  and e.teacherAssignment.academicPeriod.academicYear = :year
+			""")
+	long countByCategoriesAndYear(
+			@Param("categories") List<GradeCategory> categories,
+			@Param("year") AcademicYear year);
 }

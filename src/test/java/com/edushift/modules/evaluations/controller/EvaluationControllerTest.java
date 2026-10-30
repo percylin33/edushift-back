@@ -67,7 +67,8 @@ class EvaluationControllerTest {
     private EvaluationResponse stubResponse(UUID publicUuid, EvaluationStatus status) {
         return new EvaluationResponse(
                 publicUuid,
-                new AssignmentRef(UUID.randomUUID(), "MAT ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â· 5A ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â· Garcia ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â· B1"),
+                new AssignmentRef(UUID.randomUUID(), "MAT · 5A · Garcia · B1"),
+                null, null,
                 null, null,
                 EvaluationKind.EXAM, "Midterm", "60 minutes",
                 new BigDecimal("25.00"),
@@ -103,6 +104,7 @@ class EvaluationControllerTest {
                             new BigDecimal("25.00"),
                             LocalDate.of(2026, 5, 1), LocalDate.of(2026, 5, 8),
                             EvaluationScale.SCORE_0_20, EvaluationStatus.DRAFT,
+                            null, null,
                             5L, Boolean.TRUE,
                             Instant.now(), Instant.now())));
 
@@ -189,7 +191,7 @@ class EvaluationControllerTest {
                     EvaluationKind.EXAM, "Midterm", "60 minutes",
                     new BigDecimal("25.00"),
                     LocalDate.of(2026, 5, 1), LocalDate.of(2026, 5, 8),
-                    EvaluationScale.SCORE_0_20, null, null, null);
+                    EvaluationScale.SCORE_0_20, null, null, null, null);
 
             mockMvc.perform(post("/v1/academic/assignments/{u}/evaluations", assignmentUuid)
                             .contentType(MediaType.APPLICATION_JSON)
@@ -205,7 +207,7 @@ class EvaluationControllerTest {
         void missingField() throws Exception {
             UUID assignmentUuid = UUID.randomUUID();
             var req = new CreateEvaluationRequest(null, null, null,
-                    null, null, null, null, null, null, null);
+                    null, null, null, null, null, null, null, null);
 
             mockMvc.perform(post("/v1/academic/assignments/{u}/evaluations", assignmentUuid)
                             .contentType(MediaType.APPLICATION_JSON)
@@ -227,7 +229,7 @@ class EvaluationControllerTest {
                     EvaluationKind.EXAM, "Midterm", null,
                     new BigDecimal("25.00"),
                     LocalDate.of(2026, 5, 1), null,
-                    EvaluationScale.SCORE_0_20, null, null, null);
+                    EvaluationScale.SCORE_0_20, null, null, null, null);
 
             mockMvc.perform(post("/v1/academic/assignments/{u}/evaluations", assignmentUuid)
                             .contentType(MediaType.APPLICATION_JSON)
@@ -289,7 +291,7 @@ class EvaluationControllerTest {
 
             var patch = new UpdateEvaluationRequest(
                     null, "Renamed", null, null, null, null,
-                    null, null, null, null);
+                    null, null, null, null, null);
 
             mockMvc.perform(put("/v1/academic/evaluations/{u}", evalUuid)
                             .contentType(MediaType.APPLICATION_JSON)
@@ -308,7 +310,7 @@ class EvaluationControllerTest {
 
             var patch = new UpdateEvaluationRequest(
                     null, "Renamed", null, null, null, null,
-                    null, null, null, null);
+                    null, null, null, null, null);
 
             mockMvc.perform(put("/v1/academic/evaluations/{u}", evalUuid)
                             .contentType(MediaType.APPLICATION_JSON)

@@ -17,5 +17,6 @@ public record CreateAnnouncementRequest(
         @NotNull AudienceType audienceType,
         List<String> audienceIds,
         boolean pinned,
-        Instant publishAt
+        Instant publishAt,
+        Boolean includeGuardians
 ) {}

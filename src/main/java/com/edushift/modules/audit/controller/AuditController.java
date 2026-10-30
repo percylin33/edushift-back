@@ -1,19 +1,24 @@
 package com.edushift.modules.audit.controller;
 
 import com.edushift.modules.audit.dto.AuditLogResponse;
-import com.edushift.modules.audit.dto.AuditLogSearchRequest;
+import com.edushift.modules.audit.entity.AuditLog;
 import com.edushift.modules.audit.mapper.AuditLogMapper;
+import com.edushift.modules.audit.repository.AuditDirectoryRepository;
 import com.edushift.modules.audit.repository.AuditLogRepository;
+import com.edushift.modules.tenants.entity.Tenant;
+import com.edushift.modules.tenants.repository.TenantRepository;
 import com.edushift.shared.api.ApiResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
-import jakarta.validation.Valid;
 import java.time.Instant;
+import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
-import org.springframework.data.domain.Sort;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -45,6 +50,8 @@ public class AuditController {
 	private static final int MAX_PAGE_SIZE = 200;
 
 	private final AuditLogRepository auditLogRepository;
+	private final AuditDirectoryRepository auditDirectoryRepository;
+	private final TenantRepository tenantRepository;
 
 	@GetMapping(produces = MediaType.APPLICATION_JSON_VALUE)
 	@Operation(summary = "Search audit events (cross-tenant)")
@@ -53,20 +60,44 @@ public class AuditController {
 			@RequestParam(required = false) UUID actorId,
 			@RequestParam(required = false) String action,
 			@RequestParam(required = false) String resourceType,
+			@RequestParam(required = false) String tenantSearch,
+			@RequestParam(required = false) String actorSearch,
 			@RequestParam(required = false) Instant from,
 			@RequestParam(required = false) Instant to,
 			@RequestParam(required = false) Integer page,
-			@RequestParam(required = false) Integer size,
-			@Valid AuditLogSearchRequest unused) {
+			@RequestParam(required = false) Integer size) {
 
 		int pageIndex = page == null || page < 0 ? 0 : page;
 		int pageSize = size == null || size <= 0 ? 50 : Math.min(size, MAX_PAGE_SIZE);
 
-		Page<AuditLogResponse> rows = auditLogRepository.search(
-				tenantId, actorId, action, resourceType, from, to,
-				PageRequest.of(pageIndex, pageSize,
-						Sort.by(Sort.Direction.DESC, "occurredAt")))
-				.map(AuditLogMapper::toResponse);
+		// Resolve labels in batches to avoid one query per row. This is a
+		// cross-tenant directory lookup and must remain behind SUPER_ADMIN auth.
+		var sourcePage = auditLogRepository.search(
+				tenantId, actorId, action, resourceType,
+				normalizeSearch(tenantSearch), normalizeSearch(actorSearch), from, to,
+				PageRequest.of(pageIndex, pageSize));
+		Set<UUID> actorIds = sourcePage.getContent().stream()
+				.map(AuditLog::getActorId).filter(java.util.Objects::nonNull).collect(Collectors.toSet());
+		Set<UUID> tenantIds = sourcePage.getContent().stream()
+				.map(AuditLog::getTenantId).filter(java.util.Objects::nonNull).collect(Collectors.toSet());
+		Map<UUID, AuditDirectoryRepository.ActorLabel> actors = actorIds.isEmpty() ? Map.of()
+				: auditDirectoryRepository.findActorLabels(actorIds).stream()
+						.collect(Collectors.toMap(AuditDirectoryRepository.ActorLabel::getActorId, Function.identity()));
+		Map<UUID, Tenant> tenants = tenantIds.isEmpty() ? Map.of()
+				: tenantRepository.findAllById(tenantIds).stream()
+						.collect(Collectors.toMap(Tenant::getId, Function.identity()));
+		Page<AuditLogResponse> rows = sourcePage.map(log -> {
+			var actor = log.getActorId() == null ? null : actors.get(log.getActorId());
+			String fullName = actor == null ? null
+					: ((actor.getFirstName() == null ? "" : actor.getFirstName().trim()) + " "
+							+ (actor.getLastName() == null ? "" : actor.getLastName().trim())).trim();
+			Tenant tenant = log.getTenantId() == null ? null : tenants.get(log.getTenantId());
+			return AuditLogMapper.toResponse(log,
+					fullName == null || fullName.isBlank() ? null : fullName,
+					actor == null ? null : actor.getEmail(),
+					tenant == null ? null : tenant.getName(),
+					tenant == null ? null : tenant.getSlug());
+		});
 
 		return ApiResponse.ok(rows);
 	}
@@ -77,12 +108,15 @@ public class AuditController {
 			@RequestParam(required = false) UUID tenantId,
 			@RequestParam(required = false) UUID actorId,
 			@RequestParam(required = false) String action,
+			@RequestParam(required = false) String tenantSearch,
+			@RequestParam(required = false) String actorSearch,
 			@RequestParam(required = false) Instant from,
 			@RequestParam(required = false) Instant to) {
 
 		Page<com.edushift.modules.audit.entity.AuditLog> rows = auditLogRepository.search(
-				tenantId, actorId, action, null, from, to,
-				PageRequest.of(0, 5000, Sort.by(Sort.Direction.DESC, "occurredAt")));
+				tenantId, actorId, action, null,
+				normalizeSearch(tenantSearch), normalizeSearch(actorSearch), from, to,
+				PageRequest.of(0, 5000));
 
 		StringBuilder sb = new StringBuilder(64 * 1024);
 		sb.append("id,occurred_at,tenant_id,actor_id,action,resource_type,resource_id,summary,trace_id\n");
@@ -109,5 +143,9 @@ public class AuditController {
 			return value;
 		}
 		return "\"" + value.replace("\"", "\"\"") + "\"";
+	}
+
+	private static String normalizeSearch(String value) {
+		return value == null || value.isBlank() ? null : value.trim();
 	}
 }

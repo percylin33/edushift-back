@@ -27,17 +27,17 @@ import jakarta.validation.constraints.Size;
  *
  * <h3>Password policy</h3>
  * The {@code adminPassword} field is bound to {@link ValidPassword} (8-72
- * chars, mixed case + digit + special) so the self-signup flow applies
+ * chars, mixed case + digit) so the self-signup flow applies
  * the same baseline as {@code CreateUserRequest} and
  * {@code AcceptInvitationRequest}. Without this guard a tenant founder
  * could create their account with {@code "12345678"} and bypass the
  * policy enforced elsewhere. Closes DEBT-USR-2.
  *
  * <h3>Slug grammar</h3>
- * Mirrored from the {@code chk_tenants_slug_format} CHECK constraint
- * in V4 — kebab-case lowercase alphanumerics, 2-80 chars, no leading
- * or trailing dash. Catching it client-side keeps server errors out
- * of the happy path.
+ * New tenant hostnames use lowercase alphanumerics only, 2-63 chars,
+ * with no dashes. Existing tenant rows may retain legacy dashed slugs;
+ * the hostname lookup resolves their compact aliases. Catching this rule
+ * at the request boundary keeps server errors out of the happy path.
  */
 public record RegisterTenantRequest(
 
@@ -46,10 +46,10 @@ public record RegisterTenantRequest(
 		String tenantName,
 
 		@NotBlank(message = "tenantSlug is required")
-		@Size(min = 2, max = 80, message = "tenantSlug length out of range")
+		@Size(min = 2, max = 63, message = "tenantSlug length out of range")
 		@Pattern(
-				regexp = "^[a-z0-9]([a-z0-9-]{0,78}[a-z0-9])?$",
-				message = "tenantSlug must be lowercase alphanumerics with optional dashes (kebab-case)"
+				regexp = "^[a-z0-9]{2,63}$",
+				message = "tenantSlug must be 2-63 lowercase alphanumeric characters without dashes"
 		)
 		String tenantSlug,
 

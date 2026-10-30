@@ -15,9 +15,15 @@ public record AssignmentListItem(
 		String teacherFullName,
 		UUID sectionPublicUuid,
 		String sectionName,
+		/** Denormalised grade label (e.g. {@code "1ro Primaria"}); null-safe. */
+		String gradeName,
 		UUID coursePublicUuid,
 		String courseCode,
 		String courseName,
+		/** Optional course hex color {@code #RRGGBB}; null → FE resolves by code. */
+		String courseColor,
+		/** Optional course Lucide icon key; null → FE resolves by code. */
+		String courseIcon,
 		UUID academicPeriodPublicUuid,
 		PeriodType periodType,
 		Integer periodOrdinal,

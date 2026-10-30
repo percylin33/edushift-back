@@ -32,7 +32,8 @@ class InvoiceEntityTest {
     @Test
     @DisplayName("Status enum has expected values")
     void statusEnum() {
-        assertThat(Invoice.Status.values()).hasSize(5);
+        assertThat(Invoice.Status.values()).hasSize(6);
+        assertThat(Invoice.Status.PENDING_REVIEW).isNotEqualTo(Invoice.Status.PENDING);
         assertThat(Invoice.Status.PAID).isNotEqualTo(Invoice.Status.CANCELLED);
     }
 }

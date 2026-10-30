@@ -1,6 +1,7 @@
 package com.edushift.modules.students.controller;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.then;
 import static org.mockito.Mockito.never;
@@ -107,7 +108,7 @@ private static final String BASE = "/v1/students/bulk-import";
 					.andExpect(header().string("Content-Type",
 							"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"))
 					.andExpect(header().string("Content-Disposition",
-							"attachment; filename=\"students-template.xlsx\""))
+							"attachment; filename=\"plantilla-estudiantes.xlsx\""))
 					.andExpect(content().bytes(payload));
 		}
 
@@ -137,7 +138,8 @@ private static final String BASE = "/v1/students/bulk-import";
 		@DisplayName("TENANT_ADMIN + multipart upload → 202 with PENDING job")
 		void happyPath() throws Exception {
 			UUID id = UUID.randomUUID();
-			given(service.enqueueStudentsImport(any()))
+			given(service.parseColumnMappingJson(nullable(String.class))).willReturn(null);
+			given(service.enqueueStudentsImport(any(), any()))
 					.willReturn(stubJob(id, BulkImportStatus.PENDING));
 
 			MockMultipartFile file = new MockMultipartFile(
@@ -157,7 +159,8 @@ private static final String BASE = "/v1/students/bulk-import";
 		@Test
 		@DisplayName("INVALID_FILE → 422")
 		void invalidFile() throws Exception {
-			given(service.enqueueStudentsImport(any()))
+			given(service.parseColumnMappingJson(nullable(String.class))).willReturn(null);
+			given(service.enqueueStudentsImport(any(), any()))
 					.willThrow(new BusinessException("INVALID_FILE", "empty"));
 
 			MockMultipartFile file = new MockMultipartFile(
@@ -185,7 +188,7 @@ private static final String BASE = "/v1/students/bulk-import";
 							.with(authentication(plainAuth())))
 					.andExpect(status().isForbidden());
 
-			then(service).should(never()).enqueueStudentsImport(any());
+			then(service).should(never()).enqueueStudentsImport(any(), any());
 		}
 
 		@Test

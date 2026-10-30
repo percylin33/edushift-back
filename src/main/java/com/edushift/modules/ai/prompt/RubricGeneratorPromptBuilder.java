@@ -1,6 +1,6 @@
 package com.edushift.modules.ai.prompt;
 
-import com.edushift.modules.ai.config.MiniMaxProperties;
+import com.edushift.modules.ai.config.ActiveLlmSettings;
 import com.edushift.modules.ai.dto.GenerateRubricRequest;
 import com.edushift.modules.ai.llm.LlmClient.LlmRequest;
 import java.util.Map;
@@ -88,18 +88,16 @@ public class RubricGeneratorPromptBuilder {
             }
             """;
 
-    private final MiniMaxProperties props;
+    private final ActiveLlmSettings models;
 
-    public RubricGeneratorPromptBuilder(MiniMaxProperties props) {
-        this.props = props;
+    public RubricGeneratorPromptBuilder(ActiveLlmSettings models) {
+        this.models = models;
     }
 
     public LlmRequest build(GenerateRubricRequest request,
                             String seedRubricName,
                             String seedRubricCriteriaSummary) {
-        String model = props.getDefaultModel() != null && !props.getDefaultModel().isBlank()
-                ? props.getDefaultModel()
-                : "openai/gpt-4o-mini";
+        String model = models.defaultModel();
 
         String userPrompt = buildUserPrompt(request, seedRubricName, seedRubricCriteriaSummary);
 

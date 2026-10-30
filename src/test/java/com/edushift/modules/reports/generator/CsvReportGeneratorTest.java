@@ -72,7 +72,7 @@ class CsvReportGeneratorTest {
         assertThat(bytes[1]).isEqualTo((byte) 0xBB);
         assertThat(bytes[2]).isEqualTo((byte) 0xBF);
         var body = new String(bytes, java.nio.charset.StandardCharsets.UTF_8);
-        assertThat(body).contains("section_id,section_name,date,slot,total_students,"
+        assertThat(body).contains("session_uuid,section_name,date,slot,total_students,"
             + "present,absent,late,excused");
     }
 

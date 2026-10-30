@@ -91,6 +91,9 @@ public class ScheduleCloneServiceImpl implements ScheduleCloneService {
 			copy.setShift(src.getShift());
 			copy.setName(src.getName());
 			copy.setRecessShareGroup(src.getRecessShareGroup());
+			copy.setDayStart(src.getDayStart());
+			copy.setDayEnd(src.getDayEnd());
+			copy.setPeriodMinutes(src.getPeriodMinutes());
 			DayScheduleTemplate saved = templateRepository.saveAndFlush(copy);
 
 			for (DayScheduleBlock srcBlock : blockRepository.findByTemplateOrdered(src)) {

@@ -65,6 +65,7 @@ import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
@@ -115,6 +116,7 @@ class QuizWithRubricIT extends IntegrationTest {
 	@Autowired private TeacherAssignmentRepository assignmentRepository;
 	@Autowired private RubricRepository rubricRepository;
 	@Autowired private EvaluationRepository evaluationRepository;
+	@Autowired private JdbcTemplate jdbcTemplate;
 	@Autowired private GradeRecordRepository gradeRecordRepository;
 	@Autowired private QuizRepository quizRepository;
 	@Autowired private QuizQuestionRepository questionRepository;
@@ -312,12 +314,10 @@ class QuizWithRubricIT extends IntegrationTest {
 			// We need findByPublicUuidAcrossTenants because
 			// @SQLRestriction hides the row from findByPublicUuid once
 			// it's marked deleted.
-			com.edushift.modules.evaluations.entity.Evaluation derived = TenantContext
-					.runAs(fixture.tenantA().getId(),
-							() -> tx().execute(s -> evaluationRepository
-									.findByPublicUuidAcrossTenants(derivedUuid)
-									.orElseThrow()));
-			assertThat(derived.isDeleted()).isTrue();
+		Boolean deleted = jdbcTemplate.queryForObject(
+				"SELECT deleted FROM edushift.evaluations WHERE public_uuid = ?::uuid AND tenant_id = ?",
+				Boolean.class, derivedUuid, fixture.tenantA().getId());
+		assertThat(deleted).isTrue();
 		}
 
 		@Test
@@ -435,10 +435,10 @@ class QuizWithRubricIT extends IntegrationTest {
 		// Tie tenant A's users to Teacher / Student records (so the
 		// QuizRubricServiceImpl can resolve the owner's Teacher +
 		// active assignment in the section).
-		Teacher teacherEntityA = linkTeacher(tenantA, teacherA.getId(), "T-A");
-		Teacher teacherEntityB = linkTeacher(tenantB, teacherB.getId(), "T-B");
-		Student studentEntityA = linkStudent(tenantA, studentA.getId(), "S-A");
-		Student studentEntityB = linkStudent(tenantB, studentB.getId(), "S-B");
+		Teacher teacherEntityA = linkTeacher(tenantA, teacherA.getPublicUuid(), "T-A");
+		Teacher teacherEntityB = linkTeacher(tenantB, teacherB.getPublicUuid(), "T-B");
+		Student studentEntityA = linkStudent(tenantA, studentA.getPublicUuid(), "S-A");
+		Student studentEntityB = linkStudent(tenantB, studentB.getPublicUuid(), "S-B");
 
 		// Academic scaffold for tenant A.
 		seedAcademicCatalog(tenantA);
@@ -472,7 +472,7 @@ class QuizWithRubricIT extends IntegrationTest {
 	}
 
 	private Tenant createTenant(String slugPrefix) {
-		Tenant t = new Tenant();
+		Tenant t = newTestTenant();
 		t.setSlug(slugPrefix + UUID.randomUUID().toString().substring(0, 8));
 		t.setName("IT Tenant " + t.getSlug());
 		t.setStatus(TenantStatus.ACTIVE);
@@ -495,31 +495,31 @@ class QuizWithRubricIT extends IntegrationTest {
 				}));
 	}
 
-	private Teacher linkTeacher(Tenant tenant, UUID userInternalId, String firstName) {
+	private Teacher linkTeacher(Tenant tenant, UUID userPublicUuid, String firstName) {
 		return TenantContext.runAs(tenant.getId(), () -> tx().execute(s -> {
 			Teacher teacher = new Teacher();
 			teacher.setDocumentType(DocumentType.DNI);
 			teacher.setDocumentNumber("T-" + Math.abs(
-					userInternalId.hashCode() % 1000000));
+					userPublicUuid.hashCode() % 1000000));
 			teacher.setFirstName(firstName);
 			teacher.setLastName(tenant.getSlug());
 			teacher.setEmploymentStatus(EmploymentStatus.ACTIVE);
-			// The FK teachers.user_id → users.id (V18).
-			teacher.setUserId(userInternalId);
+			// The FK teachers.user_id → users.public_uuid (V77).
+			teacher.setUserId(userPublicUuid);
 			return teacherRepository.saveAndFlush(teacher);
 		}));
 	}
 
-	private Student linkStudent(Tenant tenant, UUID userInternalId, String firstName) {
+	private Student linkStudent(Tenant tenant, UUID userPublicUuid, String firstName) {
 		return TenantContext.runAs(tenant.getId(), () -> tx().execute(s -> {
 			Student student = new Student();
 			student.setDocumentType(DocumentType.DNI);
 			student.setDocumentNumber("S-" + Math.abs(
-					userInternalId.hashCode() % 1000000));
+					userPublicUuid.hashCode() % 1000000));
 			student.setFirstName(firstName);
 			student.setLastName(tenant.getSlug());
-			// The FK students.user_id → users.id (V10).
-			student.setUserId(userInternalId);
+			// The FK students.user_id → users.public_uuid (V76).
+			student.setUserId(userPublicUuid);
 			return studentRepository.saveAndFlush(student);
 		}));
 	}

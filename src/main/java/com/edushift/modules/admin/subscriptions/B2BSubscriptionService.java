@@ -3,6 +3,8 @@ package com.edushift.modules.admin.subscriptions;
 import com.edushift.modules.admin.plans.PlatformPlan;
 import com.edushift.modules.admin.plans.PlatformPlanRepository;
 import com.edushift.modules.admin.subscriptions.B2BSubscription.B2BSubscriptionStatus;
+import com.edushift.modules.tenants.entity.Tenant;
+import com.edushift.modules.tenants.repository.TenantRepository;
 import com.edushift.shared.exception.ConflictException;
 import com.edushift.shared.exception.NotFoundException;
 import java.time.LocalDate;
@@ -21,20 +23,27 @@ public class B2BSubscriptionService {
 
     private final B2BSubscriptionRepository subscriptionRepository;
     private final PlatformPlanRepository planRepository;
+    private final TenantRepository tenantRepository;
 
-    public Optional<SubscriptionResponse> getActiveForTenant(UUID tenantId) {
-        return subscriptionRepository.findByTenantIdAndStatusNot(tenantId, B2BSubscriptionStatus.CANCELED)
+    public Optional<SubscriptionResponse> getActiveForTenant(UUID tenantPublicUuid) {
+        return tenantRepository.findByPublicUuid(tenantPublicUuid)
+                .flatMap(tenant -> subscriptionRepository.findByTenantId(tenant.getId()))
+                .filter(sub -> sub.getStatus() == B2BSubscriptionStatus.ACTIVE
+                        || sub.getStatus() == B2BSubscriptionStatus.TRIAL)
                 .map(SubscriptionResponse::from);
     }
 
     @Transactional
-    public SubscriptionResponse assignOrChangePlan(UUID tenantId, B2BSubscriptionRequest request) {
+    public SubscriptionResponse assignOrChangePlan(UUID tenantPublicUuid, B2BSubscriptionRequest request) {
         PlatformPlan plan = planRepository.findById(request.planId())
                 .orElseThrow(() -> new NotFoundException("PLAN_NOT_FOUND", "Plan not found"));
 
         if (!plan.isActive()) {
             throw new NotFoundException("PLAN_NOT_FOUND", "Plan is not active");
         }
+        Tenant tenant = tenantRepository.findByPublicUuid(tenantPublicUuid)
+                .orElseThrow(() -> new NotFoundException("TENANT_NOT_FOUND", "Tenant not found"));
+        UUID tenantId = tenant.getId();
 
         B2BSubscription sub = subscriptionRepository.findByTenantId(tenantId)
                 .orElseGet(() -> {
@@ -59,13 +68,18 @@ public class B2BSubscriptionService {
         }
 
         subscriptionRepository.save(sub);
+        tenant.setPlanId(plan.getId());
+        tenantRepository.save(tenant);
         log.info("[b2b-subscription] plan changed for tenant={} to plan={}", tenantId, request.planId());
 
         return SubscriptionResponse.from(sub);
     }
 
     @Transactional
-    public void cancel(UUID tenantId, String reason) {
+    public void cancel(UUID tenantPublicUuid, String reason) {
+        UUID tenantId = tenantRepository.findByPublicUuid(tenantPublicUuid)
+                .map(Tenant::getId)
+                .orElseThrow(() -> new NotFoundException("TENANT_NOT_FOUND", "Tenant not found"));
         B2BSubscription sub = subscriptionRepository.findByTenantId(tenantId)
                 .orElseThrow(() -> new NotFoundException("SUBSCRIPTION_NOT_FOUND", "No subscription found"));
 
@@ -79,7 +93,10 @@ public class B2BSubscriptionService {
     }
 
     @Transactional
-    public void reactivate(UUID tenantId) {
+    public void reactivate(UUID tenantPublicUuid) {
+        UUID tenantId = tenantRepository.findByPublicUuid(tenantPublicUuid)
+                .map(Tenant::getId)
+                .orElseThrow(() -> new NotFoundException("TENANT_NOT_FOUND", "Tenant not found"));
         B2BSubscription sub = subscriptionRepository.findByTenantId(tenantId)
                 .orElseThrow(() -> new NotFoundException("SUBSCRIPTION_NOT_FOUND", "No subscription found"));
 

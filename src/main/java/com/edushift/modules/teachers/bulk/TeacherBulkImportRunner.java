@@ -19,6 +19,7 @@ import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -53,14 +54,19 @@ public class TeacherBulkImportRunner {
 
 	@Async("bulkImportExecutor")
 	public void run(UUID jobId, UUID tenantId, byte[] payload) {
+		run(jobId, tenantId, payload, null);
+	}
+
+	@Async("bulkImportExecutor")
+	public void run(UUID jobId, UUID tenantId, byte[] payload, Map<String, String> columnMapping) {
 		TenantContext.runAs(tenantId, () -> {
-			processJob(jobId, payload);
+			processJob(jobId, payload, columnMapping);
 			return null;
 		});
 	}
 
 	@Transactional
-	void processJob(UUID jobId, byte[] payload) {
+	void processJob(UUID jobId, byte[] payload, Map<String, String> columnMapping) {
 		BulkImportJob job = jobRepository.findById(jobId).orElse(null);
 		if (job == null) {
 			log.warn("[bulk-import/teachers] job not found at runner start -- jobId={}", jobId);
@@ -71,7 +77,7 @@ public class TeacherBulkImportRunner {
 
 		List<TeacherRowDraft> drafts;
 		try {
-			drafts = parser.parse(new ByteArrayInputStream(payload));
+			drafts = parser.parse(new ByteArrayInputStream(payload), columnMapping);
 		}
 		catch (BulkImportException e) {
 			log.warn("[bulk-import/teachers] parse failed -- jobId={} code={} msg={}",

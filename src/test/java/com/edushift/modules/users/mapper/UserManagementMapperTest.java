@@ -124,6 +124,8 @@ class UserManagementMapperTest {
 			assertThat(response.status()).isEqualTo(UserStatus.ACTIVE);
 			assertThat(response.emailVerified()).isTrue();
 			assertThat(response.mfaEnabled()).isTrue();
+			assertThat(response.emailSource()).isEqualTo(
+					com.edushift.modules.auth.entity.EmailSource.REAL);
 			assertThat(response.roles()).containsExactly("TENANT_ADMIN");
 		}
 

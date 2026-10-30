@@ -4,7 +4,9 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.BDDMockito.then;
 import static org.mockito.Mockito.doNothing;
+import static org.mockito.Mockito.never;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
@@ -92,9 +94,31 @@ class FileObjectControllerTest {
 
     @Test
     void testDelete() throws Exception {
+        UUID fileUuid = UUID.randomUUID();
+        FileObject file = sampleFile();
+        file.setPublicUuid(fileUuid);
+        given(fileObjectService.findByPublicUuid(fileUuid)).willReturn(Optional.of(file));
         doNothing().when(fileObjectService).delete(any());
-        mockMvc.perform(delete("/v1/files/{id}", UUID.randomUUID()).with(csrf()).with(authentication(admin())))
+        mockMvc.perform(delete("/v1/files/{id}", fileUuid).with(csrf()).with(authentication(admin())))
                 .andExpect(status().isOk());
+    }
+
+    @Test
+    void staffWithDisclosurePermissionCannotDeleteNonDisclosureFiles() throws Exception {
+        UUID fileUuid = UUID.randomUUID();
+        FileObject file = sampleFile();
+        file.setPublicUuid(fileUuid);
+        given(fileObjectService.findByPublicUuid(fileUuid)).willReturn(Optional.of(file));
+        var staff = new JwtAuthenticationToken(
+                new JwtAuthenticatedPrincipal(UUID.randomUUID(), UUID.randomUUID(), "staff", "staff@t"),
+                "t",
+                List.of(new SimpleGrantedAuthority("ROLE_STAFF"),
+                        new SimpleGrantedAuthority("LMS_DISCLOSURE_MANAGE")));
+
+        mockMvc.perform(delete("/v1/files/{id}", fileUuid).with(csrf()).with(authentication(staff)))
+                .andExpect(status().isForbidden());
+
+        then(fileObjectService).should(never()).delete(any());
     }
 
     @Test

@@ -83,6 +83,18 @@ public class TeacherController {
 				service.listTeachers(search, employmentStatus, hasUserAccount, pageable));
 	}
 
+	@GetMapping("/me")
+	@SecurityRequirement(name = "bearerAuth")
+	@PreAuthorize("hasRole('TEACHER')")
+	@Operation(
+			summary = "Get the teacher profile linked to the authenticated user (TEACHER)",
+			description = "Resolves the caller's linked teacher row via user_id. "
+					+ "404 when the user has TEACHER role but no teacher linkage yet."
+	)
+	public ResponseEntity<ApiResponse<TeacherResponse>> me() {
+		return ResponseEntity.ok(ApiResponse.ok(service.getCurrentTeacher()));
+	}
+
 	@GetMapping("/{publicUuid}")
 	@SecurityRequirement(name = "bearerAuth")
 	@PreAuthorize("hasRole('TENANT_ADMIN')")
@@ -129,8 +141,9 @@ public class TeacherController {
 	@PreAuthorize("hasRole('TENANT_ADMIN')")
 	@Operation(
 			summary = "Link a teacher to an existing user (TENANT_ADMIN)",
-			description = "User must be in the same tenant and have the TEACHER role. "
-					+ "Errors: 409 TEACHER_ALREADY_HAS_USER, 409 USER_NOT_TEACHER_ROLE, "
+			description = "User must be in the same tenant. TEACHER is granted "
+					+ "and the profile is linked in one transaction. "
+					+ "Errors: 409 TEACHER_ALREADY_HAS_USER, "
 					+ "409 USER_ALREADY_LINKED_TO_TEACHER, 404 RESOURCE_NOT_FOUND."
 	)
 	public ResponseEntity<ApiResponse<TeacherResponse>> linkUser(

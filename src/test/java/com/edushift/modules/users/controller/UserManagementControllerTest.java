@@ -1,5 +1,6 @@
 package com.edushift.modules.users.controller;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
@@ -19,9 +20,11 @@ import com.edushift.modules.auth.entity.UserStatus;
 import com.edushift.modules.auth.security.JwtAuthenticatedPrincipal;
 import com.edushift.modules.auth.security.JwtAuthenticationToken;
 import com.edushift.modules.auth.service.JwtService;
+import com.edushift.modules.users.dto.AdminResetPasswordResponse;
 import com.edushift.modules.users.dto.AssignRolesRequest;
 import com.edushift.modules.users.dto.UpdateUserRequest;
 import com.edushift.modules.users.dto.UserDetailResponse;
+import com.edushift.modules.users.dto.UserListFilters;
 import com.edushift.modules.users.dto.UserListItem;
 import com.edushift.modules.users.service.UserManagementService;
 import com.edushift.shared.exception.BusinessException;
@@ -36,6 +39,7 @@ import java.util.UUID;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.context.annotation.ComponentScan;
@@ -73,6 +77,8 @@ import org.springframework.test.web.servlet.MockMvc;
 		com.edushift.test.EdushiftWebMvcTestConfig.class,
 })
 class UserManagementControllerTest {
+
+	@MockitoBean private com.edushift.modules.tenants.service.StaffUserAccessService staffUserAccessService;
 
 	@Autowired private MockMvc mockMvc;
 	@Autowired private ObjectMapper objectMapper;
@@ -116,6 +122,7 @@ private static final String BASE = "/v1/users";
 				status,
 				true,
 				false,
+				com.edushift.modules.auth.entity.EmailSource.REAL,
 				roles,
 				Instant.parse("2026-01-01T00:00:00Z"),
 				Instant.parse("2025-01-01T00:00:00Z"),
@@ -154,6 +161,20 @@ private static final String BASE = "/v1/users";
 					.andExpect(status().isOk())
 					.andExpect(jsonPath("$.content[0].email").value("a@acme.test"))
 					.andExpect(jsonPath("$.content[1].email").value("b@acme.test"));
+		}
+
+		@Test
+		@DisplayName("forwards role query param into UserListFilters")
+		void forwardsRoleFilter() throws Exception {
+			Page<UserListItem> page = new PageImpl<>(List.of());
+			given(service.listUsers(any(), any(Pageable.class))).willReturn(page);
+
+			mockMvc.perform(get(BASE).param("role", "TEACHER").with(authentication(adminAuth())))
+					.andExpect(status().isOk());
+
+			ArgumentCaptor<UserListFilters> filters = ArgumentCaptor.forClass(UserListFilters.class);
+			then(service).should().listUsers(filters.capture(), any(Pageable.class));
+			assertThat(filters.getValue().role()).isEqualTo("TEACHER");
 		}
 
 		@Test
@@ -430,16 +451,37 @@ private static final String BASE = "/v1/users";
 	class ResetPassword {
 
 		@Test
-		@DisplayName("happy path — 202 Accepted (email delivery is Sprint 9)")
-		void happyPath() throws Exception {
+		@DisplayName("happy path EMAIL (empty body) — 202 Accepted")
+		void happyPathEmail() throws Exception {
 			UUID id = UUID.randomUUID();
+			given(service.resetPassword(eq(id), any()))
+					.willReturn(AdminResetPasswordResponse.email("ada@acme.test"));
 
 			mockMvc.perform(post(BASE + "/" + id + "/reset-password")
 							.with(csrf())
 							.with(authentication(adminAuth())))
-					.andExpect(status().isAccepted());
+					.andExpect(status().isAccepted())
+					.andExpect(jsonPath("$.data.delivery").value("EMAIL"));
 
-			then(service).should().resetPassword(id);
+			then(service).should().resetPassword(eq(id), any());
+		}
+
+		@Test
+		@DisplayName("TEMPORARY — 200 with plaintext password once")
+		void temporaryPassword() throws Exception {
+			UUID id = UUID.randomUUID();
+			given(service.resetPassword(eq(id), any()))
+					.willReturn(AdminResetPasswordResponse.temporary("ada@acme.test", "TempPass!23456"));
+
+			mockMvc.perform(post(BASE + "/" + id + "/reset-password")
+							.contentType(MediaType.APPLICATION_JSON)
+							.content("{\"delivery\":\"TEMPORARY\"}")
+							.with(csrf())
+							.with(authentication(adminAuth())))
+					.andExpect(status().isOk())
+					.andExpect(jsonPath("$.data.delivery").value("TEMPORARY"))
+					.andExpect(jsonPath("$.data.temporaryPassword").value("TempPass!23456"))
+					.andExpect(jsonPath("$.data.mustChangePassword").value(true));
 		}
 
 		@Test
@@ -452,7 +494,7 @@ private static final String BASE = "/v1/users";
 							.with(authentication(plainAuth())))
 					.andExpect(status().isForbidden());
 
-			then(service).should(never()).resetPassword(any(UUID.class));
+			then(service).should(never()).resetPassword(any(UUID.class), any());
 		}
 	}
 }

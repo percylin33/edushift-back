@@ -12,6 +12,7 @@ import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
@@ -80,7 +81,10 @@ public class LoginAttemptService {
 	 *                        failed — see notes in AuthServiceImpl).
 	 * @param email           normalized email of the failed attempt.
 	 */
-	@Transactional
+	// Login runs inside a transaction that must roll back when credentials
+	// are rejected. Persist this counter independently so that rollback does
+	// not erase the failure or the lockout applied at the threshold.
+	@Transactional(propagation = Propagation.REQUIRES_NEW)
 	public void recordFailure(String email) {
 		if (email == null || email.isBlank()) {
 			return;

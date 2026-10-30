@@ -14,7 +14,8 @@ public final class AuditLogMapper {
 
 	private AuditLogMapper() {}
 
-	public static AuditLogResponse toResponse(AuditLog log) {
+	public static AuditLogResponse toResponse(
+			AuditLog log, String actorName, String actorEmail, String tenantName, String tenantSlug) {
 		if (log == null) {
 			return null;
 		}
@@ -23,7 +24,11 @@ public final class AuditLogMapper {
 				log.getOccurredAt(),
 				log.getTenantId(),
 				log.getActorId(),
+				actorName,
+				actorEmail,
 				log.getAction() != null ? log.getAction().name() : null,
+				tenantName,
+				tenantSlug,
 				log.getResourceType(),
 				log.getResourceId(),
 				log.getSummary(),

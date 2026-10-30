@@ -15,6 +15,7 @@ import lombok.NoArgsConstructor;
 import lombok.Setter;
 import lombok.ToString;
 import org.hibernate.annotations.SQLDelete;
+import org.hibernate.annotations.SQLRestriction;
 
 /**
  * Course catalog item inside a tenant (Sprint 4 / BE-4.4).
@@ -47,6 +48,7 @@ import org.hibernate.annotations.SQLDelete;
 @Setter
 @NoArgsConstructor
 @ToString(callSuper = true, of = {"publicUuid", "code", "name", "isActive"})
+@SQLRestriction("deleted = false")
 @SQLDelete(sql = "UPDATE edushift.courses "
 		+ "SET deleted = true, deleted_at = NOW(), updated_at = NOW() "
 		+ "WHERE id = ?")
@@ -70,6 +72,14 @@ public class Course extends TenantAwareEntity {
 
 	@Column(name = "hours_per_week")
 	private Integer hoursPerWeek;
+
+	/** Optional hex color {@code #RRGGBB} for FE chips/avatars. */
+	@Column(name = "color", length = 7)
+	private String color;
+
+	/** Optional Lucide-style icon key from the FE icons registry. */
+	@Column(name = "icon", length = 64)
+	private String icon;
 
 	@Column(name = "is_active", nullable = false)
 	private Boolean isActive = Boolean.TRUE;
