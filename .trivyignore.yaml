@@ -2,7 +2,7 @@ vulnerabilities:
   - id: CVE-2026-47884
     purls:
       - pkg:maven/org.springframework/spring-webmvc@6.2.19
-    expired_at: "2027-01-30"
+    expired_at: "2027-01-30T00:00:00Z"
     statement: >-
       Not affected: Spring requires XsltView, an implicit view name, and a
       matching /** MVC handler that renders a view. EduShift has no XsltView
@@ -11,7 +11,7 @@ vulnerabilities:
   - id: CVE-2026-47890
     purls:
       - pkg:maven/org.springframework/spring-webmvc@6.2.19
-    expired_at: "2027-01-30"
+    expired_at: "2027-01-30T00:00:00Z"
     statement: >-
       Not affected: Spring requires view fragments streamed over SSE. EduShift
       SSE endpoints use SseEmitter with direct JSON/text event payloads and no
