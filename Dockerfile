@@ -33,7 +33,7 @@ FROM eclipse-temurin:21-jre-jammy@sha256:affcab5356e1270ac35d2361ee83135af2f03e8
 # data are installed explicitly so runtime behavior does not depend on PATH
 # or packages from the host machine.
 RUN apt-get update \
- && apt-get install -y --no-install-recommends wget util-linux tesseract-ocr tesseract-ocr-spa tesseract-ocr-eng \
+ && apt-get install -y --no-install-recommends wget util-linux libbrotli1 tesseract-ocr tesseract-ocr-spa tesseract-ocr-eng \
  && rm -rf /var/lib/apt/lists/*
 
 # Run as non-root (defence in depth; ECS/Fargate also has its own UID).
